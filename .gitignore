@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+wheels/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# sansdir runtime artifacts (per CLAUDE.md / PLANNING.md)
+.cache/
+*.log
+
+# Real SANS data fixtures are large (300+ MB NeXus files); excluded from VCS.
+# Tests use synthetic fixtures from tests/conftest.py instead.
+# See tests/data/README.md for how to obtain the real files.
+tests/data/*.nxs.h5
+
+# Local-only kickoff brief
+kikoffprompt.md
