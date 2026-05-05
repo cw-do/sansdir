@@ -36,9 +36,6 @@ class CommandInput(Input):
 
     DEFAULT_CSS = """
     CommandInput {
-        height: 1;
-        border: none;
-        padding: 0 1;
         background: $surface;
     }
     CommandInput:focus {
@@ -68,6 +65,11 @@ class CommandInput(Input):
             # in the input pre-filled with "tag.glob ") wipe the prefix. Keep
             # the cursor where we put it.
             select_on_focus=False,
+            # Built-in 1-line variant — no border, no padding, height: 1.
+            # Custom CSS like `height: 1; border: none; padding: 0 1` does
+            # NOT work because Input's internal layout collapses to 0
+            # content rows, leaving the value invisible.
+            compact=True,
         )
         self._registry = registry
         self._history = history
