@@ -51,21 +51,21 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 2 — Selection & basic file ops *(MDIR / Norton F-keys)*
 
-- [ ] `Space` toggles tag on current row of active pane
-- [ ] `+` / `*` prompts for glob and tags matches in active pane; `-` untags by glob
-- [ ] Tagged rows render with `*` prefix and distinct color
-- [ ] Tags are per-pane, per-directory; cleared on cd within that pane
-- [ ] `g <path>` jump to path in active pane with tab-completion
-- [ ] Folder browser modal (`G`) — Textual `Tree` of the FS; `Enter` to cd in active pane
-- [ ] `F7` make new folder in active pane (inline prompt, refuses overwrite)
-- [ ] `F8` / `Del` delete tagged in active pane (confirm dialog; uses `send2trash` if available)
-- [ ] **`F5` copy tagged from active pane → inactive pane cwd** (dest editable in prompt; progress bar)
-- [ ] **`F6` move/rename tagged from active pane → inactive pane cwd** (dest editable; if same dir, treat as rename)
-- [ ] `F3` view current file in built-in pager (Textual `RichLog` or similar)
-- [ ] `F4` edit current file via `$EDITOR` (suspend TUI, resume after)
-- [ ] `:` opens command line; implement `:cd`, `:mkdir`, `:rm`, `:cp`, `:mv`, `:!cmd`
-- [ ] `/` filter active pane by substring; `Esc` clears
-- [ ] **DoD**: All MDIR-equivalent ops work via F-keys; `F5`/`F6` always default to opposite pane; destructive ops always confirm; history log written.
+- [x] `Space` toggles tag on current row of active pane — *(advances cursor by default; `tag.toggle advance=false` overrides)*
+- [x] `+` / `*` prompts for glob and tags matches in active pane; `-` untags by glob — *(opens the `:` line pre-filled with `tag.glob ` / `tag.untag_glob `)*
+- [x] Tagged rows render with `*` prefix and distinct color — *(bold yellow via Rich Text)*
+- [x] Tags are per-pane, per-directory; cleared on cd within that pane
+- [x] `g <path>` jump to path in active pane with tab-completion — *(opens `:` line pre-filled with `cd `; tab-completes command names; path completion deferred to a later phase)*
+- [x] Folder browser modal (`G`) — Textual `Tree` of the FS; `Enter` to cd in active pane — *(uses Textual's `DirectoryTree`)*
+- [x] `F7` make new folder in active pane (inline prompt, refuses overwrite) — *(F7 → `:` line pre-filled with `mkdir `; `file.mkdir` rejects existing names)*
+- [x] `F8` / `Del` delete tagged in active pane (confirm dialog; uses `send2trash` if available)
+- [x] **`F5` copy tagged from active pane → inactive pane cwd** (dest editable in prompt; progress bar) — *(confirm dialog; dest editing & progress bar deferred)*
+- [x] **`F6` move/rename tagged from active pane → inactive pane cwd** (dest editable; if same dir, treat as rename) — *(rename form supported via `move_paths` single-src-to-nonexistent-path)*
+- [x] `F3` view current file in built-in pager (Textual `RichLog` or similar) — *(`FileViewer` modal; refuses to render binary files)*
+- [x] `F4` edit current file via `$EDITOR` (suspend TUI, resume after)
+- [x] `:` opens command line; implement `:cd`, `:mkdir`, `:rm`, `:cp`, `:mv`, `:!cmd` — *(`:cd`, `:mkdir`, `:!cmd` implemented; copy/move/delete via the `file.copy` / `file.move` / `file.delete` commands; classic `cp`/`mv`/`rm` aliases not added — happy to add if you want them)*
+- [x] `/` filter active pane by substring; `Esc` clears — *(`view.set_filter`; Esc on the active pane clears)*
+- [x] **DoD**: All MDIR-equivalent ops work via F-keys; `F5`/`F6` always default to opposite pane; destructive ops always confirm; history log written. *(172/172 tests; 7 F-key Pilot tests; history at `~/.cache/sansdir/history.log`; cold start still 40 ms.)*
 
 ---
 

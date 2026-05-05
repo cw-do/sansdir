@@ -34,17 +34,21 @@ def test_every_binding_names_a_registered_command(tmp_path_factory) -> None:  # 
         assert kb.command in known, f"{kb.key} → unregistered command {kb.command!r}"
 
 
-async def test_every_resolver_dispatches_cleanly(tmp_path_factory) -> None:  # type: ignore[no-untyped-def]
+def test_every_resolver_runs_without_crashing(tmp_path_factory) -> None:  # type: ignore[no-untyped-def]
+    """Resolvers must produce a kwargs dict for any plausible app state.
+
+    Dispatch correctness is covered by the per-command tests in
+    ``test_phase1_commands.py``, ``test_tags.py``, and ``test_file_keys.py``.
+    Here we only assert resolvers are wired correctly and don't throw on
+    a typical (file-under-cursor) app state.
+    """
     app = _make_app(tmp_path_factory)
-    reg = build_default_registry(app=app)
+    f = app.left.cwd / "smoke.txt"
+    f.write_text("smoke", encoding="utf-8")
+    app.left.cursor_path = f
     for kb in default_keymap():
-        if kb.command == "app.quit":
-            # Calling quit_app would mark the app as quitting; allow but
-            # reset the counter so later assertions stay meaningful.
-            await reg.dispatch(kb.command, **kb.resolve(app))
-            continue
-        # No exceptions should escape — handlers and resolvers are wired up.
-        await reg.dispatch(kb.command, **kb.resolve(app))
+        kwargs = kb.resolve(app)
+        assert isinstance(kwargs, dict)
 
 
 def test_no_duplicate_visible_bindings_for_same_key() -> None:

@@ -16,10 +16,12 @@ through :meth:`CommandRegistry.dispatch` — handlers never bypass it.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sansdir.commands.registry import Command, CommandParam, CommandRegistry
+from sansdir.core import fileops
 from sansdir.core.filesystem import VALID_SORT_KEYS
 
 if TYPE_CHECKING:
@@ -172,6 +174,28 @@ def _make_view_toggle_hidden(app: AppProtocol) -> Command:
     )
 
 
+def _make_view_set_filter(app: AppProtocol) -> Command:
+    def handler(pattern: str = "") -> str:
+        app.active_panel.filter_substring = pattern
+        return pattern
+
+    return Command(
+        name="view.set_filter",
+        description="Filter the active pane by substring (empty clears).",
+        params=(
+            CommandParam(
+                name="pattern",
+                type="string",
+                description="Substring to filter by (empty to clear).",
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        aliases=("filter",),
+    )
+
+
 def _make_view_set_sort(app: AppProtocol) -> Command:
     def handler(key: str, reverse: bool = False) -> str:
         panel = app.active_panel
@@ -215,6 +239,391 @@ def _make_app_help(app: AppProtocol) -> Command:
     )
 
 
+def _make_app_cmdline_open(app: AppProtocol) -> Command:
+    def handler() -> None:
+        app.focus_cmdline()
+
+    return Command(
+        name="app.cmdline_open",
+        description="Focus the bottom command line so the next keys go there.",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_app_cmdline_prompt(app: AppProtocol) -> Command:
+    def handler(text: str) -> None:
+        app.cmdline_prompt(text)
+
+    return Command(
+        name="app.cmdline_prompt",
+        description="Open the command line pre-filled with the given text.",
+        params=(
+            CommandParam(
+                name="text",
+                type="string",
+                description="Initial value to place in the input.",
+            ),
+        ),
+        handler=handler,
+    )
+
+
+def _make_tag_toggle(app: AppProtocol) -> Command:
+    def handler(advance: bool = True) -> bool:
+        panel = app.active_panel
+        new_state = panel.toggle_tag()
+        if advance:
+            panel.move_cursor_down()
+        return new_state
+
+    return Command(
+        name="tag.toggle",
+        description="Toggle the tag on the cursor row of the active pane.",
+        params=(
+            CommandParam(
+                name="advance",
+                type="bool",
+                description="Move cursor down after toggling.",
+                required=False,
+                default=True,
+            ),
+        ),
+        handler=handler,
+    )
+
+
+def _make_tag_glob(app: AppProtocol) -> Command:
+    def handler(pattern: str) -> int:
+        return app.active_panel.tag_glob(pattern)
+
+    return Command(
+        name="tag.glob",
+        description="Tag every visible entry in the active pane matching a glob.",
+        params=(
+            CommandParam(
+                name="pattern",
+                type="glob",
+                description="Filename glob (e.g. '*Iq*.dat').",
+            ),
+        ),
+        handler=handler,
+        examples=("tag.glob *Iq*.dat", "tag.glob *.nxs.h5"),
+    )
+
+
+def _make_tag_untag_glob(app: AppProtocol) -> Command:
+    def handler(pattern: str) -> int:
+        return app.active_panel.untag_glob(pattern)
+
+    return Command(
+        name="tag.untag_glob",
+        description="Remove tags from entries matching a glob.",
+        params=(
+            CommandParam(
+                name="pattern",
+                type="glob",
+                description="Filename glob.",
+            ),
+        ),
+        handler=handler,
+    )
+
+
+def _make_tag_clear(app: AppProtocol) -> Command:
+    def handler() -> int:
+        return app.active_panel.clear_tags()
+
+    return Command(
+        name="tag.clear",
+        description="Clear every tag in the active pane.",
+        params=(),
+        handler=handler,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pure-IO file commands (no UI). The LLM can call these directly with
+# `confirm=False`-style explicit args; the F-key bindings go through the
+# `ui.*_tagged` orchestration commands below, which add a confirm dialog.
+# ---------------------------------------------------------------------------
+
+
+def _make_file_copy(app: AppProtocol) -> Command:
+    def handler(srcs: list[str], dst_dir: str) -> list[str]:
+        out = fileops.copy_paths([Path(s) for s in srcs], Path(dst_dir))
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return [str(p) for p in out]
+
+    return Command(
+        name="file.copy",
+        description="Copy files into a destination directory.",
+        params=(
+            CommandParam(name="srcs", type="files", description="Source paths."),
+            CommandParam(name="dst_dir", type="path", description="Destination dir."),
+        ),
+        handler=handler,
+        danger=True,
+    )
+
+
+def _make_file_move(app: AppProtocol) -> Command:
+    def handler(srcs: list[str], dst_dir: str) -> list[str]:
+        out = fileops.move_paths([Path(s) for s in srcs], Path(dst_dir))
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return [str(p) for p in out]
+
+    return Command(
+        name="file.move",
+        description="Move files into a destination directory (or rename a single file).",
+        params=(
+            CommandParam(name="srcs", type="files", description="Source paths."),
+            CommandParam(name="dst_dir", type="path", description="Destination dir or new name."),
+        ),
+        handler=handler,
+        danger=True,
+    )
+
+
+def _make_file_delete(app: AppProtocol) -> Command:
+    def handler(paths: list[str], trash: bool = True) -> list[str]:
+        out = fileops.delete_paths([Path(p) for p in paths], trash=trash)
+        app.active_panel.clear_tags()
+        app.active_panel.refresh_listing()
+        return [str(p) for p in out]
+
+    return Command(
+        name="file.delete",
+        description="Delete (or trash) the given paths.",
+        params=(
+            CommandParam(name="paths", type="files", description="Paths to delete."),
+            CommandParam(
+                name="trash",
+                type="bool",
+                description="Use the OS trash bin (vs. unlink).",
+                required=False,
+                default=True,
+            ),
+        ),
+        handler=handler,
+        danger=True,
+    )
+
+
+def _make_file_mkdir(app: AppProtocol) -> Command:
+    def handler(name: str) -> str:
+        out = fileops.make_dir(app.active_panel.cwd, name)
+        app.active_panel.refresh_listing()
+        return str(out)
+
+    return Command(
+        name="file.mkdir",
+        description="Create a directory in the active pane.",
+        params=(CommandParam(name="name", type="string", description="New directory name."),),
+        handler=handler,
+        aliases=("mkdir",),
+        examples=("mkdir new_data",),
+    )
+
+
+# ---------------------------------------------------------------------------
+# UI orchestration — wraps a confirm dialog around the IO commands above.
+# These are what F-key bindings target so destructive ops always confirm.
+# ---------------------------------------------------------------------------
+
+
+def _make_ui_copy_tagged(app: AppProtocol) -> Command:
+    async def handler() -> int:
+        srcs = app.active_panel.selection()
+        dst = app.inactive_panel.cwd
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return 0
+        names = ", ".join(p.name for p in srcs[:5])
+        more = f" (+{len(srcs) - 5} more)" if len(srcs) > 5 else ""
+        ok = await app.confirm(f"Copy {names}{more} → {dst}?")
+        if not ok:
+            return 0
+        try:
+            fileops.copy_paths(srcs, dst)
+        except (FileExistsError, OSError) as exc:
+            app.notify_user(f"copy failed: {exc}", severity="error")
+            return 0
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return len(srcs)
+
+    return Command(
+        name="ui.copy_tagged",
+        description="Copy the active pane's selection (tags or cursor) to the inactive pane.",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_ui_move_tagged(app: AppProtocol) -> Command:
+    async def handler() -> int:
+        srcs = app.active_panel.selection()
+        dst = app.inactive_panel.cwd
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return 0
+        names = ", ".join(p.name for p in srcs[:5])
+        more = f" (+{len(srcs) - 5} more)" if len(srcs) > 5 else ""
+        ok = await app.confirm(f"Move {names}{more} → {dst}?", danger=True)
+        if not ok:
+            return 0
+        try:
+            fileops.move_paths(srcs, dst)
+        except (FileExistsError, OSError) as exc:
+            app.notify_user(f"move failed: {exc}", severity="error")
+            return 0
+        app.active_panel.clear_tags()
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return len(srcs)
+
+    return Command(
+        name="ui.move_tagged",
+        description="Move the active pane's selection to the inactive pane (with confirm).",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_app_browse_tree(app: AppProtocol) -> Command:
+    async def handler(root: str = "/") -> str | None:
+        from sansdir.app import SansdirApp as _RealApp
+
+        if not isinstance(app, _RealApp):
+            return None
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str | None] = loop.create_future()
+
+        def _cb(value: str | None) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        from sansdir.ui.dialogs import DirectoryTreeDialog
+
+        app.push_screen(DirectoryTreeDialog(root), _cb)
+        result = await fut
+        if result:
+            target = Path(result).expanduser().resolve()
+            if target.is_dir():
+                app.active_panel.set_cwd(target)
+        return result
+
+    return Command(
+        name="app.browse_tree",
+        description="Open a directory tree browser; selected dir cds the active pane.",
+        params=(
+            CommandParam(
+                name="root",
+                type="path",
+                description="Tree root.",
+                required=False,
+                default="/",
+            ),
+        ),
+        handler=handler,
+    )
+
+
+def _make_view_file(app: AppProtocol) -> Command:
+    def handler(path: str) -> None:
+        from sansdir.ui.dialogs import FileViewer
+
+        target = Path(path).expanduser().resolve()
+        if not target.is_file():
+            app.notify_user(f"not a file: {target}", severity="warning")
+            return
+        # The actual screen-push has to live on the App side because we're
+        # not in a worker here; use the app's notify to surface the file
+        # content via a modal. We rely on the worker-based dispatch path
+        # (app._dispatch) to keep this non-blocking.
+        from sansdir.app import SansdirApp as _RealApp
+
+        if isinstance(app, _RealApp):
+            app.push_screen(FileViewer(target))
+
+    return Command(
+        name="view.file",
+        description="Open the file under the cursor in a read-only pager.",
+        params=(CommandParam(name="path", type="path", description="File to view."),),
+        handler=handler,
+        aliases=("view",),
+    )
+
+
+def _make_edit_file(app: AppProtocol) -> Command:
+    def handler(path: str) -> int:
+        target = Path(path).expanduser().resolve()
+        if target.is_dir():
+            raise IsADirectoryError(target)
+        return app.edit_in_editor(target)
+
+    return Command(
+        name="edit.file",
+        description="Edit the file under the cursor in $EDITOR.",
+        params=(CommandParam(name="path", type="path", description="File to edit."),),
+        handler=handler,
+        aliases=("edit",),
+        danger=True,
+    )
+
+
+def _make_ui_delete_tagged(app: AppProtocol) -> Command:
+    async def handler() -> int:
+        srcs = app.active_panel.selection()
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return 0
+        names = ", ".join(p.name for p in srcs[:5])
+        more = f" (+{len(srcs) - 5} more)" if len(srcs) > 5 else ""
+        ok = await app.confirm(
+            f"Delete {names}{more}? (sent to trash if available)",
+            danger=True,
+        )
+        if not ok:
+            return 0
+        removed = fileops.delete_paths(srcs)
+        app.active_panel.clear_tags()
+        app.active_panel.refresh_listing()
+        app.notify_user(f"deleted {len(removed)} entries")
+        return len(removed)
+
+    return Command(
+        name="ui.delete_tagged",
+        description="Delete the active pane's selection (with confirm).",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_shell_run(app: AppProtocol) -> Command:
+    def handler(cmd: str) -> int:
+        return app.run_shell(cmd)
+
+    return Command(
+        name="shell.run",
+        description="Run a shell command, suspending the TUI while it runs.",
+        params=(
+            CommandParam(
+                name="cmd",
+                type="string",
+                description="Shell command line (e.g. 'ls -la /tmp').",
+            ),
+        ),
+        handler=handler,
+        aliases=("!",),
+        examples=(":!ls -la", ":!echo hi"),
+        danger=True,
+    )
+
+
 def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
     return [
         _make_nav_cd(app),
@@ -225,7 +634,25 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_pane_toggle_max(app),
         _make_view_toggle_hidden(app),
         _make_view_set_sort(app),
+        _make_view_set_filter(app),
         _make_app_help(app),
+        _make_app_cmdline_open(app),
+        _make_app_cmdline_prompt(app),
+        _make_shell_run(app),
+        _make_tag_toggle(app),
+        _make_tag_glob(app),
+        _make_tag_untag_glob(app),
+        _make_tag_clear(app),
+        _make_file_copy(app),
+        _make_file_move(app),
+        _make_file_delete(app),
+        _make_file_mkdir(app),
+        _make_ui_copy_tagged(app),
+        _make_ui_move_tagged(app),
+        _make_ui_delete_tagged(app),
+        _make_view_file(app),
+        _make_edit_file(app),
+        _make_app_browse_tree(app),
     ]
 
 

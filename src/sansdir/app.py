@@ -1,24 +1,35 @@
 """``SansdirApp`` — the Textual app shell.
 
 Hosts two :class:`~sansdir.ui.panel.FilePanel` instances, one
-:class:`~sansdir.ui.statusbar.StatusBar`, and routes every keystroke through
-:meth:`~sansdir.commands.registry.CommandRegistry.dispatch` per the keymap
-in :mod:`sansdir.ui.keys`. There is no business logic in this file — the
-event handler at :meth:`SansdirApp.on_key` is the only translation between
-Textual events and registered commands (``PLANNING.md`` §12.6).
+:class:`~sansdir.ui.statusbar.StatusBar`, one
+:class:`~sansdir.ui.command_input.CommandInput`, and routes every keystroke
+through :meth:`~sansdir.commands.registry.CommandRegistry.dispatch` per the
+keymap in :mod:`sansdir.ui.keys`. There is no business logic in this file
+— :meth:`SansdirApp.on_key` is the only translation between Textual events
+and registered commands (``PLANNING.md`` §12.6).
+
+The ``:``-line at the bottom is always visible. ``:`` focuses it, ``Esc``
+returns focus to the active pane, ``Enter`` parses + dispatches via
+:func:`sansdir.commands.parser.parse_command_line`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import shlex
+import subprocess
 from pathlib import Path
 
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.widgets import Input
 
 from sansdir.commands.builtins import build_default_registry
+from sansdir.commands.parser import ParseError, parse_command_line
 from sansdir.commands.registry import CommandRegistry, UnknownCommandError
+from sansdir.core.history import CommandHistory
+from sansdir.ui.command_input import CommandInput
 from sansdir.ui.help import HelpScreen
 from sansdir.ui.keys import KeyBinding, default_keymap
 from sansdir.ui.panel import FilePanel
@@ -48,6 +59,7 @@ class SansdirApp(App[int]):
         start_path: str | Path | None = None,
         *,
         right_path: str | Path | None = None,
+        history: CommandHistory | None = None,
     ) -> None:
         super().__init__()
         start = Path(start_path).expanduser().resolve() if start_path else Path.cwd()
@@ -58,12 +70,12 @@ class SansdirApp(App[int]):
         self._right = FilePanel(self._start_right, panel_id="right")
         self._panes: Horizontal = Horizontal(self._left, self._right, id="panes")
         self._statusbar = StatusBar()
-        self._active_id: str = "left"
-        self._max: bool = False
-        # Registry built lazily in on_mount so the FakeApp tests never spin
-        # up a real Textual instance.
+        self._history = history if history is not None else CommandHistory()
         self.registry: CommandRegistry = build_default_registry(app=self)
         self.keymap: list[KeyBinding] = default_keymap()
+        self._cmdline = CommandInput(registry=self.registry, history=self._history)
+        self._active_id: str = "left"
+        self._max: bool = False
 
     # ------------------------------------------------------------------
     # Layout
@@ -73,10 +85,12 @@ class SansdirApp(App[int]):
         with Vertical():
             yield self._panes
             yield self._statusbar
+            yield self._cmdline
 
     def on_mount(self) -> None:
         self._apply_active_class()
         self._refresh_status()
+        self.set_focus(self.active_panel)
 
     # ------------------------------------------------------------------
     # AppProtocol surface (used by command handlers in commands/builtins.py)
@@ -120,37 +134,158 @@ class SansdirApp(App[int]):
     def quit_app(self) -> None:
         self.exit(0)
 
+    def focus_cmdline(self) -> None:
+        self.set_focus(self._cmdline)
+
+    def cmdline_prompt(self, text: str) -> None:
+        """Open the command line pre-filled with ``text``, cursor at end."""
+        self._cmdline.value = text
+        self._cmdline.cursor_position = len(text)
+        self.set_focus(self._cmdline)
+
+    async def confirm(self, message: str, *, danger: bool = False) -> bool:
+        """Show a yes/no modal; return the user's choice.
+
+        Uses an explicit Future + callback because :meth:`push_screen_wait`
+        requires being inside a Textual worker, which our keymap-dispatch
+        coroutines are not.
+        """
+        from sansdir.ui.dialogs import ConfirmDialog
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[bool] = loop.create_future()
+
+        def _on_dismiss(value: bool | None) -> None:
+            if not fut.done():
+                fut.set_result(bool(value))
+
+        self.push_screen(ConfirmDialog(message, danger=danger), _on_dismiss)
+        return await fut
+
+    def notify_user(self, message: str, *, severity: str = "information") -> None:
+        """Surface a message in the status notifier."""
+        self.notify(message, severity=severity)  # type: ignore[arg-type]
+
+    def edit_in_editor(self, path: Path) -> int:
+        """Suspend the TUI and exec ``$EDITOR`` (or ``vi``) on ``path``."""
+        import os as _os
+
+        editor = _os.environ.get("EDITOR") or _os.environ.get("VISUAL") or "vi"
+        cmd = f"{editor} {shlex.quote(str(path))}"
+        return self.run_shell(cmd)
+
+    def run_shell(self, cmd_line: str) -> int:
+        """Run ``cmd_line`` in a subshell, suspending the TUI while it runs.
+
+        Returns the subprocess's exit code. Errors are surfaced via
+        :meth:`App.notify`; a non-zero return is *not* treated as an
+        exception so ``$?`` style failures land in the status bar like
+        any other shell.
+        """
+        cmd_line = cmd_line.strip()
+        if not cmd_line:
+            return 0
+        try:
+            with self.suspend():
+                result = subprocess.run(cmd_line, shell=True, check=False)
+        except OSError as exc:
+            self.notify(f"shell error: {exc}", severity="error")
+            return -1
+        if result.returncode != 0:
+            self.notify(
+                f"shell exited {result.returncode}: {cmd_line}",
+                severity="warning",
+            )
+        return result.returncode
+
     # ------------------------------------------------------------------
     # Event routing — the *only* place keystrokes become commands.
     # ------------------------------------------------------------------
 
     async def on_key(self, event: events.Key) -> None:
-        # If the help overlay (or any modal) is on top, let it handle keys.
+        # If a modal (help, dialogs) is on top, let it handle keys.
         if self.screen is not self.screen_stack[0]:
+            return
+        # If the user is typing in the ``:``-input, hands off — the input's
+        # own bindings handle Up/Down/Tab/Esc and normal characters.
+        if self.focused is self._cmdline:
             return
         for kb in self.keymap:
             if event.key == kb.key:
                 event.stop()
                 event.prevent_default()
-                await self._dispatch(kb)
+                self._dispatch(kb)
                 return
 
-    async def _dispatch(self, kb: KeyBinding) -> None:
+    def _dispatch(self, kb: KeyBinding) -> None:
+        """Spawn a worker that runs the handler.
+
+        Workers are separate Textual tasks, so handlers that ``await`` on
+        a modal (``push_screen`` + callback Future) don't deadlock against
+        the App's event-processing loop.
+        """
         try:
             kwargs = kb.resolve(self)
         except Exception as exc:
             self.notify(f"resolver error for {kb.key}: {exc}", severity="error")
             return
+        self.run_worker(
+            self._dispatch_async(kb.command, kwargs),
+            name=f"dispatch:{kb.command}",
+            exclusive=False,
+        )
+
+    async def _dispatch_async(self, name: str, kwargs: dict[str, object]) -> None:
         try:
-            await self.registry.dispatch(kb.command, **kwargs)
+            await self.registry.dispatch(name, **kwargs)
         except UnknownCommandError:
-            self.notify(f"unknown command: {kb.command}", severity="error")
+            self.notify(f"unknown command: {name}", severity="error")
         except (NotADirectoryError, FileNotFoundError, PermissionError) as exc:
             self.notify(f"{type(exc).__name__}: {exc}", severity="warning")
         except Exception as exc:
-            self.notify(f"{kb.command} failed: {exc}", severity="error")
+            self.notify(f"{name} failed: {exc}", severity="error")
         finally:
             self._refresh_status()
+
+    # ------------------------------------------------------------------
+    # ``:``-line submission
+    # ------------------------------------------------------------------
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input is not self._cmdline:
+            return
+        text = event.value.strip()
+        # Always clear the visible line and return focus, even on parse error.
+        self._cmdline.value = ""
+        self.set_focus(self.active_panel)
+        if not text:
+            return
+        self._history.append(text)
+        await self.run_command_line(text)
+
+    async def run_command_line(self, text: str) -> None:
+        """Parse a ``:``-line and dispatch it through the registry.
+
+        Public so ``:!cmd`` macros, the LLM layer, and tests can drive the
+        same code path the user does.
+        """
+        try:
+            cmd, kwargs = parse_command_line(text, self.registry)
+        except ParseError as exc:
+            self.notify(f"parse error: {exc}", severity="error")
+            return
+        try:
+            result = await self.registry.dispatch(cmd.name, **kwargs)
+        except (NotADirectoryError, FileNotFoundError, PermissionError) as exc:
+            self.notify(f"{type(exc).__name__}: {exc}", severity="warning")
+            return
+        except Exception as exc:
+            self.notify(f"{cmd.name} failed: {exc}", severity="error")
+            return
+        finally:
+            self._refresh_status()
+        if isinstance(result, (int, float, bool)) and not isinstance(result, bool):
+            self.notify(f"{cmd.name} → {result}", timeout=2)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -162,7 +297,6 @@ class SansdirApp(App[int]):
 
     def _refresh_status(self) -> None:
         panel = self.active_panel
-        # ``len(panel._entries)`` is private; expose count via len(rows) instead.
         try:
             count = len(panel._entries)
         except AttributeError:

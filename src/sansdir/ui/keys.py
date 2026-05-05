@@ -84,6 +84,31 @@ def _sort_ext(_app: AppProtocol) -> dict[str, Any]:
     return {"key": "ext"}
 
 
+def _prompt_tag_glob(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "tag.glob "}
+
+
+def _prompt_untag_glob(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "tag.untag_glob "}
+
+
+def _prompt_mkdir(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "mkdir "}
+
+
+def _prompt_jump(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "cd "}
+
+
+def _filter_open(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "filter "}
+
+
+def _file_under_cursor(app: AppProtocol) -> dict[str, Any]:
+    cur = app.active_panel.cursor_path
+    return {"path": str(cur) if cur is not None else str(app.active_panel.cwd)}
+
+
 # ---------------------------------------------------------------------------
 # Default keymap (Phase 1 surface)
 # ---------------------------------------------------------------------------
@@ -107,6 +132,32 @@ def default_keymap() -> list[KeyBinding]:
         # Navigation
         KeyBinding("enter", "nav.cd", "Open directory under cursor", _cd_to_cursor),
         KeyBinding("backspace", "nav.up", "Go up one directory"),
+        # Tagging (Phase 2)
+        KeyBinding("space", "tag.toggle", "Tag/untag current row"),
+        KeyBinding("plus", "app.cmdline_prompt", "Tag by glob", _prompt_tag_glob),
+        KeyBinding("+", "app.cmdline_prompt", "Tag by glob", _prompt_tag_glob, show_in_help=False),
+        KeyBinding(
+            "asterisk",
+            "app.cmdline_prompt",
+            "Tag by glob",
+            _prompt_tag_glob,
+            show_in_help=False,
+        ),
+        KeyBinding(
+            "*",
+            "app.cmdline_prompt",
+            "Tag by glob",
+            _prompt_tag_glob,
+            show_in_help=False,
+        ),
+        KeyBinding("minus", "app.cmdline_prompt", "Untag by glob", _prompt_untag_glob),
+        KeyBinding(
+            "-",
+            "app.cmdline_prompt",
+            "Untag by glob",
+            _prompt_untag_glob,
+            show_in_help=False,
+        ),
         # View
         KeyBinding("h", "view.toggle_hidden", "Toggle hidden files"),
         KeyBinding("s", "view.set_sort", "Sort by name", _sort_name, show_in_help=False),
@@ -114,7 +165,30 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("2", "view.set_sort", "Sort by mtime", _sort_mtime),
         KeyBinding("3", "view.set_sort", "Sort by size", _sort_size),
         KeyBinding("4", "view.set_sort", "Sort by extension", _sort_ext),
+        # View / edit (Phase 2)
+        KeyBinding("f3", "view.file", "View file (pager)", _file_under_cursor),
+        KeyBinding("f4", "edit.file", "Edit file ($EDITOR)", _file_under_cursor),
+        # File ops (Phase 2)
+        KeyBinding("f5", "ui.copy_tagged", "Copy tagged → other pane"),
+        KeyBinding("f6", "ui.move_tagged", "Move tagged → other pane"),
+        KeyBinding("f7", "app.cmdline_prompt", "Make directory", _prompt_mkdir),
+        KeyBinding("f8", "ui.delete_tagged", "Delete tagged"),
+        KeyBinding("delete", "ui.delete_tagged", "Delete tagged", show_in_help=False),
+        # Jump (Phase 2)
+        KeyBinding("g", "app.cmdline_prompt", "Jump to path", _prompt_jump),
+        KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
+        # Filter (Phase 2)
+        KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
+        KeyBinding(
+            "/",
+            "app.cmdline_prompt",
+            "Filter active pane",
+            _filter_open,
+            show_in_help=False,
+        ),
         # App
+        KeyBinding("colon", "app.cmdline_open", "Open command line"),
+        KeyBinding(":", "app.cmdline_open", "Open command line", show_in_help=False),
         KeyBinding("question_mark", "app.help", "Help overlay"),
         KeyBinding("?", "app.help", "Help overlay", show_in_help=False),
         KeyBinding("q", "app.quit", "Quit"),

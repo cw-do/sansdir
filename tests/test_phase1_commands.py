@@ -22,15 +22,72 @@ class FakePanel:
     show_hidden: bool = False
     sort_key: str = "name"
     sort_reverse: bool = False
+    filter_substring: str = ""
     refresh_count: int = 0
     cursor_path: Path | None = None
+    cursor_advances: int = 0
+    tags: set[Path] = None  # type: ignore[assignment]
+    visible: list[Path] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.tags is None:
+            self.tags = set()
+        if self.visible is None:
+            self.visible = []
 
     def set_cwd(self, new_cwd: Path) -> None:
         self.cwd = new_cwd
+        self.tags.clear()
         self.refresh_count += 1
 
     def refresh_listing(self) -> None:
         self.refresh_count += 1
+
+    def toggle_tag(self, path: Path | None = None) -> bool:
+        target = path if path is not None else self.cursor_path
+        if target is None:
+            return False
+        if target in self.tags:
+            self.tags.discard(target)
+            return False
+        self.tags.add(target)
+        return True
+
+    def tag_glob(self, pattern: str) -> int:
+        import fnmatch as _fn
+
+        n = 0
+        for p in self.visible:
+            if _fn.fnmatch(p.name, pattern):
+                self.tags.add(p)
+                n += 1
+        return n
+
+    def untag_glob(self, pattern: str) -> int:
+        import fnmatch as _fn
+
+        n = 0
+        for p in list(self.tags):
+            if _fn.fnmatch(p.name, pattern):
+                self.tags.discard(p)
+                n += 1
+        return n
+
+    def clear_tags(self) -> int:
+        n = len(self.tags)
+        self.tags.clear()
+        return n
+
+    def tagged_paths(self) -> list[Path]:
+        return sorted(self.tags)
+
+    def selection(self) -> list[Path]:
+        if self.tags:
+            return self.tagged_paths()
+        return [self.cursor_path] if self.cursor_path else []
+
+    def move_cursor_down(self) -> None:
+        self.cursor_advances += 1
 
 
 @dataclass
@@ -43,6 +100,25 @@ class FakeApp:
     helped: int = 0
     quit_called: int = 0
     max_state: bool = False
+    cmdline_focused: int = 0
+    shells_run: list[str] = None  # type: ignore[assignment]
+    cmdline_prompts: list[str] = None  # type: ignore[assignment]
+    confirm_messages: list[str] = None  # type: ignore[assignment]
+    confirm_response: bool = True
+    notifications: list[str] = None  # type: ignore[assignment]
+    editor_calls: list[Path] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.shells_run is None:
+            self.shells_run = []
+        if self.cmdline_prompts is None:
+            self.cmdline_prompts = []
+        if self.confirm_messages is None:
+            self.confirm_messages = []
+        if self.notifications is None:
+            self.notifications = []
+        if self.editor_calls is None:
+            self.editor_calls = []
 
     @property
     def active_panel(self) -> FakePanel:
@@ -73,6 +149,27 @@ class FakeApp:
 
     def quit_app(self) -> None:
         self.quit_called += 1
+
+    def focus_cmdline(self) -> None:
+        self.cmdline_focused += 1
+
+    def cmdline_prompt(self, text: str) -> None:
+        self.cmdline_prompts.append(text)
+
+    def run_shell(self, cmd_line: str) -> int:
+        self.shells_run.append(cmd_line)
+        return 0
+
+    async def confirm(self, message: str, *, danger: bool = False) -> bool:
+        self.confirm_messages.append(message)
+        return self.confirm_response
+
+    def notify_user(self, message: str, *, severity: str = "information") -> None:
+        self.notifications.append(message)
+
+    def edit_in_editor(self, path: Path) -> int:
+        self.editor_calls.append(path)
+        return 0
 
 
 @pytest.fixture
