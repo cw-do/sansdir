@@ -1,0 +1,122 @@
+"""Key → command map.
+
+The keymap is intentionally a plain data structure. Each :class:`KeyBinding`
+names a registered command and an optional ``args_resolver`` that turns the
+running app's state into the kwargs the command expects. The Textual app
+walks this list and forwards each binding to
+:meth:`~sansdir.commands.registry.CommandRegistry.dispatch` — there is no
+inline business logic in any key handler. See ``PLANNING.md`` §12.6.
+
+Tests verify that every binding's ``command`` exists in a fully-bound
+registry, so a typo here fails CI rather than at runtime.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from sansdir.commands._protocols import AppProtocol
+
+ArgsResolver = Callable[[AppProtocol], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class KeyBinding:
+    """One keystroke routed to one registered command.
+
+    Attributes:
+        key: Textual key string (``"tab"``, ``"ctrl+u"``, ``"f10"``, ...).
+        command: Name of a registered :class:`~sansdir.commands.registry.Command`.
+        description: One-line label shown in help and the status hint bar.
+        args_resolver: Optional callable mapping the running app to ``**kwargs``
+            for :meth:`CommandRegistry.dispatch`. ``None`` means dispatch with
+            no arguments.
+        show_in_help: Hide internal/duplicate bindings from the help overlay.
+    """
+
+    key: str
+    command: str
+    description: str
+    args_resolver: ArgsResolver | None = None
+    show_in_help: bool = True
+
+    def resolve(self, app: AppProtocol) -> dict[str, Any]:
+        """Compute the kwargs to pass to :meth:`dispatch` for this app state."""
+        if self.args_resolver is None:
+            return {}
+        return self.args_resolver(app)
+
+
+# ---------------------------------------------------------------------------
+# Resolvers — kept as small named functions (not lambdas) so tracebacks and
+# the help overlay show meaningful names.
+# ---------------------------------------------------------------------------
+
+
+def _activate_other(_app: AppProtocol) -> dict[str, Any]:
+    return {"panel_id": "other"}
+
+
+def _cd_to_cursor(app: AppProtocol) -> dict[str, Any]:
+    cursor = app.active_panel.cursor_path
+    if cursor is None:
+        # No selection — fall back to a no-op cd to current cwd. The handler
+        # will resolve and refresh, which mirrors how mc treats an empty pane.
+        return {"path": str(app.active_panel.cwd)}
+    return {"path": str(cursor)}
+
+
+def _sort_name(_app: AppProtocol) -> dict[str, Any]:
+    return {"key": "name"}
+
+
+def _sort_mtime(_app: AppProtocol) -> dict[str, Any]:
+    return {"key": "mtime"}
+
+
+def _sort_size(_app: AppProtocol) -> dict[str, Any]:
+    return {"key": "size"}
+
+
+def _sort_ext(_app: AppProtocol) -> dict[str, Any]:
+    return {"key": "ext"}
+
+
+# ---------------------------------------------------------------------------
+# Default keymap (Phase 1 surface)
+# ---------------------------------------------------------------------------
+
+
+def default_keymap() -> list[KeyBinding]:
+    """The Phase-1 navigation keymap.
+
+    Phases 2+ extend this list (selection, copy/move, plot, …) — each
+    addition is a new binding that names an already-registered command.
+    """
+    return [
+        # Pane focus / layout
+        KeyBinding("tab", "pane.activate", "Switch active pane", _activate_other),
+        KeyBinding("ctrl+u", "pane.swap", "Swap left and right panes"),
+        KeyBinding("equals_sign", "pane.sync", "Sync inactive pane to active path"),
+        # The literal ``=`` key reaches Textual as the named "equals_sign" key
+        # on most terminals, but some emit "=" directly — we register both.
+        KeyBinding("=", "pane.sync", "Sync inactive pane to active path", show_in_help=False),
+        KeyBinding("ctrl+o", "pane.toggle_max", "Maximize / restore active pane"),
+        # Navigation
+        KeyBinding("enter", "nav.cd", "Open directory under cursor", _cd_to_cursor),
+        KeyBinding("backspace", "nav.up", "Go up one directory"),
+        # View
+        KeyBinding("h", "view.toggle_hidden", "Toggle hidden files"),
+        KeyBinding("s", "view.set_sort", "Sort by name", _sort_name, show_in_help=False),
+        KeyBinding("1", "view.set_sort", "Sort by name", _sort_name),
+        KeyBinding("2", "view.set_sort", "Sort by mtime", _sort_mtime),
+        KeyBinding("3", "view.set_sort", "Sort by size", _sort_size),
+        KeyBinding("4", "view.set_sort", "Sort by extension", _sort_ext),
+        # App
+        KeyBinding("question_mark", "app.help", "Help overlay"),
+        KeyBinding("?", "app.help", "Help overlay", show_in_help=False),
+        KeyBinding("q", "app.quit", "Quit"),
+        KeyBinding("f10", "app.quit", "Quit", show_in_help=False),
+    ]
