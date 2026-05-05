@@ -63,6 +63,30 @@ async def test_typing_in_cmdline_is_not_intercepted_by_keymap(tmp_path: Path) ->
         assert app._cmdline.value == "q"
 
 
+async def test_typing_after_colon_inserts_full_word(tmp_path: Path) -> None:
+    """Regression: pressing `:` then typing immediately must accept every
+    character. A previous version of `_dispatch` ran *all* handlers as
+    workers, so the focus-shift from `app.cmdline_open` lagged behind the
+    next keystroke and the keymap re-intercepted letters with bindings
+    (`g`, `h`, `q`, etc.).
+    """
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press(":")
+        # No pause between `:` and the first letter — exactly what a user
+        # who types fluidly would do.
+        await pilot.press("h")
+        await pilot.press("e")
+        await pilot.press("l")
+        await pilot.press("p")
+        await pilot.pause()
+        assert app.focused is app._cmdline, "cmdline did not actually receive focus"
+        assert app._cmdline.value == "help", (
+            f"expected 'help' in cmdline, got {app._cmdline.value!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Submission → registry dispatch
 # ---------------------------------------------------------------------------

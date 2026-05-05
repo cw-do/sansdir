@@ -166,7 +166,7 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("3", "view.set_sort", "Sort by size", _sort_size),
         KeyBinding("4", "view.set_sort", "Sort by extension", _sort_ext),
         # View / edit (Phase 2)
-        KeyBinding("f3", "view.file", "View file (pager)", _file_under_cursor),
+        KeyBinding("f3", "view.toggle_other_pane", "View in other pane"),
         KeyBinding("f4", "edit.file", "Edit file ($EDITOR)", _file_under_cursor),
         # File ops (Phase 2)
         KeyBinding("f5", "ui.copy_tagged", "Copy tagged → other pane"),

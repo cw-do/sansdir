@@ -31,7 +31,9 @@ from sansdir.commands.registry import CommandRegistry, UnknownCommandError
 from sansdir.core.history import CommandHistory
 from sansdir.ui.command_input import CommandInput
 from sansdir.ui.help import HelpScreen
+from sansdir.ui.key_hint_bar import KeyHintBar
 from sansdir.ui.keys import KeyBinding, default_keymap
+from sansdir.ui.pane_slot import PaneSlot
 from sansdir.ui.panel import FilePanel
 from sansdir.ui.statusbar import StatusBar
 
@@ -46,12 +48,12 @@ class SansdirApp(App[int]):
     #panes {
         height: 1fr;
     }
-    #panes > FilePanel {
+    #panes > PaneSlot {
         width: 1fr;
     }
     /* Maximize state: hide the inactive pane by giving it 0% width. */
-    #panes.-max-left  > #right { display: none; }
-    #panes.-max-right > #left  { display: none; }
+    #panes.-max-left  > #slot-right { display: none; }
+    #panes.-max-right > #slot-left  { display: none; }
     """
 
     def __init__(
@@ -68,12 +70,15 @@ class SansdirApp(App[int]):
         self._start_right = right
         self._left = FilePanel(self._start_left, panel_id="left")
         self._right = FilePanel(self._start_right, panel_id="right")
-        self._panes: Horizontal = Horizontal(self._left, self._right, id="panes")
+        self._left_slot = PaneSlot(self._left, panel_id="left")
+        self._right_slot = PaneSlot(self._right, panel_id="right")
+        self._panes: Horizontal = Horizontal(self._left_slot, self._right_slot, id="panes")
         self._statusbar = StatusBar()
         self._history = history if history is not None else CommandHistory()
         self.registry: CommandRegistry = build_default_registry(app=self)
         self.keymap: list[KeyBinding] = default_keymap()
         self._cmdline = CommandInput(registry=self.registry, history=self._history)
+        self._hintbar = KeyHintBar(self.keymap)
         self._active_id: str = "left"
         self._max: bool = False
 
@@ -85,6 +90,7 @@ class SansdirApp(App[int]):
         with Vertical():
             yield self._panes
             yield self._statusbar
+            yield self._hintbar
             yield self._cmdline
 
     def on_mount(self) -> None:
@@ -174,6 +180,42 @@ class SansdirApp(App[int]):
         cmd = f"{editor} {shlex.quote(str(path))}"
         return self.run_shell(cmd)
 
+    # ------------------------------------------------------------------
+    # Inline file viewer (Norton-style preview in the *other* pane)
+    # ------------------------------------------------------------------
+
+    def view_in_other_pane(self, path: Path) -> bool:
+        """Show ``path`` in the inactive pane's slot. Returns False on binary."""
+        slot = self._inactive_slot
+        ok = slot.show_viewer(path)
+        if not ok:
+            slot.show_panel()
+            self.notify_user(
+                "binary or unreadable file — viewer dismissed",
+                severity="warning",
+            )
+        # Keep focus on the active panel — the whole point is that the user
+        # keeps navigating while the file content is shown next to them.
+        self.set_focus(self.active_panel)
+        return ok
+
+    def close_inline_viewer(self, panel_id: str) -> None:
+        """Restore the FilePanel in the named slot."""
+        slot = self._left_slot if panel_id == "left" else self._right_slot
+        slot.show_panel()
+        self.set_focus(self.active_panel)
+
+    def is_other_pane_viewing(self) -> bool:
+        return self._inactive_slot.viewer_visible
+
+    @property
+    def _active_slot(self) -> PaneSlot:
+        return self._left_slot if self._active_id == "left" else self._right_slot
+
+    @property
+    def _inactive_slot(self) -> PaneSlot:
+        return self._right_slot if self._active_id == "left" else self._left_slot
+
     def run_shell(self, cmd_line: str) -> int:
         """Run ``cmd_line`` in a subshell, suspending the TUI while it runs.
 
@@ -218,22 +260,45 @@ class SansdirApp(App[int]):
                 return
 
     def _dispatch(self, kb: KeyBinding) -> None:
-        """Spawn a worker that runs the handler.
+        """Run the handler inline (sync) or as a worker (async).
 
-        Workers are separate Textual tasks, so handlers that ``await`` on
-        a modal (``push_screen`` + callback Future) don't deadlock against
-        the App's event-processing loop.
+        Handlers that ``await`` on a modal (push_screen + callback Future)
+        must run in a worker to avoid deadlocking against the App's event
+        loop. **Sync** handlers, however, must run **inline** — otherwise
+        side effects like ``set_focus(self._cmdline)`` (driven by the
+        ``app.cmdline_open`` handler) don't take effect before Textual
+        processes the user's *next* keystroke, and the keymap re-intercepts
+        characters that should have gone into the input.
         """
         try:
             kwargs = kb.resolve(self)
         except Exception as exc:
             self.notify(f"resolver error for {kb.key}: {exc}", severity="error")
             return
-        self.run_worker(
-            self._dispatch_async(kb.command, kwargs),
-            name=f"dispatch:{kb.command}",
-            exclusive=False,
-        )
+        try:
+            cmd = self.registry.get(kb.command)
+        except UnknownCommandError:
+            self.notify(f"unknown command: {kb.command}", severity="error")
+            return
+        if asyncio.iscoroutinefunction(cmd.handler):
+            self.run_worker(
+                self._dispatch_async(kb.command, kwargs),
+                name=f"dispatch:{kb.command}",
+                exclusive=False,
+            )
+        else:
+            self._dispatch_sync(cmd, kwargs)
+
+    def _dispatch_sync(self, cmd, kwargs: dict[str, object]) -> None:  # type: ignore[no-untyped-def]
+        try:
+            CommandRegistry._validate_kwargs(cmd, kwargs)
+            cmd.handler(**kwargs)
+        except (NotADirectoryError, FileNotFoundError, PermissionError) as exc:
+            self.notify(f"{type(exc).__name__}: {exc}", severity="warning")
+        except Exception as exc:
+            self.notify(f"{cmd.name} failed: {exc}", severity="error")
+        finally:
+            self._refresh_status()
 
     async def _dispatch_async(self, name: str, kwargs: dict[str, object]) -> None:
         try:

@@ -182,6 +182,43 @@ async def test_f8_delete_tagged_with_confirm(
     assert len(captured) == 2
 
 
+async def test_f3_shows_file_in_other_pane(tmp_path: Path) -> None:
+    """F3 from active pane shows file content in the inactive pane (Norton-style).
+
+    Active pane keeps focus so the user can keep navigating.
+    """
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Cursor on '..' first; step down to first .dat file.
+        await pilot.press("down")
+        await pilot.pause()
+        active_before = app.active_panel
+        await pilot.press("f3")
+        await pilot.pause()
+        # The inactive *slot* is now showing its viewer; the active panel
+        # is unchanged and still focused.
+        assert app._inactive_slot.viewer_visible
+        assert app.active_panel is active_before
+        assert app.focused is app.active_panel
+        # Press F3 again to close.
+        await pilot.press("f3")
+        await pilot.pause()
+        assert not app._inactive_slot.viewer_visible
+        await pilot.press("q")
+
+
+async def test_f3_on_directory_notifies(tmp_path: Path) -> None:
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Cursor on '..' (a directory) — F3 should notify, not crash.
+        await pilot.press("f3")
+        await pilot.pause()
+        assert not app._inactive_slot.viewer_visible
+        await pilot.press("q")
+
+
 async def test_f8_no_skips_when_user_declines(tmp_path: Path) -> None:
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:

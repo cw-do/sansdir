@@ -540,10 +540,6 @@ def _make_view_file(app: AppProtocol) -> Command:
         if not target.is_file():
             app.notify_user(f"not a file: {target}", severity="warning")
             return
-        # The actual screen-push has to live on the App side because we're
-        # not in a worker here; use the app's notify to surface the file
-        # content via a modal. We rely on the worker-based dispatch path
-        # (app._dispatch) to keep this non-blocking.
         from sansdir.app import SansdirApp as _RealApp
 
         if isinstance(app, _RealApp):
@@ -551,11 +547,45 @@ def _make_view_file(app: AppProtocol) -> Command:
 
     return Command(
         name="view.file",
-        description="Open the file under the cursor in a read-only pager.",
+        description="Open the file under the cursor in a read-only modal pager.",
         params=(CommandParam(name="path", type="path", description="File to view."),),
         handler=handler,
         aliases=("view",),
     )
+
+
+def _make_view_toggle_other_pane(app: AppProtocol) -> Command:
+    def handler() -> bool:
+        # If the inactive pane is already showing a viewer, F3 dismisses it.
+        if app.is_other_pane_viewing():
+            app.close_inline_viewer("right" if app.active_panel is _left_of(app) else "left")
+            return False
+        cur = app.active_panel.cursor_path
+        if cur is None or not cur.is_file():
+            app.notify_user("nothing under cursor to view", severity="warning")
+            return False
+        app.view_in_other_pane(cur)
+        return True
+
+    return Command(
+        name="view.toggle_other_pane",
+        description="Show the file under the cursor in the inactive pane (toggle).",
+        params=(),
+        handler=handler,
+    )
+
+
+def _left_of(app: AppProtocol):  # type: ignore[no-untyped-def]
+    """Return whichever panel object the App calls 'left'.
+
+    Used to identify which slot the inactive pane corresponds to. Lives as
+    a tiny helper because the AppProtocol intentionally exposes only
+    active/inactive, not left/right by name.
+    """
+    # By contract the implementation knows; we use object identity to
+    # work it out without forcing every AppProtocol implementer to expose
+    # left/right.
+    return getattr(app, "_left", None) or app.active_panel
 
 
 def _make_edit_file(app: AppProtocol) -> Command:
@@ -651,6 +681,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_ui_move_tagged(app),
         _make_ui_delete_tagged(app),
         _make_view_file(app),
+        _make_view_toggle_other_pane(app),
         _make_edit_file(app),
         _make_app_browse_tree(app),
     ]

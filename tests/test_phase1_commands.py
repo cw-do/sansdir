@@ -107,6 +107,8 @@ class FakeApp:
     confirm_response: bool = True
     notifications: list[str] = None  # type: ignore[assignment]
     editor_calls: list[Path] = None  # type: ignore[assignment]
+    viewer_calls: list[Path] = None  # type: ignore[assignment]
+    _other_pane_viewing: bool = False
 
     def __post_init__(self) -> None:
         if self.shells_run is None:
@@ -119,6 +121,8 @@ class FakeApp:
             self.notifications = []
         if self.editor_calls is None:
             self.editor_calls = []
+        if self.viewer_calls is None:
+            self.viewer_calls = []
 
     @property
     def active_panel(self) -> FakePanel:
@@ -170,6 +174,17 @@ class FakeApp:
     def edit_in_editor(self, path: Path) -> int:
         self.editor_calls.append(path)
         return 0
+
+    def view_in_other_pane(self, path: Path) -> bool:
+        self.viewer_calls.append(path)
+        self._other_pane_viewing = True
+        return True
+
+    def close_inline_viewer(self, panel_id: str) -> None:
+        self._other_pane_viewing = False
+
+    def is_other_pane_viewing(self) -> bool:
+        return self._other_pane_viewing
 
 
 @pytest.fixture
