@@ -46,7 +46,8 @@ class _ExpItem(ListItem):
         title = self.experiment.title or "(no title)"
         head = Text()
         head.append(self.experiment.ipts, style="bold cyan")
-        head.append(f"  {title[:80]}")
+        # eqsanscli truncates titles to 60 chars on /list output; match it.
+        head.append(f"  {title[:60]}")
         yield Static(head)
 
         bits: list[str] = []
