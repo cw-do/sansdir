@@ -189,10 +189,7 @@ def test_read_iq_csv(tmp_path: Path) -> None:
     """Comma-separated transmission/Iq files work too — delimiter auto-detected."""
     f = tmp_path / "sample_trans.txt"
     f.write_text(
-        "# lambda, T, sigT\n"
-        "2.76523,0.849843,0.00465712\n"
-        "3.1,0.85,0.005\n"
-        "4.0,0.86,0.006\n",
+        "# lambda, T, sigT\n2.76523,0.849843,0.00465712\n3.1,0.85,0.005\n4.0,0.86,0.006\n",
         encoding="utf-8",
     )
     ds = ascii1d.read_iq(f)

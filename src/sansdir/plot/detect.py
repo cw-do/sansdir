@@ -31,9 +31,7 @@ VALID_KINDS: frozenset[str] = frozenset(
 )
 
 _TRANS_NAME_RE = re.compile(r"trans", re.IGNORECASE)
-_TRANS_HEADER_RE = re.compile(
-    r"\b(lambda|wavelength|T\s*\(|transmission)\b", re.IGNORECASE
-)
+_TRANS_HEADER_RE = re.compile(r"\b(lambda|wavelength|T\s*\(|transmission)\b", re.IGNORECASE)
 _IQXQY_HEADER_RE = re.compile(r"\b(iqxqy|qx\s*qy|qx,\s*qy|2d)\b", re.IGNORECASE)
 
 

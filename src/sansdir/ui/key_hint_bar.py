@@ -1,11 +1,14 @@
 """``KeyHintBar`` — the Norton-style F-key hint strip.
 
-One line above the ``:``-prompt. Picks short labels (max two words) for
-the F-keys plus a few signature shortcuts and renders them in a compact
-"key:label" form. The list is derived from :func:`default_keymap` so a
-new keybinding shows up here automatically.
+Two lines above the ``:``-prompt, in the style of mc/Norton:
 
-If your terminal is narrow, the bar elides labels from the right.
+* **Row 1** — F-keys + pane controls (Tab, ^U)
+* **Row 2** — selection / navigation / actions (Space, +, U, p, z, e, /, g, i, :, ?)
+
+Cell labels are derived from the keymap (``default_keymap()``) so a new
+binding shows up in the hint bar automatically — but the canonical
+short labels live in :data:`LABEL_OVERRIDES` so a verbose
+``description`` doesn't blow out the cell width.
 """
 
 from __future__ import annotations
@@ -15,8 +18,8 @@ from textual.widget import Widget
 
 from sansdir.ui.keys import KeyBinding, default_keymap
 
-# Keys we always want to show, in this order.
-HINT_ORDER: tuple[str, ...] = (
+# Two rows of cells. Order within each row is left-to-right as rendered.
+HINT_ROW_1: tuple[str, ...] = (
     "f2",
     "f3",
     "f4",
@@ -27,6 +30,8 @@ HINT_ORDER: tuple[str, ...] = (
     "f10",
     "tab",
     "ctrl+u",
+)
+HINT_ROW_2: tuple[str, ...] = (
     "space",
     "+",
     "U",
@@ -40,9 +45,9 @@ HINT_ORDER: tuple[str, ...] = (
     "?",
 )
 
-# Display labels override the keybinding's verbose description so the bar
-# stays at most two words per cell. Falls back to the keybinding's own
-# description when not present here.
+# Back-compat: tests import this — keep it as the concatenated row order.
+HINT_ORDER: tuple[str, ...] = HINT_ROW_1 + HINT_ROW_2
+
 LABEL_OVERRIDES: dict[str, str] = {
     "f2": "Catalog",
     "f3": "View",
@@ -67,8 +72,6 @@ LABEL_OVERRIDES: dict[str, str] = {
     "?": "Help",
 }
 
-# How each key prints in the hint cell. F-keys keep their digit; named
-# Textual keys ("colon", "asterisk", ...) are normalised back to a glyph.
 KEY_DISPLAY: dict[str, str] = {
     "f2": "F2",
     "f3": "F3",
@@ -95,11 +98,11 @@ KEY_DISPLAY: dict[str, str] = {
 
 
 class KeyHintBar(Widget):
-    """Single-line F-key hint strip rendered above the ``:``-prompt."""
+    """Two-line key hint strip rendered above the ``:``-prompt."""
 
     DEFAULT_CSS = """
     KeyHintBar {
-        height: 1;
+        height: 2;
         background: $surface;
         color: $text;
         padding: 0 1;
@@ -109,30 +112,38 @@ class KeyHintBar(Widget):
     def __init__(self, keymap: list[KeyBinding] | None = None) -> None:
         super().__init__()
         self._keymap = keymap if keymap is not None else default_keymap()
-        self._cells = self._build_cells(self._keymap)
+        self._row1 = self._build_cells(self._keymap, HINT_ROW_1)
+        self._row2 = self._build_cells(self._keymap, HINT_ROW_2)
+        # Tests still inspect ._cells; expose the concatenation.
+        self._cells = self._row1 + self._row2
 
     @staticmethod
-    def _build_cells(keymap: list[KeyBinding]) -> list[tuple[str, str]]:
-        # Index keymap by key for label fallback lookups.
+    def _build_cells(keymap: list[KeyBinding], keys: tuple[str, ...]) -> list[tuple[str, str]]:
         by_key = {kb.key: kb for kb in keymap if kb.show_in_help}
         cells: list[tuple[str, str]] = []
-        for key in HINT_ORDER:
+        for key in keys:
             label = LABEL_OVERRIDES.get(key)
             if label is None:
                 kb = by_key.get(key)
                 if kb is None:
                     continue
-                # Trim to first two words.
                 label = " ".join(kb.description.split()[:2])
             display = KEY_DISPLAY.get(key, key)
             cells.append((display, label))
         return cells
 
-    def render(self) -> Text:
+    @staticmethod
+    def _render_row(cells: list[tuple[str, str]]) -> Text:
         text = Text()
-        for i, (key, label) in enumerate(self._cells):
+        for i, (key, label) in enumerate(cells):
             if i:
                 text.append("  ")
             text.append(key, style="bold reverse")
             text.append(f":{label}", style="")
+        return text
+
+    def render(self) -> Text:
+        text = self._render_row(self._row1)
+        text.append("\n")
+        text.append_text(self._render_row(self._row2))
         return text
