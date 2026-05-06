@@ -66,15 +66,38 @@ class Iq1D:
 def read_iq(path: Path) -> Iq1D:
     """Load 2/3/4-col ``q I(q) [sigma_I] [sigma_q]`` from ``path``.
 
-    The 4th column (sigma_q) is read but discarded — see PLANNING.md §4.1.
+    Auto-detects the delimiter (comma for CSV, whitespace otherwise) by
+    sniffing the first non-comment line. The 4th column (sigma_q) is
+    read but discarded — see PLANNING.md §4.1.
     """
-    data = np.loadtxt(path, comments="#", ndmin=2)
+    delim = _detect_delimiter(path)
+    data = np.loadtxt(path, comments="#", ndmin=2, delimiter=delim)
     if data.shape[1] < 2:
         raise ValueError(f"{path}: need at least 2 columns, got {data.shape[1]}")
     q = data[:, 0]
     intensity = data[:, 1]
     sigma_i = data[:, 2] if data.shape[1] >= 3 else None
     return Iq1D(path=Path(path), q=q, intensity=intensity, sigma_i=sigma_i)
+
+
+def _detect_delimiter(path: Path) -> str | None:
+    """Sniff the column separator. ``","`` for CSV, ``None`` (=whitespace) else.
+
+    Returns ``None`` when the file is empty or unreadable so :func:`np.loadtxt`
+    falls back to its default behavior (any whitespace).
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Comma wins if present — CSV-with-spaces is much more
+                # common than tab-with-stray-comma.
+                return "," if "," in line else None
+    except OSError:
+        return None
+    return None
 
 
 def read_transmission(path: Path) -> Iq1D:

@@ -158,6 +158,34 @@ def test_read_iq_4col_drops_sigq(tmp_path: Path) -> None:
     assert ds.sigma_i.shape == (5,)
 
 
+def test_read_iq_csv(tmp_path: Path) -> None:
+    """Comma-separated transmission/Iq files work too — delimiter auto-detected."""
+    f = tmp_path / "sample_trans.txt"
+    f.write_text(
+        "# lambda, T, sigT\n"
+        "2.76523,0.849843,0.00465712\n"
+        "3.1,0.85,0.005\n"
+        "4.0,0.86,0.006\n",
+        encoding="utf-8",
+    )
+    ds = ascii1d.read_iq(f)
+    assert ds.q.shape == (3,)
+    assert ds.intensity[0] == pytest.approx(0.849843)
+    assert ds.sigma_i is not None
+    assert ds.sigma_i[0] == pytest.approx(0.00465712)
+
+
+def test_plot_transmission_csv_writes_png(tmp_path: Path) -> None:
+    """Regression: CSV-formatted transmission files plot without crashing."""
+    f = tmp_path / "sample_trans.txt"
+    f.write_text(
+        "# lambda, T, sigT\n2.5,0.9,0.01\n5.0,0.85,0.01\n10.0,0.7,0.01\n",
+        encoding="utf-8",
+    )
+    png, _ = ascii1d.plot_transmission([f])
+    assert png is not None and png.exists()
+
+
 def test_plot_iq_real_fixture_produces_png(tmp_path: Path) -> None:
     """The bundled 4-col fixture must plot in headless mode quickly.
 
