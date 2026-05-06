@@ -235,9 +235,12 @@ async def test_tab_extends_to_common_prefix(tmp_path: Path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press(":")
-        # "p" matches pane.activate, pane.swap, pane.sync, pane.toggle_max →
-        # common prefix "pane."
+        # "pa" matches pane.activate, pane.swap, pane.sync, pane.toggle_max,
+        # pane.toggle_catalog → common prefix "pane.".
+        # ("p" alone now matches plot.* too, which would have only "p" as
+        # the common prefix.)
         await pilot.press("p")
+        await pilot.press("a")
         await pilot.press("tab")
         await pilot.pause()
         assert app._cmdline.value == "pane."

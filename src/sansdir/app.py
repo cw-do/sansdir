@@ -139,6 +139,14 @@ class SansdirApp(App[int]):
         self.push_screen(HelpScreen(self.registry, self.keymap))
 
     def quit_app(self) -> None:
+        # Best-effort: close any matplotlib figures the user opened during
+        # the session so they don't outlive the TUI process.
+        try:
+            from sansdir.plot.backend import close_all
+
+            close_all()
+        except ImportError:
+            pass
         self.exit(0)
 
     def focus_cmdline(self) -> None:

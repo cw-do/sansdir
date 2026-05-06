@@ -97,17 +97,17 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 5 — 1D plotting *(matplotlib windows)*
 
-- [ ] `plot/detect.py` — sniff file by extension + first non-comment line column count
-- [ ] `plot/ascii1d.py` — read 2/3/4-col data with numpy; respect `#` comments
-- [ ] `plot/backend.py` — display probe (`$DISPLAY` / `$WAYLAND_DISPLAY` / `SANSDIR_HEADLESS`); pick interactive backend (`QtAgg` → `TkAgg` → `GTK4Agg`) or `Agg`
-- [ ] **matplotlib interactive figure** as default: log/lin axes, errorbars when σI present, title from filename, multiple files overlaid with legend
-- [ ] **Headless fallback**: `Agg` → PNG to `~/.cache/sansdir/plots/` with timestamped name; status bar shows path; optional `xdg-open`
-- [ ] Non-blocking show (`plt.show(block=False)`) so TUI stays responsive; `plt.close("all")` on app exit
-- [ ] Transmission detection (`*trans*.txt`): different default scales + axis labels (λ, T(λ))
-- [ ] Register commands: `plot.iq`, `plot.transmission`, `plot.show_options`
-- [ ] `p` keypress dispatches `plot.iq` / `plot.transmission` based on detected file kind
-- [ ] `P` opens options dialog (a `plot.show_options` command); user picks x/y scale, errorbars on/off, legend
-- [ ] **DoD**: Plot a 3-col Iq.dat in <500 ms in a real matplotlib window; correctly handles 4-col by ignoring last column; transmission gets correct axis labels; headless run produces PNG without crashing.
+- [x] `plot/detect.py` — sniff file by extension + first non-comment line column count
+- [x] `plot/ascii1d.py` — read 2/3/4-col data with numpy; respect `#` comments
+- [x] `plot/backend.py` — display probe (`$DISPLAY` / `$WAYLAND_DISPLAY` / `SANSDIR_HEADLESS`); pick interactive backend (`QtAgg` → `TkAgg` → `GTK4Agg`) or `Agg`
+- [x] **matplotlib interactive figure** as default: log/lin axes, errorbars when σI present, title from filename, multiple files overlaid with legend
+- [x] **Headless fallback**: `Agg` → PNG to `~/.cache/sansdir/plots/` with timestamped name; status bar shows path; optional `xdg-open` — *(status bar message via `notify_user`; `xdg-open` left unwired for now)*
+- [x] Non-blocking show (`plt.show(block=False)`) so TUI stays responsive; `plt.close("all")` on app exit
+- [x] Transmission detection (`*trans*.txt`): different default scales + axis labels (λ, T(λ))
+- [x] Register commands: `plot.iq`, `plot.transmission`, `plot.show_options` — *(`plot.iq`, `plot.transmission`, `ui.plot_auto`; options dialog deferred — see `P` task below)*
+- [x] `p` keypress dispatches `plot.iq` / `plot.transmission` based on detected file kind — *(`ui.plot_auto` handler buckets the active selection by detected kind and runs both plots if needed)*
+- [ ] `P` opens options dialog (a `plot.show_options` command); user picks x/y scale, errorbars on/off, legend — *(deferred to a polish pass)*
+- [x] **DoD**: Plot a 3-col Iq.dat in <500 ms in a real matplotlib window; correctly handles 4-col by ignoring last column; transmission gets correct axis labels; headless run produces PNG without crashing. *(test_plot_iq_real_fixture_produces_png — warm plot in <500 ms; test_plot_transmission_uses_lambda_label — λ axis; bundled fixtures cover the 4-col path)*
 
 ---
 

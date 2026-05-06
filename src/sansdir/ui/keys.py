@@ -187,6 +187,8 @@ def default_keymap() -> list[KeyBinding]:
         # OnCat IPTS search (Phase 4)
         KeyBinding("i", "oncat.search", "OnCat IPTS search"),
         KeyBinding("f2", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
+        # Plotting (Phase 5)
+        KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans)"),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(

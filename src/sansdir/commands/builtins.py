@@ -587,6 +587,89 @@ def _make_oncat_search(app: AppProtocol) -> Command:
     )
 
 
+def _make_plot_iq(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        from sansdir.plot.ascii1d import plot_iq
+
+        png, info = plot_iq([Path(p) for p in paths])
+        return _plot_user_message(png, info, paths)
+
+    return Command(
+        name="plot.iq",
+        description="Plot one or more 2/3/4-col I(q) ASCII files (overlay).",
+        params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        handler=handler,
+    )
+
+
+def _make_plot_transmission(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        from sansdir.plot.ascii1d import plot_transmission
+
+        png, info = plot_transmission([Path(p) for p in paths])
+        return _plot_user_message(png, info, paths)
+
+    return Command(
+        name="plot.transmission",
+        description="Plot transmission curves T(λ) — linear axes, λ in Å.",
+        params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        handler=handler,
+    )
+
+
+def _plot_user_message(png: Path | None, info, paths: list[str]) -> str:  # type: ignore[no-untyped-def]
+    """Return a user-facing summary; the dispatcher routes it to notify_user."""
+    if png is None:
+        return f"plot opened ({info.name})"
+    return f"plot saved → {png}"
+
+
+def _make_ui_plot_auto(app: AppProtocol) -> Command:
+    """Dispatch a plot for the active selection based on detected file kind."""
+
+    def handler() -> str | None:
+        from sansdir.plot import ascii1d, detect
+
+        srcs = app.active_panel.selection()
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return None
+        # Bucket by kind so a mixed selection still does the right thing.
+        iq: list[Path] = []
+        trans: list[Path] = []
+        unknown: list[str] = []
+        for p in srcs:
+            d = detect.detect_kind(p)
+            if d.kind == detect.KIND_TRANSMISSION:
+                trans.append(p)
+            elif d.kind == detect.KIND_IQ:
+                iq.append(p)
+            else:
+                unknown.append(f"{p.name} [{d.kind}]")
+        if unknown:
+            app.notify_user(
+                f"skipping (unsupported in Phase 5): {', '.join(unknown[:5])}",
+                severity="warning",
+            )
+        result_msgs: list[str] = []
+        if iq:
+            png, info = ascii1d.plot_iq(iq)
+            result_msgs.append(_plot_user_message(png, info, [str(p) for p in iq]))
+        if trans:
+            png, info = ascii1d.plot_transmission(trans)
+            result_msgs.append(_plot_user_message(png, info, [str(p) for p in trans]))
+        if result_msgs:
+            app.notify_user(" · ".join(result_msgs))
+        return " · ".join(result_msgs) or None
+
+    return Command(
+        name="ui.plot_auto",
+        description="Plot the active selection; routes Iq vs transmission by file kind.",
+        params=(),
+        handler=handler,
+    )
+
+
 def _make_pane_toggle_catalog(app: AppProtocol) -> Command:
     def handler() -> None:
         app.toggle_other_pane_catalog()
@@ -1020,6 +1103,9 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_app_browse_tree(app),
         _make_oncat_search(app),
         _make_pane_toggle_catalog(app),
+        _make_plot_iq(app),
+        _make_plot_transmission(app),
+        _make_ui_plot_auto(app),
     ]
 
 
