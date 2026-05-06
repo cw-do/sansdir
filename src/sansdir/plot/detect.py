@@ -1,14 +1,16 @@
 """Sniff what kind of plot a SANS file wants.
 
-We classify by extension *plus* a peek at the first non-comment line:
+Classification uses three signals, in priority order:
 
-* ``*trans*.txt`` → ``transmission`` (different axis labels, linear scales)
-* 2/3/4-col ASCII   → ``iq`` (1D reduced data)
-* 4/6-col ASCII     → ``iqxqy`` if the file looks 2D (Phase 6)
-* ``*.nxs.h5``      → ``nexus`` (Phase 7)
+1. **Filename** — ``*.nxs.h5`` → ``nexus``; ``*trans*.txt`` (or any other
+   extension containing "trans") → ``transmission``.
+2. **Header keywords** in ``#``-prefixed lines — ``lambda`` / ``wavelength``
+   / ``T(`` upgrades to ``transmission``; ``Iqxqy`` / ``qx qy`` / ``2D``
+   upgrades to ``iqxqy``.
+3. **First-data-row column count** — 2/3/4 → ``iq``; 4/6 with repeating
+   first-column → ``iqxqy``.
 
-Detection is cheap (reads a few lines) and pure — it returns a string
-constant that the dispatcher uses to pick a plot command.
+Detection is cheap (reads a handful of lines) and pure.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ VALID_KINDS: frozenset[str] = frozenset(
 )
 
 _TRANS_NAME_RE = re.compile(r"trans", re.IGNORECASE)
+_TRANS_HEADER_RE = re.compile(
+    r"\b(lambda|wavelength|T\s*\(|transmission)\b", re.IGNORECASE
+)
+_IQXQY_HEADER_RE = re.compile(r"\b(iqxqy|qx\s*qy|qx,\s*qy|2d)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,15 +53,16 @@ def detect_kind(path: Path) -> Detected:
     if not path.is_file():
         return Detected(kind=KIND_UNKNOWN, columns=0)
 
-    # Transmission lives under the *trans* naming convention regardless
-    # of column count.
-    if _TRANS_NAME_RE.search(path.name):
-        cols = _peek_columns(path)
-        return Detected(kind=KIND_TRANSMISSION, columns=cols)
-
+    name_says_trans = bool(_TRANS_NAME_RE.search(path.name))
+    header = _read_header(path)
     cols = _peek_columns(path)
+
+    if name_says_trans or _TRANS_HEADER_RE.search(header):
+        return Detected(kind=KIND_TRANSMISSION, columns=cols)
     if cols == 0:
         return Detected(kind=KIND_UNKNOWN, columns=0)
+    if _IQXQY_HEADER_RE.search(header):
+        return Detected(kind=KIND_IQXQY, columns=cols)
     if cols in (4, 6) and _looks_2d(path):
         return Detected(kind=KIND_IQXQY, columns=cols)
     if cols in (2, 3, 4):
@@ -86,10 +93,38 @@ def _iter_data_lines(path: Path, *, max_lines: int = 8) -> Iterable[str]:
 
 
 def _peek_columns(path: Path) -> int:
-    """Return the column count of the first non-comment line, or 0 on failure."""
+    """Return the column count of the first non-comment line, or 0 on failure.
+
+    Sniffs comma-delimited files too — a CSV row counts its commas, a
+    whitespace row counts its tokens.
+    """
     for line in _iter_data_lines(path, max_lines=1):
-        return len(line.split())
+        return len(line.split(",")) if "," in line else len(line.split())
     return 0
+
+
+def _read_header(path: Path, *, max_lines: int = 8) -> str:
+    """Concatenate the first few ``#``-prefixed comment lines into one string.
+
+    Used for keyword-based kind detection when the filename and column
+    count alone aren't decisive (e.g. CSV transmission files where the
+    column count comes back as 1).
+    """
+    out: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if not stripped.startswith("#"):
+                    break
+                out.append(stripped.lstrip("#").strip())
+                if len(out) >= max_lines:
+                    break
+    except OSError:
+        return ""
+    return " ".join(out)
 
 
 def _looks_2d(path: Path) -> bool:

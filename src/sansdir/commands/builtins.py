@@ -637,7 +637,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         # Bucket by kind so a mixed selection still does the right thing.
         iq: list[Path] = []
         trans: list[Path] = []
-        unknown: list[str] = []
+        unknown: list[tuple[Path, str]] = []
         for p in srcs:
             d = detect.detect_kind(p)
             if d.kind == detect.KIND_TRANSMISSION:
@@ -645,12 +645,33 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
             elif d.kind == detect.KIND_IQ:
                 iq.append(p)
             else:
-                unknown.append(f"{p.name} [{d.kind}]")
+                unknown.append((p, d.kind))
+
+        # Tell the user *what* is about to be plotted, including filenames,
+        # so a stale-tags surprise (cursor on a transmission file but old
+        # Iq tags still active) is obvious before any window appears.
+        bucket_summary: list[str] = []
+        if iq:
+            sample = ", ".join(p.name for p in iq[:3]) + (
+                f" (+{len(iq) - 3} more)" if len(iq) > 3 else ""
+            )
+            bucket_summary.append(f"{len(iq)} Iq [{sample}]")
+        if trans:
+            sample = ", ".join(p.name for p in trans[:3]) + (
+                f" (+{len(trans) - 3} more)" if len(trans) > 3 else ""
+            )
+            bucket_summary.append(f"{len(trans)} transmission [{sample}]")
+        if bucket_summary:
+            app.notify_user("plotting " + " · ".join(bucket_summary))
         if unknown:
+            details = ", ".join(f"{p.name} [{kind}]" for p, kind in unknown[:5])
             app.notify_user(
-                f"skipping (unsupported in Phase 5): {', '.join(unknown[:5])}",
+                f"skipping (unsupported in Phase 5): {details}",
                 severity="warning",
             )
+        if not iq and not trans:
+            return None
+
         result_msgs: list[str] = []
         if iq:
             png, info = ascii1d.plot_iq(iq)
@@ -658,8 +679,6 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         if trans:
             png, info = ascii1d.plot_transmission(trans)
             result_msgs.append(_plot_user_message(png, info, [str(p) for p in trans]))
-        if result_msgs:
-            app.notify_user(" · ".join(result_msgs))
         return " · ".join(result_msgs) or None
 
     return Command(

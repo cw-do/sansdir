@@ -133,6 +133,33 @@ def test_detect_unknown_for_empty_file(tmp_path: Path) -> None:
     assert d.kind == detect.KIND_UNKNOWN
 
 
+def test_detect_transmission_by_header_keyword(tmp_path: Path) -> None:
+    """Even without 'trans' in the name, a 'lambda' header marks it transmission."""
+    f = tmp_path / "EQSANS_xx_T.dat"  # no 'trans' in name
+    f.write_text(
+        "# lambda T sigT\n2.5\t0.9\t0.01\n3.0\t0.85\t0.01\n",
+        encoding="utf-8",
+    )
+    d = detect.detect_kind(f)
+    assert d.kind == detect.KIND_TRANSMISSION
+
+
+def test_detect_csv_transmission_by_header(tmp_path: Path) -> None:
+    f = tmp_path / "EQSANS_99_T.csv"
+    f.write_text(
+        "# wavelength, T, sigT\n2.5,0.9,0.01\n3.0,0.85,0.01\n",
+        encoding="utf-8",
+    )
+    d = detect.detect_kind(f)
+    assert d.kind == detect.KIND_TRANSMISSION
+
+
+def test_peek_columns_handles_csv(tmp_path: Path) -> None:
+    f = tmp_path / "x.csv"
+    f.write_text("# a,b,c\n1.0,2.0,3.0\n", encoding="utf-8")
+    assert detect._peek_columns(f) == 3
+
+
 # ---------------------------------------------------------------------------
 # ASCII 1D plotting (real fixtures + headless)
 # ---------------------------------------------------------------------------
