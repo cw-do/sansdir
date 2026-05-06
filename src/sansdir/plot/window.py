@@ -59,7 +59,7 @@ def _pick_interactive_backend() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sansdir.plot.window")
-    parser.add_argument("kind", choices=("iq", "transmission", "iqxqy"))
+    parser.add_argument("kind", choices=("iq", "transmission", "iqxqy", "nexus"))
     parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("--xscale", default=None)
     parser.add_argument("--yscale", default=None)
@@ -107,6 +107,13 @@ def main(argv: list[str] | None = None) -> int:
                 log_intensity=args.log_intensity,
                 title=args.title,
             )
+    elif args.kind == "nexus":
+        from sansdir.plot.hdf5_detector import make_detector_figure
+
+        # One subprocess handles one NeXus file — the launcher fires N
+        # subprocesses for N tagged files so each can be closed
+        # independently.
+        make_detector_figure(args.files[0], log_intensity=not args.no_errorbars and True)
     else:
         from sansdir.plot import ascii1d
 

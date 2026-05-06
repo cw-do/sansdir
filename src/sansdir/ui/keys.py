@@ -113,6 +113,11 @@ def _file_under_cursor(app: AppProtocol) -> dict[str, Any]:
     return {"path": str(cur) if cur is not None else str(app.active_panel.cwd)}
 
 
+def _hdf_under_cursor(app: AppProtocol) -> dict[str, Any]:
+    cur = app.active_panel.cursor_path
+    return {"path": str(cur) if cur is not None else ""}
+
+
 # ---------------------------------------------------------------------------
 # Default keymap (Phase 1 surface)
 # ---------------------------------------------------------------------------
@@ -188,8 +193,10 @@ def default_keymap() -> list[KeyBinding]:
         # OnCat IPTS search (Phase 4)
         KeyBinding("i", "oncat.search", "OnCat IPTS search"),
         KeyBinding("f2", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
-        # Plotting (Phase 5)
-        KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans)"),
+        # Plotting (Phase 5/6/7)
+        KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans / 2D / NeXus)"),
+        # NeXus tree (Phase 7)
+        KeyBinding("m", "hdf.show_keys", "HDF5 metadata tree", _hdf_under_cursor),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(

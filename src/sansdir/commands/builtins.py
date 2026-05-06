@@ -659,6 +659,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
     def handler() -> str | None:
         from sansdir.plot import ascii1d, detect
         from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
+        from sansdir.plot.hdf5_detector import make_detector_figure
         from sansdir.plot.tile import make_iqxqy_figure, make_tile_figure
 
         srcs = app.active_panel.selection()
@@ -669,6 +670,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         iq: list[Path] = []
         trans: list[Path] = []
         iqxqy: list[Path] = []
+        nexus: list[Path] = []
         unknown: list[tuple[Path, str]] = []
         for p in srcs:
             d = detect.detect_kind(p)
@@ -678,6 +680,8 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
                 iq.append(p)
             elif d.kind == detect.KIND_IQXQY:
                 iqxqy.append(p)
+            elif d.kind == detect.KIND_NEXUS:
+                nexus.append(p)
             else:
                 unknown.append((p, d.kind))
 
@@ -685,7 +689,12 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         # so a stale-tags surprise (cursor on a transmission file but old
         # Iq tags still active) is obvious before any window appears.
         bucket_summary: list[str] = []
-        for label, files in (("Iq", iq), ("transmission", trans), ("Iqxqy", iqxqy)):
+        for label, files in (
+            ("Iq", iq),
+            ("transmission", trans),
+            ("Iqxqy", iqxqy),
+            ("NeXus", nexus),
+        ):
             if files:
                 sample = ", ".join(p.name for p in files[:3]) + (
                     f" (+{len(files) - 3} more)" if len(files) > 3 else ""
@@ -699,7 +708,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
                 f"skipping (unsupported): {details}",
                 severity="warning",
             )
-        if not (iq or trans or iqxqy):
+        if not (iq or trans or iqxqy or nexus):
             return None
 
         result_msgs: list[str] = []
@@ -723,12 +732,79 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
                     title = f"tile_{len(iqxqy)}files"
                 png, info = save_figure_to_png(fig, title=title)
                 result_msgs.append(f"Iqxqy plot saved → {png}")
+        if nexus:
+            if has_display():
+                # One subprocess per file — different files don't share
+                # a colour scale meaningfully (different total counts).
+                for p in nexus:
+                    spawn_plot_window("nexus", [p])
+                result_msgs.append(f"NeXus plot opened ({len(nexus)} window(s))")
+            else:
+                for p in nexus:
+                    fig = make_detector_figure(p)
+                    png, _info = save_figure_to_png(fig, title=f"{p.stem}_detector")
+                    result_msgs.append(f"NeXus plot saved → {png}")
         return " · ".join(result_msgs) or None
 
     return Command(
         name="ui.plot_auto",
         description="Plot the active selection; routes Iq / transmission / Iqxqy by file kind.",
         params=(),
+        handler=handler,
+    )
+
+
+def _make_hdf_show_keys(app: AppProtocol) -> Command:
+    def handler(path: str) -> None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.ui.hdf_tree import HdfTreeScreen
+
+        target = Path(path).expanduser().resolve()
+        if not target.is_file():
+            app.notify_user(f"not a file: {target}", severity="warning")
+            return
+        if not isinstance(app, _RealApp):
+            return  # pragma: no cover
+        app.push_screen(HdfTreeScreen(target))
+
+    return Command(
+        name="hdf.show_keys",
+        description="Open an HDF5 / NeXus file in a tree-browser modal.",
+        params=(CommandParam(name="path", type="path", description="Path to *.nxs.h5"),),
+        handler=handler,
+        aliases=("hdf",),
+    )
+
+
+def _make_plot_detector_sum(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        # Headless path only — interactive runs through the subprocess
+        # via spawn_plot_window("nexus", ...).
+        from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
+        from sansdir.plot.hdf5_detector import make_detector_figure
+
+        path_list = [Path(p) for p in paths]
+        if not path_list:
+            raise ValueError("plot.detector_sum: at least one file required")
+        if has_display():
+            # One subprocess per file — multi-file detector tiling lives
+            # inside a single make_detector_figure call but only handles
+            # one file at a time today; a Phase 8 batch view would
+            # collate runs.
+            for p in path_list:
+                spawn_plot_window("nexus", [p])
+            return f"opened {len(path_list)} window(s)"
+        msgs: list[str] = []
+        for p in path_list:
+            fig = make_detector_figure(p)
+            png, _ = save_figure_to_png(fig, title=f"{p.stem}_detector")
+            msgs.append(str(png))
+        return " · ".join(msgs)
+
+    return Command(
+        name="plot.detector_sum",
+        description="Render NeXus detector banks as 2D heatmaps (one window per file).",
+        params=(CommandParam(name="paths", type="files", description="*.nxs.h5 file(s)."),),
         handler=handler,
     )
 
@@ -1169,6 +1245,8 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_plot_iq(app),
         _make_plot_transmission(app),
         _make_plot_iqxqy(app),
+        _make_plot_detector_sum(app),
+        _make_hdf_show_keys(app),
         _make_ui_plot_auto(app),
     ]
 

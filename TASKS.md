@@ -128,12 +128,12 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 7 — HDF5 / NeXus support
 
-- [ ] `hdf/reader.py` — safe open with `swmr=True`, key resolution helpers
-- [ ] `hdf/metadata.py` — extract scalar or time-averaged DASlogs values
-- [ ] `m` keypress on a `.nxs.h5` opens a tree dialog; preview leaf values
-- [ ] `plot/hdf5_detector.py` — sum bank arrays, render as 2D heatmap (per bank as tiles for v1)
-- [ ] `p` on a `.nxs.h5` plots total detector sum
-- [ ] **DoD**: Inspect any SNS NeXus file; plot its detector sum without writing intermediate files.
+- [x] `hdf/reader.py` — safe open with `swmr=True`, key resolution helpers
+- [x] `hdf/metadata.py` — extract scalar or time-averaged DASlogs values
+- [x] `m` keypress on a `.nxs.h5` opens a tree dialog; preview leaf values — *(`HdfTreeScreen` with lazy expansion + side preview; tested against the 350 MB cluster fixture)*
+- [x] `plot/hdf5_detector.py` — sum bank arrays, render as 2D heatmap (per bank as tiles for v1) — *(handles pre-aggregated `data` AND event-mode `event_id` via `np.bincount` + best-effort reshape)*
+- [x] `p` on a `.nxs.h5` plots total detector sum per pixel — *(`ui.plot_auto` routes NeXus → `plot.detector_sum`; one subprocess per file)*
+- [x] **DoD**: Inspect any SNS NeXus file; plot its detector sum without writing intermediate files. *(17 tests cover open/walk/extract/detector for the synthetic 2-bank fixture + an event-mode bincount path on a synthetic 4x4 detector)*
 
 ---
 
