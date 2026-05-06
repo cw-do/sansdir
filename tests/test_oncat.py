@@ -283,6 +283,8 @@ async def test_cache_with_old_schema_version_is_discarded(
 
 
 def test_normalise_datafile_extracts_daslogs() -> None:
+    """detectorz from OnCat is in mm; the dataclass keeps it raw and
+    exposes ``detector_distance_m`` for the m unit."""
     raw = {
         "indexed": {"run_number": 12345},
         "metadata": {
@@ -292,7 +294,7 @@ def test_normalise_datafile_extracts_daslogs() -> None:
                 "duration": 1200.0,
                 "total_counts": 1234567,
                 "daslogs": {
-                    "detectorz": {"average_value": 4.0},
+                    "detectorz": {"average_value": 4000.0},  # 4000 mm = 4 m
                     "wavelength": {"average_value": 2.5},
                 },
             }
@@ -300,9 +302,22 @@ def test_normalise_datafile_extracts_daslogs() -> None:
     }
     d = oncat._normalise_datafile(raw)
     assert d.run_number == 12345
+    assert d.detector_distance_mm == 4000.0
     assert d.detector_distance_m == 4.0
     assert d.wavelength_a == 2.5
     assert d.total_counts == 1234567
+
+
+def test_datafile_detector_distance_m_property() -> None:
+    """1300 mm → 1.3 m."""
+    d = oncat.Datafile(
+        run_number=1,
+        title="",
+        start_time="",
+        duration_s=0,
+        detector_distance_mm=1300.0,
+    )
+    assert d.detector_distance_m == 1.3
 
 
 # ---------------------------------------------------------------------------

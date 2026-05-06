@@ -82,7 +82,8 @@ SAMPLE_DATAFILES = [
                 "duration": 600.0,
                 "total_counts": 9999,
                 "daslogs": {
-                    "detectorz": {"average_value": 4.0},
+                    # OnCat returns detectorz in mm; 4000 = 4 m at the panel.
+                    "detectorz": {"average_value": 4000.0},
                     "wavelength": {"average_value": 2.5},
                 },
             }
@@ -96,7 +97,7 @@ SAMPLE_DATAFILES = [
                 "duration": 1200.0,
                 "total_counts": 1234567,
                 "daslogs": {
-                    "detectorz": {"average_value": 8.0},
+                    "detectorz": {"average_value": 8000.0},
                     "wavelength": {"average_value": 4.5},
                 },
             }

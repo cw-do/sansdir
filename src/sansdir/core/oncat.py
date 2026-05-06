@@ -144,15 +144,29 @@ def _short_date(timestamp: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Datafile:
-    """One run-file row from OnCat datafiles listing."""
+    """One run-file row from OnCat datafiles listing.
+
+    .. note::
+
+       OnCat's ``DASlogs.detectorz.average_value`` is reported in
+       **millimetres** (the SNS DASlogs convention). The
+       :attr:`detector_distance_m` property does the unit conversion so
+       UI code can quote the more natural "metres" without remembering
+       which side of the wire keeps which unit.
+    """
 
     run_number: int
     title: str
     start_time: str
     duration_s: float
     total_counts: int = 0
-    detector_distance_m: float = 0.0
+    detector_distance_mm: float = 0.0
     wavelength_a: float = 0.0
+
+    @property
+    def detector_distance_m(self) -> float:
+        """Detector distance in metres (1 / 1000 of the raw mm value)."""
+        return self.detector_distance_mm / 1000.0
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +514,9 @@ def _normalise_datafile(raw: dict[str, Any]) -> Datafile:
         start_time=str(metadata.get("start_time", "")),
         duration_s=float(metadata.get("duration", 0.0) or 0.0),
         total_counts=int(metadata.get("total_counts", 0) or 0),
-        detector_distance_m=_avg(daslogs.get("detectorz")),
+        # OnCat reports detectorz in mm; we keep the raw value and let the
+        # ``detector_distance_m`` property convert at display time.
+        detector_distance_mm=_avg(daslogs.get("detectorz")),
         wavelength_a=_avg(daslogs.get("wavelength")),
     )
 

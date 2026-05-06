@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from rich.text import Text
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.widgets import DataTable, Static
@@ -20,6 +21,11 @@ from sansdir.core.filesystem import format_size
 
 if TYPE_CHECKING:
     from sansdir.core.oncat import Datafile
+
+
+def _r(value: str) -> Text:
+    """Right-justified Rich Text — used for numeric columns."""
+    return Text(value, justify="right")
 
 
 def _format_counts(n: int) -> str:
@@ -93,7 +99,16 @@ class RunCatalogPanel(Vertical):
         yield self._hint
 
     def on_mount(self) -> None:
-        self._table.add_columns("Run #", "Title", "Dist (m)", "λ (Å)", "Count", "Time(s)")
+        # Right-justify numeric column headers so they line up over their
+        # right-justified data cells.
+        self._table.add_columns(
+            _r("Run #"),
+            "Title",
+            _r("Dist (m)"),
+            _r("λ (Å)"),
+            _r("Count"),
+            _r("Time(s)"),
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,12 +123,14 @@ class RunCatalogPanel(Vertical):
         self._table.clear()
         for f in files:
             self._table.add_row(
-                str(f.run_number),
+                _r(str(f.run_number)),
                 (f.title or "")[:40],
-                f"{f.detector_distance_m:.1f}",
-                f"{f.wavelength_a:.1f}",
-                _format_counts(f.total_counts),
-                str(int(f.duration_s)),
+                # detector_distance_m converts the raw mm value from OnCat
+                # for us — UI quotes metres with one decimal: "2.5", "1.3".
+                _r(f"{f.detector_distance_m:.1f}"),
+                _r(f"{f.wavelength_a:.1f}"),
+                _r(_format_counts(f.total_counts)),
+                _r(str(int(f.duration_s))),
             )
         # Keep cursor visible at top.
         if files:
