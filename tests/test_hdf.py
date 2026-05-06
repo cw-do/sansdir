@@ -116,70 +116,126 @@ def test_extract_value_from_path_one_shot(synthetic_nexus: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_list_banks_returns_known_banks(synthetic_nexus: Path) -> None:
-    banks = hdf5_detector.list_banks(synthetic_nexus)
-    assert banks == ["bank1", "bank2"]
+def _write_raw_eqsans(path: Path, *, run_number: str = "999", title: str = "test") -> None:
+    """Write a tiny NeXus file shaped like a raw EQSANS event-mode run.
 
-
-def test_read_bank_image_uses_aggregated_data(synthetic_nexus: Path) -> None:
-    """Synthetic fixture has pre-aggregated 'data' arrays — use them as-is."""
-    with reader.open_nexus(synthetic_nexus) as fh:
-        img = hdf5_detector.read_bank_image(fh, "bank1")
-    assert img is not None
-    assert img.counts.shape == (16, 16)
-    assert img.total > 0
-
-
-def test_read_bank_image_event_mode_falls_back_to_bincount(tmp_path: Path) -> None:
-    """When only event_id is present, bincount + reshape gives a usable image."""
+    48 banks named ``bank<N>_events`` each with an ``event_id`` array
+    whose IDs collectively span 0..(256*192-1) — exactly what
+    EQSANS_raw_2D.py ingests.
+    """
     import h5py
 
-    f = tmp_path / "events.nxs.h5"
+    n_total = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    rng = np.random.default_rng(seed=42)
+    with h5py.File(path, "w") as fh:
+        fh.create_dataset("entry/run_number", data=np.bytes_(run_number))
+        fh.create_dataset("entry/title", data=np.bytes_(title))
+        chunk = n_total // hdf5_detector.EQSANS_NBANKS
+        for b in range(1, hdf5_detector.EQSANS_NBANKS + 1):
+            lo = (b - 1) * chunk
+            hi = lo + chunk
+            ids = rng.integers(low=lo, high=hi, size=20)
+            fh.create_dataset(f"entry/bank{b}_events/event_id", data=ids)
+
+
+def test_load_eqsans_raw_round_trip(tmp_path: Path) -> None:
+    f = tmp_path / "EQSANS_999.nxs.h5"
+    _write_raw_eqsans(f, run_number="999", title="my sample")
+    img = hdf5_detector.load_eqsans_raw(f)
+    assert img.image.shape == (256, 192)
+    assert img.run_number == "999"
+    assert img.title == "my sample"
+    assert img.source == "raw"
+    # Total counts: 48 banks x 20 events.
+    assert int(img.image.sum()) == hdf5_detector.EQSANS_NBANKS * 20
+
+
+def test_load_eqsans_raw_rejects_files_without_bank_events(tmp_path: Path) -> None:
+    import h5py
+
+    f = tmp_path / "wrong_shape.nxs.h5"
     with h5py.File(f, "w") as fh:
-        bank = fh.create_group("entry/instrument/bank1")
-        # 4x4 detector; ids 0..15 each fired a few times.
-        rng = np.random.default_rng(seed=1)
-        ids = rng.integers(low=0, high=16, size=200)
-        bank.create_dataset("event_id", data=ids)
-    with reader.open_nexus(f) as fh:
-        img = hdf5_detector.read_bank_image(fh, "bank1")
-    assert img is not None
-    # 16 pixels → 4x4 (perfect square), with sum equal to the # of events.
-    assert img.counts.shape == (4, 4)
-    assert img.total == 200
+        fh.create_group("entry/instrument/bank1")
+    with pytest.raises(reader.HdfError, match="no /entry/bank"):
+        hdf5_detector.load_eqsans_raw(f)
 
 
-def test_make_detector_figure_returns_figure_with_pcolormesh(synthetic_nexus: Path) -> None:
-    """Synthetic 2-bank file → tile of 2 heatmaps + shared colorbar."""
+def test_load_processed_round_trip(tmp_path: Path) -> None:
+    """Mantid-written file: 1D values array of length 256*192."""
+    import h5py
+
+    f = tmp_path / "processed.nxs.h5"
+    n = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("processed sample"))
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/values",
+            data=np.arange(n, dtype=float).reshape(192, 256).ravel(),
+        )
+    img = hdf5_detector.load_processed(f)
+    assert img.image.shape == (256, 192)
+    assert img.source == "processed"
+    assert img.title == "processed sample"
+
+
+def test_load_processed_rejects_wrong_size(tmp_path: Path) -> None:
+    import h5py
+
+    f = tmp_path / "tiny.nxs.h5"
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("x"))
+        fh.create_dataset("mantid_workspace_1/workspace/values", data=np.arange(10))
+    with pytest.raises(reader.HdfError, match="expected"):
+        hdf5_detector.load_processed(f)
+
+
+def test_load_detector_image_prefers_raw_when_both_shapes_present(tmp_path: Path) -> None:
+    f = tmp_path / "both.nxs.h5"
+    _write_raw_eqsans(f, run_number="42", title="hybrid")
+    img = hdf5_detector.load_detector_image(f)
+    assert img.source == "raw"
+
+
+def test_load_detector_image_falls_back_to_processed(tmp_path: Path) -> None:
+    import h5py
+
+    f = tmp_path / "proc_only.nxs.h5"
+    n = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("proc"))
+        fh.create_dataset("mantid_workspace_1/workspace/values", data=np.zeros(n))
+    img = hdf5_detector.load_detector_image(f)
+    assert img.source == "processed"
+
+
+def test_load_detector_image_neither_shape_raises(tmp_path: Path) -> None:
+    import h5py
+
+    f = tmp_path / "junk.nxs.h5"
+    with h5py.File(f, "w") as fh:
+        fh.create_group("entry")
+    with pytest.raises(reader.HdfError, match="not a recognised EQSANS"):
+        hdf5_detector.load_detector_image(f)
+
+
+def test_make_detector_figure_renders_imshow(tmp_path: Path) -> None:
+    """Single (256x192) imshow with colorbar — not a tile of banks."""
     import matplotlib.pyplot as plt
 
-    fig = hdf5_detector.make_detector_figure(synthetic_nexus)
-    # 2 data tiles + 1 shared colorbar = at least 3 axes.
-    assert len(fig.axes) >= 3
-    pcm_count = sum(
-        1 for ax in fig.axes for c in ax.collections if c.__class__.__name__ == "QuadMesh"
-    )
-    assert pcm_count >= 2  # at least one per bank (cbar may add one too)
+    f = tmp_path / "EQSANS_99.nxs.h5"
+    _write_raw_eqsans(f)
+    fig = hdf5_detector.make_detector_figure(f)
+    assert len(fig.axes) == 2  # main + colorbar
+    main = fig.axes[0]
+    assert len(list(main.get_images())) == 1
+    assert main.get_xlabel() == "Tube"
+    assert main.get_ylabel() == "Pixel"
     plt.close(fig)
 
 
-def test_make_detector_figure_no_banks_raises(tmp_path: Path) -> None:
-    """A NeXus file without any bank<N> groups errors out cleanly."""
-    import h5py
-
-    f = tmp_path / "no_banks.nxs.h5"
-    with h5py.File(f, "w") as fh:
-        fh.create_group("entry")
-    with pytest.raises(ValueError, match="no detector banks"):
-        hdf5_detector.make_detector_figure(f)
-
-
-def test_factor_near_square() -> None:
-    assert hdf5_detector._factor_near_square(16) == (4, 4)
-    assert hdf5_detector._factor_near_square(20) == (4, 5)
-    # Prime → fall back to side x ceil(n/side).
-    rows, cols = hdf5_detector._factor_near_square(17)
-    assert rows * cols >= 17
+def test_reorder_tubes_validates_size() -> None:
+    with pytest.raises(ValueError, match="expected"):
+        hdf5_detector._reorder_tubes(np.zeros(100))
 
 
 # ---------------------------------------------------------------------------

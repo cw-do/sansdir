@@ -50,6 +50,17 @@ class StatusBar(Horizontal):
         yield self._left
         yield self._right
 
-    def update_for(self, cwd: Path, file_count: int) -> None:
-        self._left.update(f"{cwd}  ({file_count} entries)")
+    def update_for(
+        self,
+        cwd: Path,
+        file_count: int,
+        *,
+        filter_substring: str = "",
+    ) -> None:
+        if filter_substring:
+            self._left.update(
+                f"{cwd}  ({file_count} entries · [b yellow]filter:[/] [b]{filter_substring}[/])"
+            )
+        else:
+            self._left.update(f"{cwd}  ({file_count} entries)")
         self._right.update(f"free: {format_size(free_disk_bytes(cwd))}")

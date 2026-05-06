@@ -118,7 +118,14 @@ class SansdirApp(App[int]):
             raise ValueError(f"unknown panel_id {panel_id!r}")
         self._active_id = panel_id
         self._apply_active_class()
-        self.set_focus(self.active_panel)
+        # If the new active slot is showing a catalog, focus the catalog
+        # widget directly — Tab onto a hidden FilePanel would do nothing
+        # useful. The user gets a visible cursor on a runnable widget.
+        target_slot = self._left_slot if panel_id == "left" else self._right_slot
+        if target_slot.catalog_visible:
+            self.set_focus(target_slot.catalog)
+        else:
+            self.set_focus(self.active_panel)
         self._refresh_status()
 
     def swap_panels(self) -> None:
@@ -217,9 +224,16 @@ class SansdirApp(App[int]):
     def is_other_pane_viewing(self) -> bool:
         return self._inactive_slot.viewer_visible
 
-    def show_catalog_in_other_pane(self, ipts: str, files: list) -> None:  # type: ignore[type-arg]
+    def show_catalog_in_other_pane(
+        self,
+        ipts: str,
+        files: list,  # type: ignore[type-arg]
+        *,
+        instrument: str = "EQSANS",
+        facility: str = "SNS",
+    ) -> None:
         """Mount the OnCat run catalog for ``ipts`` in the inactive pane."""
-        self._inactive_slot.show_catalog(ipts, files)
+        self._inactive_slot.show_catalog(ipts, files, instrument=instrument, facility=facility)
         # Active pane keeps focus so the user can keep navigating files.
         self.set_focus(self.active_panel)
 
@@ -402,7 +416,11 @@ class SansdirApp(App[int]):
             count = len(panel._entries)
         except AttributeError:
             count = 0
-        self._statusbar.update_for(panel.cwd, count)
+        self._statusbar.update_for(
+            panel.cwd,
+            count,
+            filter_substring=panel.filter_substring,
+        )
 
 
 def run_tui(start_path: str | Path | None = None) -> int:

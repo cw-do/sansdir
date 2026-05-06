@@ -10,6 +10,7 @@ column, which is reduction-pipeline specific):
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
@@ -72,6 +73,8 @@ class RunCatalogPanel(Vertical):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "close", "Close catalog", show=False),
+        Binding("p", "plot_current", "Plot raw NeXus", show=False),
+        Binding("enter", "plot_current", "Plot raw NeXus", show=False),
     ]
 
     def __init__(self, panel_id: str) -> None:
@@ -85,11 +88,13 @@ class RunCatalogPanel(Vertical):
             show_header=True,
         )
         self._hint = Static(
-            "[dim]F2 toggles filelist · Esc closes catalog[/dim]",
+            "[dim]p / Enter: plot raw run · F2 toggles filelist · Esc closes[/dim]",
             classes="hint",
         )
         self._ipts: str = ""
         self._files: list[Datafile] = []
+        self._instrument: str = "EQSANS"
+        self._facility: str = "SNS"
         self.can_focus = True
 
     def compose(self):  # type: ignore[override]
@@ -114,10 +119,19 @@ class RunCatalogPanel(Vertical):
     # Public API
     # ------------------------------------------------------------------
 
-    def show(self, ipts: str, files: list[Datafile]) -> None:
+    def show(
+        self,
+        ipts: str,
+        files: list[Datafile],
+        *,
+        instrument: str = "EQSANS",
+        facility: str = "SNS",
+    ) -> None:
         """Replace the table contents with ``files`` for ``ipts``."""
         self._ipts = ipts
         self._files = files
+        self._instrument = instrument
+        self._facility = facility
         self._header.update(f"OnCat catalog · {ipts}")
         self._meta.update(f"{len(files)} run(s)")
         self._table.clear()
@@ -144,6 +158,31 @@ class RunCatalogPanel(Vertical):
     def files(self) -> list[Datafile]:
         return list(self._files)
 
+    @property
+    def instrument(self) -> str:
+        return self._instrument
+
+    @property
+    def facility(self) -> str:
+        return self._facility
+
+    @property
+    def current_run_number(self) -> int | None:
+        """Run number of the cursor row, or ``None`` if the table is empty."""
+        if not self._files:
+            return None
+        row = self._table.cursor_row
+        if row < 0 or row >= len(self._files):
+            return None
+        return self._files[row].run_number
+
+    def raw_nexus_path(self, run_number: int) -> Path:
+        """Conventional cluster path: ``/<facility>/<instr>/IPTS-N/nexus/<INSTR>_<run>.nxs.h5``."""
+        return Path(
+            f"/{self._facility}/{self._instrument}/{self._ipts}/nexus/"
+            f"{self._instrument}_{run_number}.nxs.h5"
+        )
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
@@ -151,6 +190,27 @@ class RunCatalogPanel(Vertical):
     def action_close(self) -> None:
         # Tell the App to swap this slot back to the FilePanel.
         self.app.close_inline_viewer(self._panel_id)  # type: ignore[attr-defined]
+
+    def action_plot_current(self) -> None:
+        """Plot the raw NeXus file for the cursor row's run number."""
+        run = self.current_run_number
+        if run is None:
+            self.app.notify("no run under cursor", severity="warning")  # type: ignore[attr-defined]
+            return
+        path = self.raw_nexus_path(run)
+        if not path.exists():
+            self.app.notify(  # type: ignore[attr-defined]
+                f"raw file not found: {path}",
+                severity="warning",
+            )
+            return
+        # Dispatch through the registry so the LLM layer can call this
+        # path too — we deliberately don't reach into matplotlib here.
+        self.app.run_worker(  # type: ignore[attr-defined]
+            self.app.registry.dispatch("plot.detector_sum", paths=[str(path)]),  # type: ignore[attr-defined]
+            name=f"plot:run{run}",
+            exclusive=False,
+        )
 
 
 # Re-export ``format_size`` so other modules importing from this module

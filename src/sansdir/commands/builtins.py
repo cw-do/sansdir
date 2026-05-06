@@ -556,7 +556,12 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                     chosen.ipts,  # type: ignore[attr-defined]
                     instrument=instr,
                 )
-                app.show_catalog_in_other_pane(chosen.ipts, files)  # type: ignore[attr-defined]
+                app.show_catalog_in_other_pane(  # type: ignore[attr-defined]
+                    chosen.ipts,  # type: ignore[attr-defined]
+                    files,
+                    instrument=instr,
+                    facility=chosen.facility,  # type: ignore[attr-defined]
+                )
         except OnCatError as exc:
             app.notify_user(f"OnCat: {exc}", severity="error")
             return None

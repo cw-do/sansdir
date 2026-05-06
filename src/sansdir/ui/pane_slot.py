@@ -110,8 +110,15 @@ class PaneSlot(Container):
         self._mode = "viewer"
         return ok
 
-    def show_catalog(self, ipts: str, files: list[Datafile]) -> None:
-        self._catalog.show(ipts, files)
+    def show_catalog(
+        self,
+        ipts: str,
+        files: list[Datafile],
+        *,
+        instrument: str = "EQSANS",
+        facility: str = "SNS",
+    ) -> None:
+        self._catalog.show(ipts, files, instrument=instrument, facility=facility)
         self._panel.display = False
         self._viewer.display = False
         self._catalog.display = True

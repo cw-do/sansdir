@@ -1,20 +1,22 @@
-"""Detector-counts heatmaps for SNS NeXus event / histogram files.
+"""Detector-counts heatmaps for EQSANS NeXus files.
 
-Two shapes show up in practice:
+Two loaders, picked automatically by inspecting the file's structure:
 
-* **Histogrammed** files (often after Mantid / drtsans reduction) keep
-  pre-aggregated 2-D pixel arrays at
-  ``/entry/instrument/bank<N>/data`` — the synthetic fixture in
-  ``tests/conftest.py`` matches this shape.
-* **Event-mode** files (the raw DAE output) keep a 1-D ``event_id``
-  array per bank and no aggregated image. We histogram that with
-  :func:`numpy.bincount` and reshape into a square-ish 2-D grid.
-  Real detector geometry would need Mantid; this is a "best-effort"
-  v1 view that's good enough for sanity checks.
+* :func:`load_eqsans_raw` — for raw event-mode files (the default DAS
+  output ``EQSANS_<run>.nxs.h5``). Mirrors
+  ``/SNS/EQSANS/shared/script/eqsanstools/EQSANS_raw_2D.py``: bincount
+  the ``event_id`` of each ``/entry/bank<N>_events`` group into a
+  ``256x192`` array, then reorder tubes [0,4,1,5,2,6,3,7] to match the
+  physical detector layout.
 
-In both cases we return a list of bank counts arrays — multiple banks
-are tiled by the existing :func:`sansdir.plot.tile.make_tile_figure`
-machinery, just like 2-D Iqxqy.
+* :func:`load_processed` — for files written by Mantid / drtsans
+  (``mantid_workspace_1/workspace/values``). Same final shape, no
+  reorder needed.
+
+Both produce one ``(256, 192)`` array — pixel rows x tube columns —
+which we render with ``imshow`` (LogNorm, viridis, "Tube" / "Pixel"
+axis labels). This is a *single* detector image, not a per-bank tile,
+because the 48 banks are physically one detector.
 """
 
 from __future__ import annotations
@@ -25,100 +27,118 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from sansdir.hdf.reader import open_nexus
+from sansdir.hdf.reader import HdfError, open_nexus
 
 if TYPE_CHECKING:
-    import h5py
     from matplotlib.figure import Figure
 
 
+# EQSANS detector geometry — 48 banks of 8 tubes x 256 pixels each, in
+# 24 columns of 8 tubes, total 192 tubes x 256 pixels per tube.
+EQSANS_NPIXELS_PER_TUBE: int = 256
+EQSANS_NTUBES: int = 192
+EQSANS_NPIXELS_TOTAL: int = EQSANS_NPIXELS_PER_TUBE * EQSANS_NTUBES
+EQSANS_NBANKS: int = 48
+EQSANS_TUBE_REORDER: tuple[int, ...] = (0, 4, 1, 5, 2, 6, 3, 7)
+
+
 @dataclass(frozen=True, slots=True)
-class BankImage:
-    """One detector bank as a 2D counts array."""
+class DetectorImage:
+    """Final 2D image we hand to matplotlib."""
 
-    name: str
-    counts: np.ndarray  # 2D
-    total: int
+    image: np.ndarray  # shape (npixels, ntubes), rows = pixel index, cols = tube
+    run_number: str
+    title: str
+    source: str  # "raw" | "processed" | "fallback"
 
 
 # ---------------------------------------------------------------------------
-# Bank reading
+# Raw loader (event mode) — mirrors EQSANS_raw_2D.py
 # ---------------------------------------------------------------------------
 
 
-def list_banks(path: Path, *, instrument_path: str = "/entry/instrument") -> list[str]:
-    """Return sorted bank group names found under ``instrument_path``."""
-    with open_nexus(path) as fh:
-        if instrument_path not in fh:
-            return []
-        inst = fh[instrument_path]
-        return sorted(name for name in inst if name.startswith("bank"))
+def load_eqsans_raw(path: Path) -> DetectorImage:
+    """Build the ``(256, 192)`` detector image from raw event-mode NeXus.
 
-
-def read_bank_image(
-    file: h5py.File, bank_name: str, *, instrument_path: str = "/entry/instrument"
-) -> BankImage | None:
-    """Materialise a 2D counts array for ``bank_name``.
-
-    Returns ``None`` if the bank exists but has neither aggregated
-    ``data`` nor ``event_id`` we can use.
+    Replicates the logic in
+    ``/SNS/EQSANS/shared/script/eqsanstools/EQSANS_raw_2D.py``.
     """
-    import h5py
-
-    bank_path = f"{instrument_path}/{bank_name}"
-    if bank_path not in file:
-        return None
-    bank = file[bank_path]
-    if not isinstance(bank, h5py.Group):
-        return None
-
-    # Path 1: pre-aggregated 2D-or-3D pixel array.
-    if "data" in bank:
-        ds = bank["data"]
-        if isinstance(ds, h5py.Dataset) and ds.ndim >= 2:
-            arr = np.asarray(ds[()])
-            if arr.ndim == 3:
-                # (tof, x, y) or similar — sum over the first axis.
-                arr = arr.sum(axis=0)
-            counts = arr.astype(np.int64, copy=False)
-            return BankImage(name=bank_name, counts=counts, total=int(counts.sum()))
-
-    # Path 2: event-mode — bincount the event_id.
-    if "event_id" in bank:
-        ids = np.asarray(bank["event_id"][()], dtype=np.int64)
-        if ids.size == 0:
-            return BankImage(name=bank_name, counts=np.zeros((1, 1), dtype=np.int64), total=0)
-        # Normalise to start from the smallest id so we don't allocate a
-        # giant array for IDs that begin at 1e6+.
-        offset = int(ids.min())
-        relative = ids - offset
-        nbins = int(relative.max()) + 1
-        flat = np.bincount(relative, minlength=nbins).astype(np.int64)
-        # Reshape into a near-square grid; the row count is whichever
-        # divisor of ``nbins`` is closest to sqrt(nbins).
-        rows, cols = _factor_near_square(flat.size)
-        if rows * cols != flat.size:
-            # Pad with zeros so reshape works; the trailing pixels read
-            # as low-count regions, which is fine for "where did
-            # neutrons land" sanity checks.
-            padded = np.zeros(rows * cols, dtype=flat.dtype)
-            padded[: flat.size] = flat
-            flat = padded
-        counts = flat.reshape(rows, cols)
-        return BankImage(name=bank_name, counts=counts, total=int(counts.sum()))
-
-    return None
-
-
-def read_bank_images(path: Path) -> list[BankImage]:
-    """All banks in ``path`` that we can render. Sorted by bank name."""
-    out: list[BankImage] = []
+    bc = np.zeros(EQSANS_NPIXELS_TOTAL, dtype=np.int64)
     with open_nexus(path) as fh:
-        for name in list_banks(path):
-            img = read_bank_image(fh, name)
-            if img is not None and img.counts.size > 0:
-                out.append(img)
-    return out
+        if "entry/bank1_events" not in fh:
+            raise HdfError(f"{path}: no /entry/bank<N>_events groups (not raw EQSANS)")
+        run_number = _scalar(fh, "entry/run_number")
+        title = _scalar(fh, "entry/title")
+        for b in range(1, EQSANS_NBANKS + 1):
+            key = f"entry/bank{b}_events/event_id"
+            if key not in fh:
+                continue
+            ids = np.asarray(fh[key][()], dtype=np.int64)
+            if ids.size:
+                bc += np.bincount(ids, minlength=EQSANS_NPIXELS_TOTAL)[:EQSANS_NPIXELS_TOTAL]
+    image = _reorder_tubes(bc)
+    return DetectorImage(image=image, run_number=run_number, title=title, source="raw")
+
+
+def _reorder_tubes(bincounts: np.ndarray) -> np.ndarray:
+    """Map a flat 49152-pixel bincount to a ``(256, 192)`` detector image.
+
+    The EQSANS detector layout interleaves tubes [0,4,1,5,2,6,3,7]
+    within each 8-tube bank — without this reorder the image is sliced
+    incorrectly. Math taken verbatim from EQSANS_raw_2D.py.
+    """
+    if bincounts.size != EQSANS_NPIXELS_TOTAL:
+        raise ValueError(
+            f"_reorder_tubes: expected {EQSANS_NPIXELS_TOTAL} cells, got {bincounts.size}"
+        )
+    data = bincounts.reshape(-1, 8, EQSANS_NPIXELS_PER_TUBE).T  # (256, 8, 24)
+    reordered = data[:, list(EQSANS_TUBE_REORDER), :]  # interleave tubes
+    final = reordered.transpose().reshape(-1, EQSANS_NPIXELS_PER_TUBE)  # (192, 256)
+    return final.T  # (256, 192)
+
+
+# ---------------------------------------------------------------------------
+# Processed loader — Mantid / drtsans output
+# ---------------------------------------------------------------------------
+
+
+def load_processed(path: Path) -> DetectorImage:
+    """For files Mantid / drtsans wrote: 1D ``mantid_workspace_1/workspace/values``."""
+    with open_nexus(path) as fh:
+        if "mantid_workspace_1/workspace/values" not in fh:
+            raise HdfError(
+                f"{path}: no /mantid_workspace_1/workspace/values (not a processed EQSANS file)"
+            )
+        title = _scalar(fh, "mantid_workspace_1/title", default="")
+        raw = np.asarray(fh["mantid_workspace_1/workspace/values"][()])
+    if raw.size != EQSANS_NPIXELS_TOTAL:
+        raise HdfError(
+            f"{path}: workspace/values has {raw.size} elements, expected {EQSANS_NPIXELS_TOTAL}"
+        )
+    image = raw.reshape(EQSANS_NTUBES, EQSANS_NPIXELS_PER_TUBE).T  # (256, 192)
+    return DetectorImage(image=image, run_number="", title=title, source="processed")
+
+
+# ---------------------------------------------------------------------------
+# Auto-dispatch
+# ---------------------------------------------------------------------------
+
+
+def load_detector_image(path: Path) -> DetectorImage:
+    """Try the raw loader, then the processed loader.
+
+    Raises :class:`HdfError` if neither shape is present.
+    """
+    try:
+        return load_eqsans_raw(path)
+    except HdfError as raw_err:
+        try:
+            return load_processed(path)
+        except HdfError as proc_err:
+            raise HdfError(
+                f"{path}: not a recognised EQSANS NeXus shape\n"
+                f"  raw: {raw_err}\n  processed: {proc_err}"
+            ) from raw_err
 
 
 # ---------------------------------------------------------------------------
@@ -127,91 +147,41 @@ def read_bank_images(path: Path) -> list[BankImage]:
 
 
 def make_detector_figure(path: Path, *, log_intensity: bool = True) -> Figure:
-    """One NeXus file → tile of bank counts heatmaps.
-
-    Banks are sorted by name; each rendered as a single
-    ``pcolormesh``. With many banks the layout falls back to the same
-    4-wide grid :mod:`sansdir.plot.tile` uses for Iqxqy tiles.
-    """
-    import math
-
+    """Render one EQSANS NeXus file as a single ``(256x192)`` heatmap."""
     import matplotlib.pyplot as plt
     from matplotlib.colors import LogNorm
-    from matplotlib.ticker import MaxNLocator
 
-    banks = read_bank_images(Path(path))
-    if not banks:
-        raise ValueError(f"{path}: no detector banks with usable counts found")
-
-    n = len(banks)
-    ncols = min(4, n)
-    nrows = math.ceil(n / ncols)
-
-    fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(2.6 * ncols, 2.6 * nrows),
-        squeeze=False,
-        layout="constrained",
-    )
-    axes_flat = axes.ravel()
-
-    # Shared colorbar across every bank — common log scale.
-    finite_positive = np.concatenate(
-        [b.counts[b.counts > 0].ravel() for b in banks if (b.counts > 0).any()]
-    )
-    if log_intensity and finite_positive.size:
-        vmin = max(1.0, float(finite_positive.min()))
-        vmax = float(finite_positive.max())
-        if vmax <= vmin:
-            vmax = vmin * 1.01
-        norm: LogNorm | None = LogNorm(vmin=vmin, vmax=vmax)
-    else:
-        norm = None
-
+    img = load_detector_image(Path(path))
+    data = img.image.astype(float)
+    if log_intensity:
+        data = np.where(data > 0, data, np.nan)
+    fig, ax = plt.subplots(figsize=(6, 7), layout="constrained")
     cm = _cmap_with_bad("viridis")
-    mappable = None
-    for i in range(nrows * ncols):
-        ax = axes_flat[i]
-        if i >= n:
-            ax.axis("off")
-            continue
-        bank = banks[i]
-        counts = bank.counts.astype(float)
-        if log_intensity:
-            counts = np.where(counts > 0, counts, np.nan)
-        pcm = ax.pcolormesh(counts, cmap=cm, norm=norm, shading="flat")
-        ax.set_aspect("equal", adjustable="box")
-        ax.set_box_aspect(1)
-        ax.xaxis.set_major_locator(MaxNLocator(3))
-        ax.yaxis.set_major_locator(MaxNLocator(3))
-        ax.tick_params(which="both", length=2, labelsize=7)
-        ax.text(
-            0.5,
-            0.98,
-            f"{bank.name}: {bank.total:,}",
-            ha="center",
-            va="top",
-            fontsize=7,
-            color="white",
-            weight="bold",
-            transform=ax.transAxes,
-            bbox={"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"},
-        )
-        if mappable is None:
-            mappable = pcm
-
-    if mappable is not None:
-        cb = fig.colorbar(
-            mappable,
-            ax=axes_flat.tolist(),
-            orientation="vertical",
-            shrink=0.95,
-            pad=0.02,
-        )
-        cb.set_label("counts")
-
-    fig.suptitle(f"{Path(path).name} — {n} bank(s), {sum(b.total for b in banks):,} total")
+    norm: LogNorm | None = None
+    if log_intensity:
+        finite = data[np.isfinite(data)]
+        if finite.size:
+            vmin = max(1.0, float(np.nanmin(finite)))
+            vmax = float(np.nanmax(finite))
+            if vmax <= vmin:
+                vmax = vmin * 1.01
+            norm = LogNorm(vmin=vmin, vmax=vmax)
+    im = ax.imshow(
+        data,
+        norm=norm,
+        cmap=cm,
+        extent=(0.5, EQSANS_NTUBES + 0.5, 0.5, EQSANS_NPIXELS_PER_TUBE + 0.5),
+        origin="lower",
+        aspect="auto",
+    )
+    cb = fig.colorbar(im, ax=ax, shrink=0.95)
+    cb.set_label("counts")
+    ax.set_xlabel("Tube")
+    ax.set_ylabel("Pixel")
+    title = f"EQSANS_{img.run_number}" if img.run_number else "EQSANS"
+    if img.title:
+        title = f"{title} — {img.title}"
+    ax.set_title(title, fontsize=10)
     return fig
 
 
@@ -220,24 +190,16 @@ def make_detector_figure(path: Path, *, log_intensity: bool = True) -> Figure:
 # ---------------------------------------------------------------------------
 
 
-def _factor_near_square(n: int) -> tuple[int, int]:
-    """Return ``(rows, cols)`` whose product is ≥ ``n`` and as square as possible.
-
-    Used for event-mode banks where we don't know the real detector
-    pixel layout — we just want the histogram to render as something
-    that vaguely *looks* like a 2D image rather than a long stripe.
-    """
-    if n <= 1:
-        return 1, max(1, n)
-    side = round(n**0.5)
-    # Find the factor of n closest to side; if n is prime, pad by reshaping
-    # to (side, ceil(n/side)) — caller pads with zeros if needed.
-    for r in range(side, 0, -1):
-        if n % r == 0:
-            return r, n // r
-    rows = side
-    cols = (n + rows - 1) // rows
-    return rows, cols
+def _scalar(fh, key: str, *, default: str = "") -> str:  # type: ignore[no-untyped-def]
+    """Read a scalar string-like dataset; tolerates ``[b'...']`` arrays."""
+    if key not in fh:
+        return default
+    raw = fh[key][()]
+    if isinstance(raw, np.ndarray) and raw.size:
+        raw = raw.flat[0]
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return str(raw)
 
 
 def _cmap_with_bad(name: str):  # type: ignore[no-untyped-def]
