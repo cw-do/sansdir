@@ -40,6 +40,12 @@ DEFAULT_PROJECTION_EXPERIMENT: tuple[str, ...] = (
     "size",
     "activity",
 )
+
+# Bump whenever the on-disk cache JSON shape changes — older entries are
+# silently discarded on read, forcing a fresh OnCat fetch. We're at v2
+# after the fix that changed members from str(dict) to extracted names
+# and that adds runs_count + acquisition_start/end.
+CACHE_SCHEMA_VERSION: int = 2
 # Datafile fields needed for the run-catalog DataTable (run_number / title /
 # detector distance / wavelength / total counts / duration). Mirrors the
 # PROJECTION constant in cw-do/eqsanscli/src/eqsanscli/integrations/oncat.py.
@@ -181,6 +187,10 @@ def _load_disk_cache(instrument: str, facility: str, ttl: float) -> list[Experim
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
+    # Reject caches written by an older code path with a different row
+    # shape (e.g. members serialized as `str(dict)` strings).
+    if int(data.get("version", 0)) != CACHE_SCHEMA_VERSION:
+        return None
     fetched_at = float(data.get("fetched_at", 0))
     if time.time() - fetched_at > ttl:
         return None
@@ -195,6 +205,7 @@ def _save_disk_cache(experiments: list[Experiment], instrument: str, facility: s
         path.write_text(
             json.dumps(
                 {
+                    "version": CACHE_SCHEMA_VERSION,
                     "fetched_at": time.time(),
                     "experiments": [{**asdict(e), "members": list(e.members)} for e in experiments],
                 },

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 import httpx
@@ -181,6 +182,41 @@ def test_ipts_label_falls_back_to_id() -> None:
     assert oncat._ipts_label({"id": "IPTS-9"}) == "IPTS-9"
     assert oncat._ipts_label({"id": "9"}) == "IPTS-9"
     assert oncat._ipts_label({}) == ""
+
+
+async def test_cache_with_old_schema_version_is_discarded(
+    httpx_mock,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    """A pre-fix cache (no `version` field, or wrong version) is ignored."""
+    cache_file = tmp_path / "cache" / "oncat" / "SNS-EQSANS-experiments.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(
+            {
+                # No version key — counts as version 0.
+                "fetched_at": time.time(),  # current — would otherwise hit
+                "experiments": [
+                    {
+                        "ipts": "IPTS-STALE",
+                        "title": "stringified-dict garbage",
+                        "pi": "x",
+                        "members": ["{'name': 'X'}"],  # the bug we fixed
+                        "activity": "",
+                        "instrument": "EQSANS",
+                        "facility": "SNS",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _stub_token(httpx_mock)
+    httpx_mock.add_response(method="GET", url=EXPERIMENTS_RE, json=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config()) as client:
+        hits = await client.search_experiments("")
+    # Stale entry rejected; fresh OnCat fetch happened instead.
+    assert "IPTS-STALE" not in {h.ipts for h in hits}
 
 
 def test_normalise_datafile_extracts_daslogs() -> None:
@@ -374,6 +410,7 @@ async def test_expired_disk_cache_triggers_refetch(
     cache_file.write_text(
         json.dumps(
             {
+                "version": oncat.CACHE_SCHEMA_VERSION,
                 "fetched_at": 0.0,  # epoch — definitely expired
                 "experiments": [
                     {
