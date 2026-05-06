@@ -115,19 +115,17 @@ def make_tile_figure(
     ncols = TILE_NCOLS
     nrows = math.ceil(n / ncols)
 
-    # Reserve room on the right for the shared colorbar + its tick labels.
-    # ``fig.colorbar(... ax=axes.ravel())`` auto-fits the bar to the data
-    # axes' bounding box, which matters because ``set_box_aspect(1)`` makes
-    # tiles square — a gridspec-column cbar would span the full figure
-    # height and dwarf single-row layouts.
-    fig_w = 2.4 * ncols + 1.0  # +1 inch for the cbar gutter
-    fig_h = 2.4 * nrows + 0.6  # +0.6 for bottom-left axis labels
+    # constrained_layout auto-sizes the inter-tile gaps, the cbar gutter,
+    # and the outer margins to fit every tick label without clipping —
+    # better than the manual subplots_adjust we used to drive.
+    fig_w = 2.6 * ncols
+    fig_h = 2.6 * nrows
     fig, axes = plt.subplots(
         nrows,
         ncols,
         figsize=(fig_w, fig_h),
         squeeze=False,
-        gridspec_kw={"wspace": 0.02, "hspace": 0.02},
+        layout="constrained",
     )
     axes_flat = axes.ravel()
 
@@ -169,7 +167,13 @@ def make_tile_figure(
             )
         ax.set_aspect("equal", adjustable="box")
         ax.set_box_aspect(1)
-        # Filename overlay in the panel — keeps tiles compact.
+        # Show qx / qy ticks + tick values on *every* tile — the user
+        # cares about the q range each panel covers. Keep the values
+        # tiny (labelsize=7, MaxNLocator(3)) so they don't crowd.
+        ax.xaxis.set_major_locator(MaxNLocator(3))
+        ax.yaxis.set_major_locator(MaxNLocator(3))
+        ax.tick_params(which="both", length=2, labelsize=7)
+        # Filename overlay in the panel — keeps the tiles compact.
         ax.text(
             0.5,
             0.98,
@@ -182,23 +186,18 @@ def make_tile_figure(
             transform=ax.transAxes,
             bbox={"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"},
         )
-        _hide_ticks(ax)
         if colorbar_mode == "independent":
             fig.colorbar(pcm, ax=ax)
         elif mappable_for_cbar is None:
             mappable_for_cbar = pcm
 
-    # Bottom-left tile keeps axis labels so the user has a reference
-    # for the (qx, qy) units.
-    bl = axes[nrows - 1, 0]
+    # Bottom-left tile carries the axis-name labels (Qx, Qy) — keeping
+    # them on every panel would crowd the layout. Tick *values* stay on
+    # every tile (set in the loop above).
     if n > 0:
-        for spine in bl.spines.values():
-            spine.set_visible(True)
+        bl = axes[nrows - 1, 0]
         bl.set_xlabel(r"$Q_x$ (Å$^{-1}$)")
         bl.set_ylabel(r"$Q_y$ (Å$^{-1}$)")
-        bl.xaxis.set_major_locator(MaxNLocator(4))
-        bl.yaxis.set_major_locator(MaxNLocator(4))
-        bl.tick_params(which="both", length=2, labelsize=8)
 
     if colorbar_mode == "shared" and mappable_for_cbar is not None:
         # ``ax=axes_flat.tolist()`` makes matplotlib steal a slice from the
