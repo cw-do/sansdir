@@ -184,6 +184,69 @@ def test_ipts_label_falls_back_to_id() -> None:
     assert oncat._ipts_label({}) == ""
 
 
+def test_experiment_ipts_number_extracts_numeric_part() -> None:
+    e = oncat.Experiment(
+        ipts="IPTS-37211",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+    )
+    assert e.ipts_number == 37211
+
+
+def test_experiment_ipts_number_zero_when_unparseable() -> None:
+    e = oncat.Experiment(
+        ipts="",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+    )
+    assert e.ipts_number == 0
+
+
+def test_experiment_sort_date_key_prefers_end_then_start() -> None:
+    e1 = oncat.Experiment(
+        ipts="IPTS-1",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+        acquisition_start="2024-01-01",
+        acquisition_end="2024-01-05",
+    )
+    e2 = oncat.Experiment(
+        ipts="IPTS-2",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+        acquisition_start="2024-02-01",
+        acquisition_end="",
+    )
+    e3 = oncat.Experiment(
+        ipts="IPTS-3",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+    )
+    assert e1.sort_date_key == "2024-01-05"
+    assert e2.sort_date_key == "2024-02-01"
+    assert e3.sort_date_key == ""
+
+
 async def test_cache_with_old_schema_version_is_discarded(
     httpx_mock,  # type: ignore[no-untyped-def]
     tmp_path: Path,

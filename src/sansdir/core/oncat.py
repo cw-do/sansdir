@@ -95,6 +95,20 @@ class Experiment:
             return True
         return any(kw in m.lower() for m in self.members)
 
+    @property
+    def ipts_number(self) -> int:
+        """Numeric IPTS portion (e.g. ``"IPTS-12345"`` → ``12345``); 0 on miss."""
+        tail = self.ipts.rsplit("-", 1)[-1] if self.ipts else ""
+        try:
+            return int(tail)
+        except ValueError:
+            return 0
+
+    @property
+    def sort_date_key(self) -> str:
+        """Most recent acquisition end (or start) for date-sort; ``""`` if unknown."""
+        return self.acquisition_end or self.acquisition_start
+
     def cluster_path(self, root: str | None = None) -> Path:
         """Conventional on-disk path: ``/<FACILITY>/<INSTR>/IPTS-NNNNN``.
 

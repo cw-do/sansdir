@@ -235,3 +235,79 @@ async def test_f2_without_loaded_catalog_notifies(tmp_path: Path, fake_oncat_con
         # No catalog loaded → notification, no mode switch.
         assert not app._inactive_slot.catalog_visible
         await pilot.press("q")
+
+
+async def test_browser_default_sort_is_ipts_descending(
+    tmp_path: Path,
+    httpx_mock,  # type: ignore[no-untyped-def]
+    fake_oncat_config: Path,
+) -> None:
+    """Browser opens with the highest IPTS number on top."""
+    rows = [
+        {"id": "IPTS-100", "rank": 100, "title": "old", "size": 1},
+        {"id": "IPTS-300", "rank": 300, "title": "newest", "size": 3},
+        {"id": "IPTS-200", "rank": 200, "title": "middle", "size": 2},
+    ]
+    _stub_oauth_and_experiments(httpx_mock, rows)
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        from textual.widgets import ListView
+
+        browser = next(s for s in app.screen_stack if type(s).__name__ == "OnCatBrowserScreen")
+        lv = browser.query_one("#results-list", ListView)
+        ipts_in_order = [c.experiment.ipts for c in lv.children]  # type: ignore[attr-defined]
+        assert ipts_in_order == ["IPTS-300", "IPTS-200", "IPTS-100"]
+        await pilot.press("escape")
+        await pilot.press("q")
+
+
+async def test_browser_s_cycles_sort_mode(
+    tmp_path: Path,
+    httpx_mock,  # type: ignore[no-untyped-def]
+    fake_oncat_config: Path,
+) -> None:
+    """Pressing `s` switches IPTS-sort → date-sort and reorders the list."""
+    rows = [
+        {
+            "id": "IPTS-300",
+            "rank": 300,
+            "title": "old data",
+            "size": 1,
+            "activity": {"acquisition": ["2020-01-01", "2020-01-02"]},
+        },
+        {
+            "id": "IPTS-100",
+            "rank": 100,
+            "title": "fresh data",
+            "size": 1,
+            "activity": {"acquisition": ["2026-04-01", "2026-04-03"]},
+        },
+    ]
+    _stub_oauth_and_experiments(httpx_mock, rows)
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        from textual.widgets import ListView
+
+        browser = next(s for s in app.screen_stack if type(s).__name__ == "OnCatBrowserScreen")
+        lv = browser.query_one("#results-list", ListView)
+        # Default: IPTS↓
+        order = [c.experiment.ipts for c in lv.children]  # type: ignore[attr-defined]
+        assert order == ["IPTS-300", "IPTS-100"]
+        # `s` → date↓ (IPTS-100 has 2026 acquisition, IPTS-300 has 2020)
+        await pilot.press("s")
+        await pilot.pause()
+        order = [c.experiment.ipts for c in lv.children]  # type: ignore[attr-defined]
+        assert order == ["IPTS-100", "IPTS-300"]
+        # `s` again wraps back to IPTS↓
+        await pilot.press("s")
+        await pilot.pause()
+        order = [c.experiment.ipts for c in lv.children]  # type: ignore[attr-defined]
+        assert order == ["IPTS-300", "IPTS-100"]
+        await pilot.press("escape")
+        await pilot.press("q")

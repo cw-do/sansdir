@@ -2,12 +2,19 @@
 
 Mimics the ``/list *`` output of eqsanscli: each IPTS renders as two
 lines — bold cyan ``IPTS-NNNNN`` + title on top, then a dimmed line with
-``N runs · DATE_FROM — DATE_TO · members``. Up/Down navigates, ``/``
-focuses the filter input, Enter selects, Esc cancels.
+``N runs · DATE_FROM — DATE_TO · members``.
+
+* Up/Down — navigate
+* ``/`` — focus the filter input
+* ``s`` — cycle sort: IPTS-number (newest first, default) → date (newest
+  first); operates on the already-fetched listing, no OnCat round trip
+* Enter — pick highlighted IPTS
+* Esc — cancel
 """
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
@@ -96,9 +103,16 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("slash", "focus_filter", "Filter", show=False),
         Binding("/", "focus_filter", "Filter", show=False),
+        Binding("s", "cycle_sort", "Cycle sort", show=False),
     ]
 
+    SORT_MODES: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("ipts", "IPTS↓ (newest first)"),
+        ("date", "Date↓ (newest acquisition)"),
+    )
+
     filter_text: reactive[str] = reactive("")
+    sort_mode: reactive[str] = reactive("ipts")
 
     def __init__(
         self,
@@ -113,10 +127,7 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static(
-                f"OnCat — {len(self._all)} experiment(s)  [dim](press [b]/[/] to filter)[/dim]",
-                classes="title",
-            )
+            yield Static(self._title_text(), id="browser-title", classes="title")
             yield Input(
                 value=self._initial_keyword,
                 placeholder="filter by IPTS / title / member name",
@@ -126,12 +137,14 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
             )
             yield ListView(id="results-list")
             yield Static(
-                "[dim]↑/↓ navigate · Enter select · / filter · Esc cancel[/dim]",
+                "[dim]↑/↓ navigate · Enter select · / filter · s sort · Esc cancel[/dim]",
                 classes="hint",
             )
 
     def on_mount(self) -> None:
         self.filter_text = self._initial_keyword
+        # Reactives are already at their default values; force one render.
+        self._refresh_list()
         # Focus the list (not the filter) so up/down works immediately.
         if self._initial_keyword:
             self.query_one("#filter-input", Input).focus()
@@ -155,9 +168,16 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
     def watch_filter_text(self, _old: str, _new: str) -> None:
         self._refresh_list()
 
+    def watch_sort_mode(self, _old: str, _new: str) -> None:
+        self._refresh_list()
+        # Reflect the new mode in the title bar.
+        with contextlib.suppress(Exception):
+            self.query_one("#browser-title", Static).update(self._title_text())
+
     def _refresh_list(self) -> None:
         kw = self.filter_text.strip()
         matches = [e for e in self._all if e.matches(kw)]
+        matches = self._sorted(matches)
         try:
             lv = self.query_one("#results-list", ListView)
         except Exception:
@@ -168,8 +188,30 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         if matches:
             lv.index = 0
 
+    def _sorted(self, items: list[Experiment]) -> list[Experiment]:
+        if self.sort_mode == "date":
+            # Newest acquisition first; entries with no date go to the end.
+            return sorted(
+                items,
+                key=lambda e: (e.sort_date_key == "", e.sort_date_key),
+                reverse=True,
+            )
+        # Default: IPTS number, descending (highest = newest IPTS first).
+        return sorted(items, key=lambda e: e.ipts_number, reverse=True)
+
+    def _title_text(self) -> str:
+        mode_label = next(
+            (lbl for key, lbl in self.SORT_MODES if key == self.sort_mode),
+            self.sort_mode,
+        )
+        return (
+            f"OnCat — {len(self._all)} experiment(s)  "
+            f"[dim]· sort:[/] [b]{mode_label}[/]  "
+            "[dim](press [b]s[/] to cycle, [b]/[/] to filter)[/dim]"
+        )
+
     # ------------------------------------------------------------------
-    # Selection / cancel
+    # Selection / cancel / sort
     # ------------------------------------------------------------------
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
@@ -178,6 +220,11 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
 
     def action_focus_filter(self) -> None:
         self.query_one("#filter-input", Input).focus()
+
+    def action_cycle_sort(self) -> None:
+        keys = [k for k, _ in self.SORT_MODES]
+        idx = keys.index(self.sort_mode) if self.sort_mode in keys else -1
+        self.sort_mode = keys[(idx + 1) % len(keys)]
 
     def action_cancel(self) -> None:
         self.dismiss(None)
