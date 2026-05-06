@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sansdir.commands.registry import Command, CommandParam, CommandRegistry
-from sansdir.core import fileops
+from sansdir.core import archive, fileops, mailer
 from sansdir.core.filesystem import VALID_SORT_KEYS
 
 if TYPE_CHECKING:
@@ -532,6 +532,214 @@ def _make_app_browse_tree(app: AppProtocol) -> Command:
     )
 
 
+def _make_archive_zip(app: AppProtocol) -> Command:
+    def handler(srcs: list[str], out_path: str) -> str:
+        out = archive.make_zip([Path(s) for s in srcs], Path(out_path))
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return str(out)
+
+    return Command(
+        name="archive.zip",
+        description="Create a zip archive containing the given paths.",
+        params=(
+            CommandParam(name="srcs", type="files", description="Files/dirs to include."),
+            CommandParam(name="out_path", type="path", description="Output .zip path."),
+        ),
+        handler=handler,
+        examples=("archive.zip a.txt b.txt /tmp/out.zip",),
+    )
+
+
+def _make_archive_tar_gz(app: AppProtocol) -> Command:
+    def handler(srcs: list[str], out_path: str) -> str:
+        out = archive.make_tar_gz([Path(s) for s in srcs], Path(out_path))
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        return str(out)
+
+    return Command(
+        name="archive.tar_gz",
+        description="Create a gzip-compressed tar archive.",
+        params=(
+            CommandParam(name="srcs", type="files", description="Files/dirs to include."),
+            CommandParam(name="out_path", type="path", description="Output .tar.gz path."),
+        ),
+        handler=handler,
+        aliases=("tar",),
+        examples=("tar a.txt b.txt /tmp/out.tar.gz",),
+    )
+
+
+def _make_mail_send(app: AppProtocol) -> Command:
+    def handler(
+        recipient: str,
+        subject: str = "[sansdir] data",
+        attachments: list[str] | None = None,
+        body: str = "",
+    ) -> int:
+        from sansdir.config import load_config
+
+        cfg = load_config()
+        atts = [Path(a) for a in (attachments or [])]
+        result = mailer.send_mail(
+            recipient=recipient,
+            subject=subject,
+            attachments=atts,
+            body=body,
+            command=cfg.mail.command,
+        )
+        if result.ok:
+            app.notify_user(f"sent {len(atts)} attachment(s) to {recipient}")
+        else:
+            stderr = (result.stderr or "").strip().splitlines()[:1]
+            tail = stderr[0] if stderr else f"exit {result.returncode}"
+            app.notify_user(f"mail failed: {tail}", severity="error")
+        return result.returncode
+
+    return Command(
+        name="mail.send",
+        description="Send mail via the configured mail/mutt command.",
+        params=(
+            CommandParam(name="recipient", type="string", description="To address."),
+            CommandParam(
+                name="subject",
+                type="string",
+                description="Subject line.",
+                required=False,
+                default="[sansdir] data",
+            ),
+            CommandParam(
+                name="attachments",
+                type="files",
+                description="Files to attach.",
+                required=False,
+                default=[],
+            ),
+            CommandParam(
+                name="body",
+                type="string",
+                description="Plain-text body (sent on stdin).",
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        danger=True,
+    )
+
+
+def _make_ui_zip_tagged(app: AppProtocol) -> Command:
+    async def handler() -> str | None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.ui.dialogs import TextPromptDialog
+
+        srcs = app.active_panel.selection()
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return None
+        default_name = f"{app.active_panel.cwd.name or 'archive'}.zip"
+        if not isinstance(app, _RealApp):
+            return None  # pragma: no cover — only meaningful in real app
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str | None] = loop.create_future()
+
+        def _cb(value: str | None) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        app.push_screen(
+            TextPromptDialog(
+                f"zip {len(srcs)} item(s) into the inactive pane",
+                default=default_name,
+                title="Archive name",
+            ),
+            _cb,
+        )
+        name = await fut
+        if not name:
+            return None
+        out = app.inactive_panel.cwd / name
+        try:
+            archive.make_zip(srcs, out)
+        except (FileExistsError, OSError, ValueError) as exc:
+            app.notify_user(f"zip failed: {exc}", severity="error")
+            return None
+        app.inactive_panel.refresh_listing()
+        app.active_panel.refresh_listing()
+        app.notify_user(f"created {out}")
+        return str(out)
+
+    return Command(
+        name="ui.zip_tagged",
+        description="Prompt for an archive name and zip the active selection.",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_ui_mail_tagged(app: AppProtocol) -> Command:
+    async def handler() -> int | None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.config import load_config
+        from sansdir.ui.dialogs import MailDialog
+
+        srcs = app.active_panel.selection()
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return None
+        if not isinstance(app, _RealApp):
+            return None  # pragma: no cover
+        cfg = load_config()
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[dict | None] = loop.create_future()
+
+        def _cb(value: dict | None) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        summary = ", ".join(p.name for p in srcs[:5])
+        if len(srcs) > 5:
+            summary += f" (+{len(srcs) - 5} more)"
+        app.push_screen(
+            MailDialog(
+                attachments_summary=summary,
+                default_subject=cfg.mail.default_subject,
+            ),
+            _cb,
+        )
+        data = await fut
+        if not data:
+            return None
+        try:
+            result = mailer.send_mail(
+                recipient=data["recipient"],
+                subject=data["subject"] or cfg.mail.default_subject,
+                attachments=srcs,
+                body=data["body"],
+                command=cfg.mail.command,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            app.notify_user(f"mail failed: {exc}", severity="error")
+            return None
+        if result.ok:
+            app.notify_user(f"sent {len(srcs)} attachment(s) to {data['recipient']}")
+        else:
+            tail = (result.stderr or f"exit {result.returncode}").strip().splitlines()[:1]
+            app.notify_user(
+                f"mail failed: {tail[0] if tail else 'unknown'}",
+                severity="error",
+            )
+        return result.returncode
+
+    return Command(
+        name="ui.mail_tagged",
+        description="Open the mail dialog and send the active selection as attachments.",
+        params=(),
+        handler=handler,
+    )
+
+
 def _make_view_file(app: AppProtocol) -> Command:
     def handler(path: str) -> None:
         from sansdir.ui.dialogs import FileViewer
@@ -680,6 +888,11 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_ui_copy_tagged(app),
         _make_ui_move_tagged(app),
         _make_ui_delete_tagged(app),
+        _make_archive_zip(app),
+        _make_archive_tar_gz(app),
+        _make_mail_send(app),
+        _make_ui_zip_tagged(app),
+        _make_ui_mail_tagged(app),
         _make_view_file(app),
         _make_view_toggle_other_pane(app),
         _make_edit_file(app),

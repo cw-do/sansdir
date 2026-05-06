@@ -168,6 +168,9 @@ def default_keymap() -> list[KeyBinding]:
         # View / edit (Phase 2)
         KeyBinding("f3", "view.toggle_other_pane", "View in other pane"),
         KeyBinding("f4", "edit.file", "Edit file ($EDITOR)", _file_under_cursor),
+        # Archive / mail (Phase 3)
+        KeyBinding("z", "ui.zip_tagged", "Zip tagged"),
+        KeyBinding("e", "ui.mail_tagged", "Email tagged"),
         # File ops (Phase 2)
         KeyBinding("f5", "ui.copy_tagged", "Copy tagged → other pane"),
         KeyBinding("f6", "ui.move_tagged", "Move tagged → other pane"),

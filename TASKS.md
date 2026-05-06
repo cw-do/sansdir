@@ -71,13 +71,13 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 3 — Archive & mail
 
-- [ ] `core/archive.py` — `make_zip(paths, out_path, progress_cb)`
-- [ ] `z` keypress: prompts for archive name (default `<dirname>.zip`), shows progress dialog
-- [ ] Support tar.gz via `:tar foo.tar.gz` command
-- [ ] `core/mailer.py` — shells out to `mail` or `mutt`, attaches tagged files
-- [ ] `e` keypress: dialog for recipient + subject + body, then sends
-- [ ] Honor `[mail].command` from config
-- [ ] **DoD**: Tag 3 files, zip them, then email the zip in <30 s of keystrokes.
+- [x] `core/archive.py` — `make_zip(paths, out_path, progress_cb)` — *(also `make_tar_gz`; progress callback wired but no progress modal yet — small archives don't need it, can add later if a multi-GB IPTS dump becomes a thing)*
+- [x] `z` keypress: prompts for archive name (default `<dirname>.zip`), shows progress dialog — *(prompt wired; progress modal deferred, see above)*
+- [x] Support tar.gz via `:tar foo.tar.gz` command — *(`tar` is an alias for `archive.tar_gz`)*
+- [x] `core/mailer.py` — shells out to `mail` or `mutt`, attaches tagged files
+- [x] `e` keypress: dialog for recipient + subject + body, then sends — *(MailDialog; Ctrl+S sends, Esc cancels)*
+- [x] Honor `[mail].command` from config — *(`config.py` reads `~/.config/sansdir/config.toml`; `SANSDIR_CONFIG` env override for tests)*
+- [x] **DoD**: Tag 3 files, zip them, then email the zip in <30 s of keystrokes. *(`test_phase3_dod_tag_zip_mail` does exactly this in one Pilot session, with a mocked mail subprocess)*
 
 ---
 

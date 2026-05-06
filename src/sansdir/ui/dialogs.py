@@ -259,3 +259,116 @@ class DirectoryTreeDialog(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class MailDialog(ModalScreen[dict | None]):
+    """Recipient + subject + body modal.
+
+    Returns ``{"recipient", "subject", "body"}`` on submit, or ``None`` on
+    Esc / Ctrl+C. The list of attachments is computed by the caller from
+    the active pane's selection — the dialog only collects the human
+    inputs.
+    """
+
+    DEFAULT_CSS = """
+    MailDialog {
+        align: center middle;
+    }
+    MailDialog > Vertical {
+        background: $surface;
+        border: round $accent;
+        padding: 1 2;
+        width: 80%;
+        height: auto;
+    }
+    MailDialog .title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    MailDialog .field-label {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    MailDialog .body-input {
+        height: 8;
+        border: round $surface;
+    }
+    MailDialog Center {
+        margin-top: 1;
+    }
+    MailDialog Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("ctrl+c", "cancel", "Cancel", show=False),
+        Binding("ctrl+s", "submit", "Send", show=False),
+    ]
+
+    def __init__(
+        self,
+        *,
+        attachments_summary: str = "",
+        default_subject: str = "",
+        default_recipient: str = "",
+    ) -> None:
+        super().__init__()
+        self._summary = attachments_summary
+        self._default_subject = default_subject
+        self._default_recipient = default_recipient
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input, TextArea
+
+        with Vertical():
+            yield Static("Send mail", classes="title")
+            if self._summary:
+                yield Static(f"attachments: {self._summary}")
+            yield Static("To:", classes="field-label")
+            yield Input(
+                value=self._default_recipient,
+                placeholder="user@example.com",
+                id="mail-to",
+                select_on_focus=False,
+            )
+            yield Static("Subject:", classes="field-label")
+            yield Input(
+                value=self._default_subject,
+                placeholder="subject",
+                id="mail-subj",
+                select_on_focus=False,
+            )
+            yield Static("Body:  (Ctrl+S to send, Esc to cancel)", classes="field-label")
+            yield TextArea("", id="mail-body", classes="body-input")
+            with Center():
+                yield Button("Send", id="send", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        from textual.widgets import Input
+
+        target = "mail-to" if not self._default_recipient else "mail-subj"
+        self.query_one(f"#{target}", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "send":
+            self.action_submit()
+        else:
+            self.action_cancel()
+
+    def action_submit(self) -> None:
+        from textual.widgets import Input, TextArea
+
+        recipient = self.query_one("#mail-to", Input).value.strip()
+        subject = self.query_one("#mail-subj", Input).value.strip()
+        body = self.query_one("#mail-body", TextArea).text
+        if not recipient:
+            self.app.notify("recipient is required", severity="warning")
+            self.query_one("#mail-to", Input).focus()
+            return
+        self.dismiss({"recipient": recipient, "subject": subject, "body": body})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
