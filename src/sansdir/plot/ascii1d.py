@@ -66,38 +66,61 @@ class Iq1D:
 def read_iq(path: Path) -> Iq1D:
     """Load 2/3/4-col ``q I(q) [sigma_I] [sigma_q]`` from ``path``.
 
-    Auto-detects the delimiter (comma for CSV, whitespace otherwise) by
-    sniffing the first non-comment line. The 4th column (sigma_q) is
-    read but discarded — see PLANNING.md §4.1.
+    Tolerant of:
+
+    * ``#``-prefixed comment lines (skipped),
+    * mixed comma- and whitespace-delimited rows,
+    * stray non-numeric header lines (e.g. a count row like just ``3``),
+    * blank lines.
+
+    We don't lean on :func:`numpy.loadtxt` because real EQSANS
+    transmission files routinely have a header row that's a single
+    integer (sample count), then CSV data after — that combination
+    breaks loadtxt's strict "every row has the same shape" rule.
+
+    The 4th column (sigma_q) is read but discarded per PLANNING.md §4.1.
     """
-    delim = _detect_delimiter(path)
-    data = np.loadtxt(path, comments="#", ndmin=2, delimiter=delim)
-    if data.shape[1] < 2:
-        raise ValueError(f"{path}: need at least 2 columns, got {data.shape[1]}")
+    from collections import Counter
+
+    rows: list[list[float]] = []
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = _split_row(line)
+            try:
+                values = [float(p) for p in parts]
+            except ValueError:
+                # Header row with names, count rows, etc. — silently skipped.
+                continue
+            if values:
+                rows.append(values)
+    if not rows:
+        raise ValueError(f"{path}: no numeric rows found")
+    # Pick the dominant column count and discard everything else. This
+    # is what filters a stray "3" sample-count row away from the real
+    # 3-column data block.
+    target_cols = Counter(len(r) for r in rows).most_common(1)[0][0]
+    rows = [r for r in rows if len(r) == target_cols]
+    if target_cols < 2:
+        raise ValueError(f"{path}: need at least 2 columns, got {target_cols}")
+    data = np.asarray(rows, dtype=float)
     q = data[:, 0]
     intensity = data[:, 1]
     sigma_i = data[:, 2] if data.shape[1] >= 3 else None
     return Iq1D(path=Path(path), q=q, intensity=intensity, sigma_i=sigma_i)
 
 
-def _detect_delimiter(path: Path) -> str | None:
-    """Sniff the column separator. ``","`` for CSV, ``None`` (=whitespace) else.
+def _split_row(line: str) -> list[str]:
+    """Split one data row, preferring commas when present, else whitespace.
 
-    Returns ``None`` when the file is empty or unreadable so :func:`np.loadtxt`
-    falls back to its default behavior (any whitespace).
+    Per-row rather than per-file because some files mix the two — the
+    header might use spaces while the data block is CSV.
     """
-    try:
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                # Comma wins if present — CSV-with-spaces is much more
-                # common than tab-with-stray-comma.
-                return "," if "," in line else None
-    except OSError:
-        return None
-    return None
+    if "," in line:
+        return [s.strip() for s in line.split(",") if s.strip()]
+    return line.split()
 
 
 def read_transmission(path: Path) -> Iq1D:

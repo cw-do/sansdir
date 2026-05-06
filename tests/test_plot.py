@@ -202,6 +202,56 @@ def test_read_iq_csv(tmp_path: Path) -> None:
     assert ds.sigma_i[0] == pytest.approx(0.00465712)
 
 
+def test_read_iq_skips_count_header_row(tmp_path: Path) -> None:
+    """Real EQSANS transmission files: '#' header, a lone count row, then CSV data.
+
+    Regression for ValueError: could not convert '2.76523,0.845023,0.0019281'
+    to float64 — loadtxt couldn't cope with a single-column row mixed in
+    with three-column CSV.
+    """
+    f = tmp_path / "sample_trans.txt"
+    f.write_text(
+        "# wavelength T sigT\n"
+        "3\n"  # count row — must be silently dropped
+        "2.76523,0.845023,0.0019281\n"
+        "3.10000,0.84800,0.00200\n"
+        "4.00000,0.86000,0.00250\n",
+        encoding="utf-8",
+    )
+    ds = ascii1d.read_iq(f)
+    assert ds.q.shape == (3,)
+    assert ds.q[0] == pytest.approx(2.76523)
+    assert ds.intensity[2] == pytest.approx(0.86000)
+
+
+def test_read_iq_handles_mixed_delimiters(tmp_path: Path) -> None:
+    """Whitespace header line, CSV data block — both should be read in."""
+    f = tmp_path / "weird.dat"
+    f.write_text(
+        "# x y\n"
+        "1.0 2.0 3.0\n"  # whitespace
+        "4.0,5.0,6.0\n"  # comma
+        "7.0\t8.0\t9.0\n",  # tab → whitespace branch
+        encoding="utf-8",
+    )
+    ds = ascii1d.read_iq(f)
+    assert ds.q.shape == (3,)
+    assert list(ds.q) == [1.0, 4.0, 7.0]
+
+
+def test_read_iq_skips_text_header_without_hash(tmp_path: Path) -> None:
+    f = tmp_path / "x.dat"
+    f.write_text(
+        "wavelength T sigT\n"  # text header without #
+        "2.5 0.9 0.01\n"
+        "3.0 0.85 0.01\n",
+        encoding="utf-8",
+    )
+    ds = ascii1d.read_iq(f)
+    assert ds.q.shape == (2,)
+    assert ds.q[0] == pytest.approx(2.5)
+
+
 def test_plot_transmission_csv_writes_png(tmp_path: Path) -> None:
     """Regression: CSV-formatted transmission files plot without crashing."""
     f = tmp_path / "sample_trans.txt"
