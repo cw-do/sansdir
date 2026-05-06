@@ -650,7 +650,10 @@ def _make_ui_zip_tagged(app: AppProtocol) -> Command:
 
         app.push_screen(
             TextPromptDialog(
-                f"zip {len(srcs)} item(s) into the inactive pane",
+                (
+                    f"zip {len(srcs)} item(s) — bare name or 'sub/x.zip' is "
+                    "relative to the active pane; '/abs/path' is absolute"
+                ),
                 default=default_name,
                 title="Archive name",
             ),
@@ -659,20 +662,28 @@ def _make_ui_zip_tagged(app: AppProtocol) -> Command:
         name = await fut
         if not name:
             return None
-        out = app.inactive_panel.cwd / name
+        # Resolve the user's input as a filesystem path:
+        # - absolute path → use as-is
+        # - relative path (incl. ``..`` segments) → relative to *active* pane
+        target = Path(name).expanduser()
+        if not target.is_absolute():
+            target = app.active_panel.cwd / target
+        target = target.resolve()
         try:
-            archive.make_zip(srcs, out)
+            archive.make_zip(srcs, target)
         except (FileExistsError, OSError, ValueError) as exc:
             app.notify_user(f"zip failed: {exc}", severity="error")
             return None
-        app.inactive_panel.refresh_listing()
-        app.active_panel.refresh_listing()
-        app.notify_user(f"created {out}")
-        return str(out)
+        # Refresh whichever panes show the directory the zip landed in.
+        for panel in (app.active_panel, app.inactive_panel):
+            if target.parent == panel.cwd:
+                panel.refresh_listing()
+        app.notify_user(f"created {target}")
+        return str(target)
 
     return Command(
         name="ui.zip_tagged",
-        description="Prompt for an archive name and zip the active selection.",
+        description="Prompt for an archive path and zip the active selection.",
         params=(),
         handler=handler,
     )

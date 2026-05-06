@@ -40,27 +40,76 @@ def _real_app(tmp_path: Path) -> SansdirApp:
 # ---------------------------------------------------------------------------
 
 
-async def test_z_zips_tagged_into_inactive_pane(tmp_path: Path) -> None:
+async def test_z_default_saves_in_active_pane(tmp_path: Path) -> None:
+    """Default archive name (no path) writes into the *active* pane."""
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        # Tag every .dat file via tag-glob.
         await pilot.press("+")
         for ch in "*.dat":
             await pilot.press(ch)
         await pilot.press("enter")
         await pilot.pause()
         assert len(app.active_panel.tags) == 3
-        # `z` opens the prompt with a default name — accept it.
         await pilot.press("z")
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("enter")  # accept default `L.zip`
         await pilot.pause()
-        # Default name is `<active-cwd-basename>.zip` → "L.zip".
-        out = app.inactive_panel.cwd / "L.zip"
-        assert out.exists(), f"expected zip at {out}"
+        out = app.active_panel.cwd / "L.zip"
+        assert out.exists(), f"expected zip in active pane at {out}"
+        # Inactive pane untouched.
+        assert not (app.inactive_panel.cwd / "L.zip").exists()
         with zipfile.ZipFile(out) as zf:
             assert sorted(zf.namelist()) == ["a.dat", "b.dat", "c.dat"]
+        await pilot.press("q")
+
+
+async def test_z_relative_dotdot_writes_to_parent(tmp_path: Path) -> None:
+    """`../foo.zip` saves in the parent of the active pane."""
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("+")
+        for ch in "*.dat":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("z")
+        await pilot.pause()
+        # Clear the default name and type a relative path with `..`.
+        await pilot.press("ctrl+u")  # standard "kill line backward" in inputs
+        for ch in "../shared.zip":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        # Parent of active pane (= tmp_path).
+        out = (app.active_panel.cwd / "../shared.zip").resolve()
+        assert out.exists(), f"expected zip at {out}"
+        assert out.parent == tmp_path
+        await pilot.press("q")
+
+
+async def test_z_absolute_path_saves_there(tmp_path: Path) -> None:
+    """`/abs/path/x.zip` saves at the given absolute location."""
+    target_dir = tmp_path / "elsewhere"
+    target_dir.mkdir()
+    target = target_dir / "test.zip"
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("+")
+        for ch in "*.dat":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("z")
+        await pilot.pause()
+        await pilot.press("ctrl+u")
+        for ch in str(target):
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert target.exists(), f"expected zip at {target}"
         await pilot.press("q")
 
 
@@ -90,6 +139,7 @@ async def test_z_can_be_cancelled(tmp_path: Path) -> None:
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
+        assert not (app.active_panel.cwd / "L.zip").exists()
         assert not (app.inactive_panel.cwd / "L.zip").exists()
         await pilot.press("q")
 
@@ -189,20 +239,27 @@ async def test_phase3_dod_tag_zip_mail(tmp_path: Path, monkeypatch: pytest.Monke
             await pilot.press(ch)
         await pilot.press("enter")
         await pilot.pause()
-        # 2. Zip into the inactive pane (default name).
+        # 2. Zip into the active pane (default name) — clears tags.
         await pilot.press("z")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        zip_path = app.inactive_panel.cwd / "L.zip"
+        zip_path = app.active_panel.cwd / "L.zip"
         assert zip_path.exists()
-        # 3. Switch to the inactive pane (now holding the zip), tag the zip.
-        await pilot.press("tab")
+        # 3. Replace the tag set with just the zip — clear, then tag-glob it.
+        await pilot.press(":")
         await pilot.pause()
-        # The zip should be visible in the now-active pane.
-        await pilot.press("down")  # off ".."
+        for ch in "tag.clear":
+            await pilot.press(ch)
+        await pilot.press("enter")
         await pilot.pause()
-        await pilot.press("space")
+        await pilot.press("+")
+        await pilot.pause()
+        for ch in "L.zip":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert {p.name for p in app.active_panel.tags} == {"L.zip"}
         await pilot.pause()
         # 4. Mail it.
         await pilot.press("e")
@@ -214,4 +271,6 @@ async def test_phase3_dod_tag_zip_mail(tmp_path: Path, monkeypatch: pytest.Monke
         assert captured["argv"] is not None
         assert captured["argv"][-1] == "lab@example.com"
         assert str(zip_path.resolve()) in captured["argv"]
+        # Exactly one attachment — the zip.
+        assert captured["argv"].count("-a") == 1
         await pilot.press("q")
