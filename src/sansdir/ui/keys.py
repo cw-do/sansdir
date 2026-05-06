@@ -162,6 +162,7 @@ def default_keymap() -> list[KeyBinding]:
             _prompt_untag_glob,
             show_in_help=False,
         ),
+        KeyBinding("U", "tag.clear", "Untag all"),
         # View
         KeyBinding("h", "view.toggle_hidden", "Toggle hidden files"),
         KeyBinding("s", "view.set_sort", "Sort by name", _sort_name, show_in_help=False),
