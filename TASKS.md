@@ -83,15 +83,15 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 4 — OnCat IPTS search
 
-- [ ] Study `eqsanscli` `/load ipts` implementation; document endpoints in `PLANNING.md` §6
-- [ ] `core/oncat.py` async client using `httpx.AsyncClient`
-- [ ] `search_experiments(keyword, instrument=None, limit=50)` returns list of dataclasses
-- [ ] `list_runs(ipts, instrument)` for browsing within an IPTS
-- [ ] Cache layer (in-memory dict + optional disk JSON cache, TTL from config)
-- [ ] `i` keypress / `:ipts <kw>` opens results modal; arrows + Enter to cd into the IPTS
-- [ ] Error handling: timeout, network down, empty results — surface in status bar
-- [ ] Mock-based tests with `pytest-httpx`
-- [ ] **DoD**: Type `i bio-membrane`, see candidate IPTS list within 2 s, Enter jumps to `/SNS/EQSANS/IPTS-NNNNN/`.
+- [x] Study `eqsanscli` `/load ipts` implementation; document endpoints in `PLANNING.md` §6 — *(eqsanscli uses `pyoncat` w/ OAuth client_credentials; we re-implement on `httpx`)*
+- [x] `core/oncat.py` async client using `httpx.AsyncClient`
+- [x] `search_experiments(keyword, instrument=None, limit=50)` returns list of dataclasses
+- [x] `list_runs(ipts, instrument)` for browsing within an IPTS — *(named `list_datafiles`; not yet wired to a UI command — `:ipts` only opens the experiment results modal for now)*
+- [x] Cache layer (in-memory dict + optional disk JSON cache, TTL from config)
+- [x] `i` keypress / `:ipts <kw>` opens results modal; arrows + Enter to cd into the IPTS
+- [x] Error handling: timeout, network down, empty results — surface in status bar — *(OnCatAuthError, OnCatNetworkError, empty list each notify)*
+- [x] Mock-based tests with `pytest-httpx`
+- [x] **DoD**: Type `i bio-membrane`, see candidate IPTS list within 2 s, Enter jumps to `/SNS/EQSANS/IPTS-NNNNN/`. *(test_phase4_dod_i_search_and_cd performs exactly this with mocked OnCat responses; cluster path is monkey-patched to a tmp_path so the test can verify `cd` happens)*
 
 ---
 

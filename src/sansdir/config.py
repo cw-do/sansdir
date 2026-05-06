@@ -36,10 +36,30 @@ class MailConfig:
 
 
 @dataclass(frozen=True)
+class OnCatConfig:
+    """``[oncat]`` section.
+
+    The ORNL OnCat REST API requires OAuth2 ``client_credentials``. We do
+    not bundle credentials with the source — set them in the config file
+    or via the ``ONCAT_CLIENT_ID`` / ``ONCAT_CLIENT_SECRET`` env vars.
+    Users on the ORNL analysis cluster typically have them in their
+    home directory already.
+    """
+
+    endpoint: str = "https://oncat.ornl.gov"
+    client_id: str = ""
+    client_secret: str = ""
+    default_instrument: str = "EQSANS"
+    cache_ttl_seconds: int = 86400
+    request_timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
 class Config:
     """Top-level config. Add new sections here as later phases need them."""
 
     mail: MailConfig = MailConfig()
+    oncat: OnCatConfig = OnCatConfig()
 
 
 def default_config_path() -> Path:
@@ -67,9 +87,26 @@ def load_config(path: Path | None = None) -> Config:
     except OSError:
         return Config()
     mail_section = data.get("mail", {}) if isinstance(data, dict) else {}
+    oncat_section = data.get("oncat", {}) if isinstance(data, dict) else {}
     return Config(
         mail=MailConfig(
             command=str(mail_section.get("command", MailConfig.command)),
             default_subject=str(mail_section.get("default_subject", MailConfig.default_subject)),
+        ),
+        oncat=OnCatConfig(
+            endpoint=str(oncat_section.get("endpoint", OnCatConfig.endpoint)),
+            client_id=str(oncat_section.get("client_id", os.environ.get("ONCAT_CLIENT_ID", ""))),
+            client_secret=str(
+                oncat_section.get("client_secret", os.environ.get("ONCAT_CLIENT_SECRET", ""))
+            ),
+            default_instrument=str(
+                oncat_section.get("default_instrument", OnCatConfig.default_instrument)
+            ),
+            cache_ttl_seconds=int(
+                oncat_section.get("cache_ttl_seconds", OnCatConfig.cache_ttl_seconds)
+            ),
+            request_timeout_seconds=float(
+                oncat_section.get("request_timeout_seconds", OnCatConfig.request_timeout_seconds)
+            ),
         ),
     )

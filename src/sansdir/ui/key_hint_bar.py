@@ -32,6 +32,7 @@ HINT_ORDER: tuple[str, ...] = (
     "e",
     "/",
     "g",
+    "i",
     ":",
     "?",
 )
@@ -55,6 +56,7 @@ LABEL_OVERRIDES: dict[str, str] = {
     "e": "Email",
     "/": "Filter",
     "g": "Goto",
+    "i": "IPTS",
     ":": "Cmd",
     "?": "Help",
 }
@@ -77,6 +79,7 @@ KEY_DISPLAY: dict[str, str] = {
     "e": "e",
     "/": "/",
     "g": "g",
+    "i": "i",
     ":": ":",
     "?": "?",
 }

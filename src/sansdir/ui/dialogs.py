@@ -297,6 +297,88 @@ class DirectoryTreeDialog(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class OnCatResultsDialog(ModalScreen[object]):
+    """Browseable list of OnCat experiments. Enter returns the chosen one.
+
+    The dialog itself does no I/O — the caller passes a pre-fetched list of
+    :class:`~sansdir.core.oncat.Experiment` objects (so the modal can be
+    unit-tested without network) and gets back either the selected
+    Experiment or ``None`` on cancel.
+    """
+
+    DEFAULT_CSS = """
+    OnCatResultsDialog {
+        align: center middle;
+    }
+    OnCatResultsDialog > Vertical {
+        background: $surface;
+        border: round $accent;
+        padding: 1 2;
+        width: 90%;
+        height: 80%;
+    }
+    OnCatResultsDialog .title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    OnCatResultsDialog .hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("q", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, experiments: list, *, keyword: str = "") -> None:  # type: ignore[type-arg]
+        super().__init__()
+        self._experiments = experiments
+        self._keyword = keyword
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import DataTable
+
+        title = (
+            f"OnCat results for {self._keyword!r} — {len(self._experiments)} match(es)"
+            if self._keyword
+            else f"OnCat — {len(self._experiments)} experiment(s)"
+        )
+        with Vertical():
+            yield Static(title, classes="title")
+            table: DataTable = DataTable(id="oncat-table", cursor_type="row", show_header=True)
+            table.add_columns("IPTS", "Title", "PI / Members", "Last activity")
+            for e in self._experiments:
+                table.add_row(
+                    e.ipts,
+                    e.title,
+                    ", ".join(e.members) if e.members else "",
+                    e.activity,
+                )
+            yield table
+            yield Static(
+                "[dim]Enter to cd into the IPTS · Esc / q to cancel[/dim]",
+                classes="hint",
+            )
+
+    def on_mount(self) -> None:
+        from textual.widgets import DataTable
+
+        if self._experiments:
+            self.query_one("#oncat-table", DataTable).focus()
+
+    def on_data_table_row_selected(self, event) -> None:  # type: ignore[no-untyped-def]
+        idx = event.cursor_row
+        if 0 <= idx < len(self._experiments):
+            self.dismiss(self._experiments[idx])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class MailDialog(ModalScreen[dict | None]):
     """Recipient + subject + body modal.
 

@@ -1,0 +1,367 @@
+"""Async OnCat client.
+
+Cross-checked against the ``pyoncat`` usage in ``cw-do/eqsanscli``
+(``src/eqsanscli/integrations/oncat.py``); re-implemented in plain
+``httpx.AsyncClient`` so we don't take on a Mantid/PyORNL dependency.
+
+Auth flow: OAuth2 ``client_credentials`` grant against
+``/oauth/token``; the resulting bearer token is cached until just
+before its ``expires_in`` window closes. Endpoints, credentials, and
+the cache TTL all come from :class:`sansdir.config.OnCatConfig` so a
+user can point at a staging instance or paste their own ``client_id``
+without touching code.
+
+OnCat doesn't expose a fuzzy "search by keyword" endpoint — instead we
+list every experiment for the configured instrument (cheap on the
+server, big-but-rare from our side) and filter client-side. The full
+listing is cached on disk for the configured TTL so subsequent
+searches are sub-second.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from sansdir.config import OnCatConfig
+from sansdir.core.history import default_history_path
+
+DEFAULT_PROJECTION_EXPERIMENT: tuple[str, ...] = (
+    "id",
+    "title",
+    "members",
+    "rank",
+    "size",
+    "activity",
+)
+DEFAULT_PROJECTION_DATAFILE: tuple[str, ...] = (
+    "indexed.run_number",
+    "metadata.entry.title",
+    "metadata.entry.start_time",
+    "metadata.entry.duration",
+)
+
+
+# ---------------------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Experiment:
+    """One row of OnCat experiment-list output, normalised."""
+
+    ipts: str  # e.g. "IPTS-12345"
+    title: str
+    pi: str
+    members: tuple[str, ...]
+    activity: str  # last-active date (free-text from OnCat)
+    instrument: str
+    facility: str
+
+    def matches(self, keyword: str) -> bool:
+        """Case-insensitive substring match against id / title / any member."""
+        if not keyword:
+            return True
+        kw = keyword.lower()
+        if kw in self.ipts.lower() or kw in self.title.lower():
+            return True
+        return any(kw in m.lower() for m in self.members)
+
+    def cluster_path(self, root: str = "/SNS") -> Path:
+        """Conventional on-disk path: ``/SNS/<INSTR>/IPTS-NNNNN``."""
+        return Path(root) / self.instrument / self.ipts
+
+
+@dataclass(frozen=True, slots=True)
+class Datafile:
+    """One run-file row from OnCat datafiles listing."""
+
+    run_number: int
+    title: str
+    start_time: str
+    duration_s: float
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class OnCatError(RuntimeError):
+    """Base for all OnCat-related failures surfaced to the UI."""
+
+
+class OnCatAuthError(OnCatError):
+    """Raised when OAuth fails or no credentials are configured."""
+
+
+class OnCatNetworkError(OnCatError):
+    """Connection or HTTP-level failure that isn't an auth issue."""
+
+
+# ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+
+
+def _cache_dir() -> Path:
+    return default_history_path().parent / "oncat"
+
+
+@dataclass
+class _CacheEntry:
+    fetched_at: float
+    experiments: list[Experiment] = field(default_factory=list)
+
+
+def _disk_path(instrument: str, facility: str) -> Path:
+    return _cache_dir() / f"{facility}-{instrument}-experiments.json"
+
+
+def _load_disk_cache(instrument: str, facility: str, ttl: float) -> list[Experiment] | None:
+    path = _disk_path(instrument, facility)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    fetched_at = float(data.get("fetched_at", 0))
+    if time.time() - fetched_at > ttl:
+        return None
+    rows = data.get("experiments", [])
+    return [Experiment(**_promote_members(r)) for r in rows]
+
+
+def _save_disk_cache(experiments: list[Experiment], instrument: str, facility: str) -> None:
+    path = _disk_path(instrument, facility)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "fetched_at": time.time(),
+                    "experiments": [{**asdict(e), "members": list(e.members)} for e in experiments],
+                },
+                indent=0,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _promote_members(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a raw cache row back into an Experiment-friendly dict."""
+    out = dict(raw)
+    out["members"] = tuple(out.get("members", []))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# OnCat client
+# ---------------------------------------------------------------------------
+
+
+class OnCatClient:
+    """Thin async wrapper around OnCat's REST API."""
+
+    def __init__(
+        self,
+        config: OnCatConfig,
+        *,
+        client: httpx.AsyncClient | None = None,
+        in_memory_cache: dict[str, _CacheEntry] | None = None,
+    ) -> None:
+        self._config = config
+        self._client = client or httpx.AsyncClient(
+            base_url=config.endpoint,
+            timeout=config.request_timeout_seconds,
+        )
+        self._owns_client = client is None
+        self._mem: dict[str, _CacheEntry] = in_memory_cache if in_memory_cache is not None else {}
+        self._token: str | None = None
+        self._token_expires_at: float = 0.0
+
+    async def __aenter__(self) -> OnCatClient:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    # ---- auth -----------------------------------------------------------
+
+    async def _get_token(self) -> str:
+        if self._token and time.time() < self._token_expires_at - 30:
+            return self._token
+        if not self._config.client_id or not self._config.client_secret:
+            raise OnCatAuthError(
+                "no OnCat credentials configured — set [oncat].client_id / "
+                "client_secret in ~/.config/sansdir/config.toml or the "
+                "ONCAT_CLIENT_ID / ONCAT_CLIENT_SECRET env vars"
+            )
+        try:
+            resp = await self._client.post(
+                "/oauth/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self._config.client_id,
+                    "client_secret": self._config.client_secret,
+                },
+            )
+        except httpx.RequestError as exc:
+            raise OnCatNetworkError(f"oauth request failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise OnCatAuthError(f"oauth failed: HTTP {resp.status_code} — {resp.text[:200]}")
+        body = resp.json()
+        token = str(body.get("access_token") or "")
+        if not token:
+            raise OnCatAuthError("oauth response missing access_token")
+        self._token = token
+        # Refresh slightly before the server-stated expiry.
+        self._token_expires_at = time.time() + float(body.get("expires_in", 3600))
+        return token
+
+    async def _get(self, path: str, params: dict[str, Any]) -> Any:
+        token = await self._get_token()
+        try:
+            resp = await self._client.get(
+                path,
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.RequestError as exc:
+            raise OnCatNetworkError(f"GET {path} failed: {exc}") from exc
+        if resp.status_code == 401:
+            # Maybe the token expired between check and use; retry once.
+            self._token = None
+            token = await self._get_token()
+            try:
+                resp = await self._client.get(
+                    path,
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            except httpx.RequestError as exc:
+                raise OnCatNetworkError(f"GET {path} retry failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise OnCatNetworkError(f"GET {path}: HTTP {resp.status_code} — {resp.text[:200]}")
+        return resp.json()
+
+    # ---- experiments ----------------------------------------------------
+
+    async def list_experiments(
+        self,
+        *,
+        instrument: str | None = None,
+        facility: str = "SNS",
+        use_cache: bool = True,
+    ) -> list[Experiment]:
+        """Return every experiment for ``instrument`` (cached)."""
+        instrument = instrument or self._config.default_instrument
+        cache_key = f"{facility}:{instrument}"
+        ttl = float(self._config.cache_ttl_seconds)
+        if use_cache and cache_key in self._mem:
+            entry = self._mem[cache_key]
+            if time.time() - entry.fetched_at <= ttl:
+                return entry.experiments
+        if use_cache:
+            on_disk = _load_disk_cache(instrument, facility, ttl)
+            if on_disk is not None:
+                self._mem[cache_key] = _CacheEntry(fetched_at=time.time(), experiments=on_disk)
+                return on_disk
+        rows = await self._get(
+            "/api/experiments",
+            {
+                "facility": facility,
+                "instrument": instrument,
+                "projection": list(DEFAULT_PROJECTION_EXPERIMENT),
+            },
+        )
+        experiments = [_normalise_experiment(r, instrument, facility) for r in rows]
+        self._mem[cache_key] = _CacheEntry(fetched_at=time.time(), experiments=experiments)
+        _save_disk_cache(experiments, instrument, facility)
+        return experiments
+
+    async def search_experiments(
+        self,
+        keyword: str,
+        *,
+        instrument: str | None = None,
+        facility: str = "SNS",
+        limit: int = 50,
+    ) -> list[Experiment]:
+        """Substring filter on a (cached) full instrument listing."""
+        all_exp = await self.list_experiments(instrument=instrument, facility=facility)
+        matches = [e for e in all_exp if e.matches(keyword)]
+        return matches[:limit]
+
+    # ---- datafiles ------------------------------------------------------
+
+    async def list_datafiles(
+        self,
+        ipts: str,
+        *,
+        instrument: str | None = None,
+        facility: str = "SNS",
+        exts: Iterable[str] = (".nxs.h5",),
+    ) -> list[Datafile]:
+        instrument = instrument or self._config.default_instrument
+        if not ipts.startswith("IPTS-"):
+            ipts = f"IPTS-{ipts}"
+        rows = await self._get(
+            "/api/datafiles",
+            {
+                "facility": facility,
+                "instrument": instrument,
+                "experiment": ipts,
+                "projection": list(DEFAULT_PROJECTION_DATAFILE),
+                "exts": list(exts),
+            },
+        )
+        return [_normalise_datafile(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Row normalisation
+# ---------------------------------------------------------------------------
+
+
+def _normalise_experiment(raw: dict[str, Any], instrument: str, facility: str) -> Experiment:
+    members_raw = raw.get("members") or []
+    members = (members_raw,) if isinstance(members_raw, str) else tuple(str(m) for m in members_raw)
+    return Experiment(
+        ipts=str(raw.get("id", "")),
+        title=str(raw.get("title", "")),
+        pi=members[0] if members else "",
+        members=members,
+        activity=str(raw.get("activity", "")),
+        instrument=instrument,
+        facility=facility,
+    )
+
+
+def _normalise_datafile(raw: dict[str, Any]) -> Datafile:
+    indexed = raw.get("indexed") or {}
+    metadata = (
+        raw.get("metadata", {}).get("entry", {}) if isinstance(raw.get("metadata"), dict) else {}
+    )
+    return Datafile(
+        run_number=int(indexed.get("run_number", 0)),
+        title=str(metadata.get("title", "")),
+        start_time=str(metadata.get("start_time", "")),
+        duration_s=float(metadata.get("duration", 0.0)),
+    )

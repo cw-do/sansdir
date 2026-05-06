@@ -327,7 +327,14 @@ class SansdirApp(App[int]):
         if not text:
             return
         self._history.append(text)
-        await self.run_command_line(text)
+        # Run command-line dispatch as a worker for the same reason the
+        # keymap path does: async handlers (e.g. ones that show a modal)
+        # would otherwise deadlock against the App event loop.
+        self.run_worker(
+            self.run_command_line(text),
+            name=f"cmdline:{text[:32]}",
+            exclusive=False,
+        )
 
     async def run_command_line(self, text: str) -> None:
         """Parse a ``:``-line and dispatch it through the registry.

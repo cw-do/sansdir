@@ -253,9 +253,29 @@ colormap_2d = "viridis"
 Port from <https://github.com/cw-do/eqsanscli> (the `/load ipts` command).
 Re-implement, do not vendor.
 
-### Endpoints (verify against eqsanscli)
-- `https://oncat.ornl.gov/api/experiments` — search by facility/instrument/keyword.
-- `https://oncat.ornl.gov/api/datafiles` — list runs in an IPTS.
+### Endpoints (cross-checked against eqsanscli's pyoncat usage)
+- `https://oncat.ornl.gov/oauth/token` — OAuth2 client_credentials grant.
+- `https://oncat.ornl.gov/api/experiments?facility=SNS&instrument=EQSANS&projection=...`
+  — list experiments. Per-experiment fields used: `id` ("IPTS-NNNNN"),
+  `title`, `members` (list of PI/co-investigators), `rank`, `size`,
+  `activity` (last-active date).
+- `https://oncat.ornl.gov/api/datafiles?facility=SNS&instrument=EQSANS&experiment=IPTS-NNNNN&exts=.nxs.h5&projection=...`
+  — list runs within an IPTS.
+
+### Auth
+OnCat requires an OAuth2 access token even for read-only endpoints. We
+use the same `client_credentials` flow eqsanscli uses but **do not**
+hardcode credentials — read them from `[oncat]` in
+`~/.config/sansdir/config.toml`, the env vars `ONCAT_CLIENT_ID` /
+`ONCAT_CLIENT_SECRET`, or fall back to anonymous (which fails with a
+clear status-bar message and a pointer to the config).
+
+### Free-text "keyword search"
+OnCat's REST API doesn't expose a fuzzy keyword endpoint. We list all
+experiments for the configured instrument once, cache that list (TTL
+per config — default 24 h), then filter client-side: substring match on
+`title`, `id`, and any element of `members`. This keeps every search
+sub-second after the first call without burdening OnCat.
 
 ### UX
 1. User types `i` or `:ipts <keyword>`.

@@ -493,6 +493,72 @@ def _make_ui_move_tagged(app: AppProtocol) -> Command:
     )
 
 
+def _make_oncat_search(app: AppProtocol) -> Command:
+    async def handler(keyword: str = "", instrument: str = "") -> None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.config import load_config
+        from sansdir.core.oncat import OnCatClient, OnCatError
+        from sansdir.ui.dialogs import OnCatResultsDialog
+
+        if not isinstance(app, _RealApp):
+            return None  # pragma: no cover
+        cfg = load_config()
+        instr = instrument or cfg.oncat.default_instrument
+        try:
+            async with OnCatClient(cfg.oncat) as client:
+                hits = await client.search_experiments(keyword, instrument=instr)
+        except OnCatError as exc:
+            app.notify_user(f"OnCat: {exc}", severity="error")
+            return None
+        if not hits:
+            app.notify_user(f"OnCat: no experiments match {keyword!r}", severity="warning")
+            return None
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[object] = loop.create_future()
+
+        def _cb(value: object) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        app.push_screen(OnCatResultsDialog(hits, keyword=keyword), _cb)
+        chosen = await fut
+        if chosen is None:
+            return None
+        target = chosen.cluster_path()  # type: ignore[attr-defined]
+        if not target.is_dir():
+            app.notify_user(
+                f"OnCat: chose {chosen.ipts} but {target} doesn't exist on this host",  # type: ignore[attr-defined]
+                severity="warning",
+            )
+            return None
+        app.active_panel.set_cwd(target)
+        return None
+
+    return Command(
+        name="oncat.search",
+        description="Search OnCat for an IPTS by keyword; Enter cds the active pane there.",
+        params=(
+            CommandParam(
+                name="keyword",
+                type="string",
+                description="Substring matched against IPTS / title / PI.",
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="instrument",
+                type="string",
+                description="Instrument (defaults to [oncat].default_instrument).",
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        aliases=("ipts",),
+        examples=("ipts bio-membrane", "ipts 12345"),
+    )
+
+
 def _make_app_browse_tree(app: AppProtocol) -> Command:
     async def handler(root: str = "/") -> str | None:
         from sansdir.app import SansdirApp as _RealApp
@@ -912,6 +978,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_view_toggle_other_pane(app),
         _make_edit_file(app),
         _make_app_browse_tree(app),
+        _make_oncat_search(app),
     ]
 
 

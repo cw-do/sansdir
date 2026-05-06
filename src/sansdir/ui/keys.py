@@ -104,6 +104,10 @@ def _filter_open(_app: AppProtocol) -> dict[str, Any]:
     return {"text": "filter "}
 
 
+def _prompt_ipts(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "ipts "}
+
+
 def _file_under_cursor(app: AppProtocol) -> dict[str, Any]:
     cur = app.active_panel.cursor_path
     return {"path": str(cur) if cur is not None else str(app.active_panel.cwd)}
@@ -180,6 +184,8 @@ def default_keymap() -> list[KeyBinding]:
         # Jump (Phase 2)
         KeyBinding("g", "app.cmdline_prompt", "Jump to path", _prompt_jump),
         KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
+        # OnCat IPTS search (Phase 4)
+        KeyBinding("i", "app.cmdline_prompt", "OnCat IPTS search", _prompt_ipts),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(
