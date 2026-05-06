@@ -25,19 +25,36 @@ DEFAULT_BACKEND_PRIORITY: tuple[str, ...] = ("QtAgg", "TkAgg", "GTK4Agg")
 
 
 def _pick_interactive_backend() -> str:
+    """Try each candidate backend until one *actually loads*, not just resolves.
+
+    ``matplotlib.use("QtAgg")`` only sets the rcParam; the backend module
+    isn't imported until a figure is created. So we have to call
+    ``plt.figure()`` to provoke the real load — that's what surfaces a
+    missing Qt binding before we waste time building data only to
+    fail later inside :func:`make_iq_figure`.
+    """
     import matplotlib
 
+    errors: list[str] = []
     for candidate in DEFAULT_BACKEND_PRIORITY:
         try:
             matplotlib.use(candidate, force=True)
-            import matplotlib.pyplot
+            import matplotlib.pyplot as plt
 
+            fig = plt.figure()
+            plt.close(fig)
             return candidate
-        except (ImportError, ValueError, RuntimeError):
+        except (ImportError, ValueError, RuntimeError) as exc:
+            errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
             continue
-    raise RuntimeError(
-        f"no interactive matplotlib backend available (tried {list(DEFAULT_BACKEND_PRIORITY)})"
+    msg = "no interactive matplotlib backend available\n  " + "\n  ".join(errors)
+    msg += (
+        "\n\nFix one of:\n"
+        '  - pip install "sansdir[qt]"           # installs PyQt5\n'
+        "  - dnf install python3-tkinter         # system Tk (Linux)\n"
+        "  - SANSDIR_HEADLESS=1 sansdir          # write PNGs instead"
     )
+    raise RuntimeError(msg)
 
 
 def main(argv: list[str] | None = None) -> int:
