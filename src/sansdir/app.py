@@ -209,6 +209,26 @@ class SansdirApp(App[int]):
     def is_other_pane_viewing(self) -> bool:
         return self._inactive_slot.viewer_visible
 
+    def show_catalog_in_other_pane(self, ipts: str, files: list) -> None:  # type: ignore[type-arg]
+        """Mount the OnCat run catalog for ``ipts`` in the inactive pane."""
+        self._inactive_slot.show_catalog(ipts, files)
+        # Active pane keeps focus so the user can keep navigating files.
+        self.set_focus(self.active_panel)
+
+    def toggle_other_pane_catalog(self) -> None:
+        """F2 — flip the inactive pane between filelist and (last-loaded) catalog."""
+        slot = self._inactive_slot
+        if slot.catalog_visible:
+            slot.show_panel()
+        elif slot.has_catalog:
+            slot.show_catalog(slot.catalog.ipts, slot.catalog.files)
+        else:
+            self.notify_user(
+                "no run catalog loaded yet — press `i` to pick an IPTS first",
+                severity="warning",
+            )
+        self.set_focus(self.active_panel)
+
     @property
     def _active_slot(self) -> PaneSlot:
         return self._left_slot if self._active_id == "left" else self._right_slot

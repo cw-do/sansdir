@@ -498,50 +498,78 @@ def _make_oncat_search(app: AppProtocol) -> Command:
         from sansdir.app import SansdirApp as _RealApp
         from sansdir.config import load_config
         from sansdir.core.oncat import OnCatClient, OnCatError
-        from sansdir.ui.dialogs import OnCatResultsDialog
+        from sansdir.ui.dialogs import ConfirmDialog
+        from sansdir.ui.oncat_browser import OnCatBrowserScreen
 
         if not isinstance(app, _RealApp):
             return None  # pragma: no cover
         cfg = load_config()
         instr = instrument or cfg.oncat.default_instrument
+
+        async def _push_modal(screen) -> object:  # type: ignore[no-untyped-def]
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future[object] = loop.create_future()
+
+            def _cb(value: object) -> None:
+                if not fut.done():
+                    fut.set_result(value)
+
+            app.push_screen(screen, _cb)
+            return await fut
+
         try:
             async with OnCatClient(cfg.oncat) as client:
-                hits = await client.search_experiments(keyword, instrument=instr)
+                # Pull the full instrument listing once — the browser
+                # filters client-side via its own `/` input.
+                experiments = await client.list_experiments(instrument=instr)
+                initial_keyword = keyword or ""
+                if not experiments:
+                    app.notify_user(
+                        f"OnCat: no experiments registered for {instr}",
+                        severity="warning",
+                    )
+                    return None
+                chosen = await _push_modal(OnCatBrowserScreen(experiments, keyword=initial_keyword))
+                if chosen is None:
+                    return None
+                # `chosen` is a sansdir.core.oncat.Experiment.
+                target = chosen.cluster_path()  # type: ignore[attr-defined]
+                ok = await _push_modal(
+                    ConfirmDialog(
+                        f"Go to {target}\nand load the run catalog in the other pane?",
+                        title=f"OnCat — {chosen.ipts}",  # type: ignore[attr-defined]
+                    )
+                )
+                if not ok:
+                    return None
+                if not target.is_dir():
+                    app.notify_user(
+                        f"OnCat: {target} doesn't exist on this host",
+                        severity="warning",
+                    )
+                    # Still try to load the catalog from OnCat even if the
+                    # local mirror is missing.
+                else:
+                    app.active_panel.set_cwd(target)
+                # Fetch and show the run catalog in the inactive pane.
+                files = await client.list_datafiles(
+                    chosen.ipts,  # type: ignore[attr-defined]
+                    instrument=instr,
+                )
+                app.show_catalog_in_other_pane(chosen.ipts, files)  # type: ignore[attr-defined]
         except OnCatError as exc:
             app.notify_user(f"OnCat: {exc}", severity="error")
             return None
-        if not hits:
-            app.notify_user(f"OnCat: no experiments match {keyword!r}", severity="warning")
-            return None
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[object] = loop.create_future()
-
-        def _cb(value: object) -> None:
-            if not fut.done():
-                fut.set_result(value)
-
-        app.push_screen(OnCatResultsDialog(hits, keyword=keyword), _cb)
-        chosen = await fut
-        if chosen is None:
-            return None
-        target = chosen.cluster_path()  # type: ignore[attr-defined]
-        if not target.is_dir():
-            app.notify_user(
-                f"OnCat: chose {chosen.ipts} but {target} doesn't exist on this host",  # type: ignore[attr-defined]
-                severity="warning",
-            )
-            return None
-        app.active_panel.set_cwd(target)
         return None
 
     return Command(
         name="oncat.search",
-        description="Search OnCat for an IPTS by keyword; Enter cds the active pane there.",
+        description="Browse OnCat experiments; Enter cds + loads the run catalog.",
         params=(
             CommandParam(
                 name="keyword",
                 type="string",
-                description="Substring matched against IPTS / title / PI.",
+                description="Initial substring filter for the browser.",
                 required=False,
                 default="",
             ),
@@ -556,6 +584,18 @@ def _make_oncat_search(app: AppProtocol) -> Command:
         handler=handler,
         aliases=("ipts",),
         examples=("ipts bio-membrane", "ipts 12345"),
+    )
+
+
+def _make_pane_toggle_catalog(app: AppProtocol) -> Command:
+    def handler() -> None:
+        app.toggle_other_pane_catalog()
+
+    return Command(
+        name="pane.toggle_catalog",
+        description="Flip the inactive pane between filelist and run catalog.",
+        params=(),
+        handler=handler,
     )
 
 
@@ -979,6 +1019,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_edit_file(app),
         _make_app_browse_tree(app),
         _make_oncat_search(app),
+        _make_pane_toggle_catalog(app),
     ]
 
 

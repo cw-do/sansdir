@@ -17,6 +17,7 @@ from sansdir.ui.keys import KeyBinding, default_keymap
 
 # Keys we always want to show, in this order.
 HINT_ORDER: tuple[str, ...] = (
+    "f2",
     "f3",
     "f4",
     "f5",
@@ -41,6 +42,7 @@ HINT_ORDER: tuple[str, ...] = (
 # stays at most two words per cell. Falls back to the keybinding's own
 # description when not present here.
 LABEL_OVERRIDES: dict[str, str] = {
+    "f2": "Catalog",
     "f3": "View",
     "f4": "Edit",
     "f5": "Copy",
@@ -64,6 +66,7 @@ LABEL_OVERRIDES: dict[str, str] = {
 # How each key prints in the hint cell. F-keys keep their digit; named
 # Textual keys ("colon", "asterisk", ...) are normalised back to a glyph.
 KEY_DISPLAY: dict[str, str] = {
+    "f2": "F2",
     "f3": "F3",
     "f4": "F4",
     "f5": "F5",

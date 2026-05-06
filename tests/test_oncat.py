@@ -83,7 +83,87 @@ def test_experiment_cluster_path() -> None:
         facility="SNS",
     )
     assert e.cluster_path() == Path("/SNS/EQSANS/IPTS-9")
-    assert e.cluster_path("/HFIR") == Path("/HFIR/EQSANS/IPTS-9")
+    assert e.cluster_path("/scratch/test") == Path("/scratch/test/EQSANS/IPTS-9")
+
+
+def test_experiment_hfir_facility_uses_hfir_root() -> None:
+    e = oncat.Experiment(
+        ipts="IPTS-7",
+        title="x",
+        pi="x",
+        members=(),
+        activity="",
+        instrument="BIOSANS",
+        facility="HFIR",
+    )
+    assert e.cluster_path() == Path("/HFIR/BIOSANS/IPTS-7")
+
+
+def test_experiment_date_range_and_members_summary() -> None:
+    e = oncat.Experiment(
+        ipts="IPTS-1",
+        title="x",
+        pi="A",
+        members=("Alice", "Bob", "Carol", "Dave", "Eve"),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+        acquisition_start="2026-04-25T08:00:00",
+        acquisition_end="2026-04-27T20:00:00",
+    )
+    assert e.date_range() == "2026-04-25 — 2026-04-27"
+    assert e.members_summary(max_shown=3) == "Alice, Bob, Carol (+2)"
+    assert e.members_summary(max_shown=10) == "Alice, Bob, Carol, Dave, Eve"
+
+
+def test_experiment_date_range_handles_missing() -> None:
+    e = oncat.Experiment(
+        ipts="IPTS-1",
+        title="",
+        pi="",
+        members=(),
+        activity="",
+        instrument="EQSANS",
+        facility="SNS",
+    )
+    assert e.date_range() == ""
+
+
+def test_normalise_experiment_pulls_size_and_acquisition() -> None:
+    raw = {
+        "id": "IPTS-42",
+        "title": "X",
+        "members": ["A"],
+        "size": 151,
+        "activity": {"acquisition": {"start": "2026-04-25", "end": "2026-04-27"}},
+    }
+    e = oncat._normalise_experiment(raw, "EQSANS", "SNS")
+    assert e.runs_count == 151
+    assert e.acquisition_start == "2026-04-25"
+    assert e.acquisition_end == "2026-04-27"
+
+
+def test_normalise_datafile_extracts_daslogs() -> None:
+    raw = {
+        "indexed": {"run_number": 12345},
+        "metadata": {
+            "entry": {
+                "title": "sample",
+                "start_time": "2026-04-25T08:00:00",
+                "duration": 1200.0,
+                "total_counts": 1234567,
+                "daslogs": {
+                    "detectorz": {"average_value": 4.0},
+                    "wavelength": {"average_value": 2.5},
+                },
+            }
+        },
+    }
+    d = oncat._normalise_datafile(raw)
+    assert d.run_number == 12345
+    assert d.detector_distance_m == 4.0
+    assert d.wavelength_a == 2.5
+    assert d.total_counts == 1234567
 
 
 # ---------------------------------------------------------------------------

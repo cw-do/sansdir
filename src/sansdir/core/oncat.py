@@ -36,15 +36,20 @@ DEFAULT_PROJECTION_EXPERIMENT: tuple[str, ...] = (
     "id",
     "title",
     "members",
-    "rank",
     "size",
     "activity",
 )
+# Datafile fields needed for the run-catalog DataTable (run_number / title /
+# detector distance / wavelength / total counts / duration). Mirrors the
+# PROJECTION constant in cw-do/eqsanscli/src/eqsanscli/integrations/oncat.py.
 DEFAULT_PROJECTION_DATAFILE: tuple[str, ...] = (
     "indexed.run_number",
     "metadata.entry.title",
     "metadata.entry.start_time",
     "metadata.entry.duration",
+    "metadata.entry.total_counts",
+    "metadata.entry.daslogs.detectorz.average_value",
+    "metadata.entry.daslogs.wavelength.average_value",
 )
 
 
@@ -55,7 +60,13 @@ DEFAULT_PROJECTION_DATAFILE: tuple[str, ...] = (
 
 @dataclass(frozen=True, slots=True)
 class Experiment:
-    """One row of OnCat experiment-list output, normalised."""
+    """One row of OnCat experiment-list output, normalised.
+
+    The "summary" fields (``runs_count``, ``acquisition_start``,
+    ``acquisition_end``) come straight from OnCat's ``size`` and
+    ``activity.acquisition.{start,end}`` — no extra round trip required
+    to count runs per IPTS.
+    """
 
     ipts: str  # e.g. "IPTS-12345"
     title: str
@@ -64,6 +75,9 @@ class Experiment:
     activity: str  # last-active date (free-text from OnCat)
     instrument: str
     facility: str
+    runs_count: int = 0
+    acquisition_start: str = ""
+    acquisition_end: str = ""
 
     def matches(self, keyword: str) -> bool:
         """Case-insensitive substring match against id / title / any member."""
@@ -74,9 +88,37 @@ class Experiment:
             return True
         return any(kw in m.lower() for m in self.members)
 
-    def cluster_path(self, root: str = "/SNS") -> Path:
-        """Conventional on-disk path: ``/SNS/<INSTR>/IPTS-NNNNN``."""
-        return Path(root) / self.instrument / self.ipts
+    def cluster_path(self, root: str | None = None) -> Path:
+        """Conventional on-disk path: ``/<FACILITY>/<INSTR>/IPTS-NNNNN``.
+
+        ``root`` overrides the facility-derived prefix (handy for tests).
+        """
+        prefix = Path(root) if root else Path("/") / self.facility
+        return prefix / self.instrument / self.ipts
+
+    def date_range(self) -> str:
+        """Human-readable date range, ``""`` if unavailable."""
+        if not self.acquisition_start and not self.acquisition_end:
+            return ""
+        if self.acquisition_start == self.acquisition_end:
+            return _short_date(self.acquisition_start)
+        return f"{_short_date(self.acquisition_start)} — {_short_date(self.acquisition_end)}"
+
+    def members_summary(self, max_shown: int = 3) -> str:
+        """Comma-list of the first ``max_shown`` members, with ``(+N)`` overflow."""
+        if not self.members:
+            return ""
+        head = list(self.members[:max_shown])
+        rest = len(self.members) - len(head)
+        out = ", ".join(head)
+        if rest > 0:
+            out += f" (+{rest})"
+        return out
+
+
+def _short_date(timestamp: str) -> str:
+    """Trim an OnCat ISO timestamp down to ``YYYY-MM-DD``; pass through otherwise."""
+    return timestamp[:10] if timestamp else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +129,9 @@ class Datafile:
     title: str
     start_time: str
     duration_s: float
+    total_counts: int = 0
+    detector_distance_m: float = 0.0
+    wavelength_a: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -343,14 +388,29 @@ class OnCatClient:
 def _normalise_experiment(raw: dict[str, Any], instrument: str, facility: str) -> Experiment:
     members_raw = raw.get("members") or []
     members = (members_raw,) if isinstance(members_raw, str) else tuple(str(m) for m in members_raw)
+    activity = raw.get("activity")
+    if isinstance(activity, dict):
+        acq = activity.get("acquisition") or {}
+        if isinstance(acq, dict):
+            start = str(acq.get("start", ""))
+            end = str(acq.get("end", ""))
+        else:
+            start = end = ""
+        activity_str = str(activity.get("date", ""))
+    else:
+        start = end = ""
+        activity_str = str(activity or "")
     return Experiment(
         ipts=str(raw.get("id", "")),
         title=str(raw.get("title", "")),
         pi=members[0] if members else "",
         members=members,
-        activity=str(raw.get("activity", "")),
+        activity=activity_str,
         instrument=instrument,
         facility=facility,
+        runs_count=int(raw.get("size", 0) or 0),
+        acquisition_start=start,
+        acquisition_end=end,
     )
 
 
@@ -359,9 +419,25 @@ def _normalise_datafile(raw: dict[str, Any]) -> Datafile:
     metadata = (
         raw.get("metadata", {}).get("entry", {}) if isinstance(raw.get("metadata"), dict) else {}
     )
+    daslogs = metadata.get("daslogs") if isinstance(metadata, dict) else None
+    if not isinstance(daslogs, dict):
+        daslogs = {}
     return Datafile(
         run_number=int(indexed.get("run_number", 0)),
         title=str(metadata.get("title", "")),
         start_time=str(metadata.get("start_time", "")),
-        duration_s=float(metadata.get("duration", 0.0)),
+        duration_s=float(metadata.get("duration", 0.0) or 0.0),
+        total_counts=int(metadata.get("total_counts", 0) or 0),
+        detector_distance_m=_avg(daslogs.get("detectorz")),
+        wavelength_a=_avg(daslogs.get("wavelength")),
     )
+
+
+def _avg(maybe_dict: Any) -> float:
+    """Pull ``average_value`` out of an OnCat DASlog node; 0.0 on miss."""
+    if isinstance(maybe_dict, dict):
+        try:
+            return float(maybe_dict.get("average_value", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0

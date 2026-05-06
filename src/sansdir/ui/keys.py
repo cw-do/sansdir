@@ -185,7 +185,8 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("g", "app.cmdline_prompt", "Jump to path", _prompt_jump),
         KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
         # OnCat IPTS search (Phase 4)
-        KeyBinding("i", "app.cmdline_prompt", "OnCat IPTS search", _prompt_ipts),
+        KeyBinding("i", "oncat.search", "OnCat IPTS search"),
+        KeyBinding("f2", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(
