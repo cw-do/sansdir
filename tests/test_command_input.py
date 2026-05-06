@@ -63,6 +63,26 @@ async def test_typing_in_cmdline_is_not_intercepted_by_keymap(tmp_path: Path) ->
         assert app._cmdline.value == "q"
 
 
+async def test_prompt_prefix_renders_in_cmdline_row(tmp_path: Path) -> None:
+    """The bottom row shows ``> `` before whatever the user is typing.
+
+    Verified by exporting an SVG screenshot and looking for both the
+    prompt and the typed text on the same row.
+    """
+    app = _app(tmp_path)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press(":")
+        for ch in "help":
+            await pilot.press(ch)
+        await pilot.pause()
+        svg = app.export_screenshot()
+        # The prompt is rendered as `&gt; ` (HTML-escaped) and `help`
+        # immediately after on the same y-coordinate.
+        assert "&gt;" in svg, "prompt `>` not found in rendered SVG"
+        assert ">help<" in svg, "typed value not found in rendered SVG"
+
+
 async def test_typing_after_colon_inserts_full_word(tmp_path: Path) -> None:
     """Regression: pressing `:` then typing immediately must accept every
     character. A previous version of `_dispatch` ran *all* handlers as

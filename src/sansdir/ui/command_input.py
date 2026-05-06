@@ -21,8 +21,10 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, ClassVar
 
+from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.widgets import Input
+from textual.containers import Horizontal
+from textual.widgets import Input, Static
 
 from sansdir.commands.parser import common_prefix, complete_command_name
 from sansdir.core.history import CommandHistory
@@ -132,3 +134,53 @@ class CommandInput(Input):
         # CommandHistory ``append`` path resets it too, so callers using the
         # submit flow don't need to call this.
         self._history.begin("")
+
+
+class CommandLineRow(Horizontal):
+    """Bottom bar: ``> `` prompt prefix + the :class:`CommandInput`.
+
+    Pure visual wrapping — Textual ``Input`` doesn't support a ``::before``
+    pseudo-element, so we attach the prefix as a sibling. The whole row's
+    background brightens when focus moves into the input (via the
+    ``:focus-within`` pseudo-class), giving the same visual cue as a single
+    contiguous prompt.
+    """
+
+    DEFAULT_CSS = """
+    CommandLineRow {
+        height: 1;
+        background: $surface;
+    }
+    CommandLineRow > .cmdline-prompt {
+        width: auto;
+        padding: 0 0 0 1;
+        color: $text-muted;
+        background: $surface;
+    }
+    CommandLineRow > CommandInput {
+        width: 1fr;
+    }
+    CommandLineRow:focus-within {
+        background: $boost;
+    }
+    CommandLineRow:focus-within > .cmdline-prompt {
+        color: $accent;
+        background: $boost;
+        text-style: bold;
+    }
+    """
+
+    PROMPT: ClassVar[str] = "> "
+
+    def __init__(self, cmdline: CommandInput) -> None:
+        super().__init__(id="cmdline-row")
+        self._cmdline = cmdline
+        self._prompt = Static(self.PROMPT, classes="cmdline-prompt")
+
+    def compose(self) -> ComposeResult:
+        yield self._prompt
+        yield self._cmdline
+
+    @property
+    def cmdline(self) -> CommandInput:
+        return self._cmdline

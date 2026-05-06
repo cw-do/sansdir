@@ -29,7 +29,7 @@ from sansdir.commands.builtins import build_default_registry
 from sansdir.commands.parser import ParseError, parse_command_line
 from sansdir.commands.registry import CommandRegistry, UnknownCommandError
 from sansdir.core.history import CommandHistory
-from sansdir.ui.command_input import CommandInput
+from sansdir.ui.command_input import CommandInput, CommandLineRow
 from sansdir.ui.help import HelpScreen
 from sansdir.ui.key_hint_bar import KeyHintBar
 from sansdir.ui.keys import KeyBinding, default_keymap
@@ -78,6 +78,7 @@ class SansdirApp(App[int]):
         self.registry: CommandRegistry = build_default_registry(app=self)
         self.keymap: list[KeyBinding] = default_keymap()
         self._cmdline = CommandInput(registry=self.registry, history=self._history)
+        self._cmdline_row = CommandLineRow(self._cmdline)
         self._hintbar = KeyHintBar(self.keymap)
         self._active_id: str = "left"
         self._max: bool = False
@@ -91,7 +92,7 @@ class SansdirApp(App[int]):
             yield self._panes
             yield self._statusbar
             yield self._hintbar
-            yield self._cmdline
+            yield self._cmdline_row
 
     def on_mount(self) -> None:
         self._apply_active_class()
