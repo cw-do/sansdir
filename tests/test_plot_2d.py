@@ -59,14 +59,46 @@ def test_read_iqxqy_6col_drops_dq(tmp_path: Path) -> None:
     assert ds.shape == (4, 5)
 
 
-def test_read_iqxqy_rejects_non_grid(tmp_path: Path) -> None:
+def test_read_iqxqy_sparse_grid_fills_nan(tmp_path: Path) -> None:
+    """Real SANS files mask the beam-stop region — missing cells stay NaN.
+
+    Regression: read_iqxqy used to raise GridError on any unfilled cell,
+    which rejected almost every real Iqxqy.dat from the cluster. Now we
+    just leave NaN there and let pcolormesh render it as a soft grey.
+    """
     f = tmp_path / "scatter.dat"
     f.write_text(
         "# qx qy I sigI\n0.0 0.0 1.0 0.1\n0.05 0.0 1.5 0.1\n0.1 0.05 2.0 0.1\n",
         encoding="utf-8",
     )
-    with pytest.raises(ascii2d.GridError):
-        ascii2d.read_iqxqy(f)
+    ds = ascii2d.read_iqxqy(f)
+    assert ds.shape == (2, 3)  # 2 unique qy x 3 unique qx
+    assert ds.intensity[0, 0] == pytest.approx(1.0)
+    assert ds.intensity[0, 1] == pytest.approx(1.5)
+    assert ds.intensity[1, 2] == pytest.approx(2.0)
+    # The other 3 cells weren't supplied → NaN, not a hard failure.
+    assert np.isnan(ds.intensity[0, 2])
+    assert np.isnan(ds.intensity[1, 0])
+    assert np.isnan(ds.intensity[1, 1])
+
+
+def test_read_iqxqy_real_grid_with_masked_centre(tmp_path: Path) -> None:
+    """Regular grid with a masked square in the middle — most cells filled."""
+    f = tmp_path / "Iqxqy.dat"
+    rows = ["# qx qy I sigI"]
+    qx_vals = np.linspace(-0.1, 0.1, 5)
+    qy_vals = np.linspace(-0.08, 0.08, 4)
+    for iy, qy in enumerate(qy_vals):
+        for ix, qx in enumerate(qx_vals):
+            # Skip the centre 2x2 region as if it were masked by the beam stop.
+            if 1 <= ix <= 2 and 1 <= iy <= 2:
+                continue
+            rows.append(f"{qx:.4e}\t{qy:.4e}\t{ix + 10 * iy + 1.0}\t0.1")
+    f.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    ds = ascii2d.read_iqxqy(f)
+    assert ds.shape == (4, 5)
+    nan_count = int(np.isnan(ds.intensity).sum())
+    assert nan_count == 4  # the masked 2x2 block
 
 
 def test_read_iqxqy_rejects_wrong_columns(tmp_path: Path) -> None:

@@ -38,7 +38,12 @@ def make_iqxqy_figure(
     log_intensity: bool = False,
     title: str | None = None,
 ) -> Figure:
-    """One Iqxqy file → one pcolormesh + colorbar."""
+    """One Iqxqy file → one pcolormesh + colorbar.
+
+    NaN cells (masked beam stop, dead pixels) render in a soft grey via
+    :func:`_cmap_with_bad`, so the user can see the *shape* of the mask
+    rather than mistaking it for missing data.
+    """
     import matplotlib.pyplot as plt
     from matplotlib.colors import LogNorm
 
@@ -46,7 +51,8 @@ def make_iqxqy_figure(
     fig, ax = plt.subplots(figsize=(7, 6))
     norm = LogNorm() if log_intensity else None
     intensity = _safe_for_log(ds.intensity) if log_intensity else ds.intensity
-    pcm = ax.pcolormesh(ds.qx, ds.qy, intensity, cmap=cmap, norm=norm, shading="auto")
+    cm = _cmap_with_bad(cmap)
+    pcm = ax.pcolormesh(ds.qx, ds.qy, intensity, cmap=cm, norm=norm, shading="auto")
     fig.colorbar(pcm, ax=ax, label=r"$I(q_x, q_y)$ (cm$^{-1}$)")
     ax.set_xlabel(r"$q_x$ (Å$^{-1}$)")
     ax.set_ylabel(r"$q_y$ (Å$^{-1}$)")
@@ -97,6 +103,7 @@ def make_tile_figure(
         vmin, vmax = _shared_vrange(datasets)
 
     pcm_for_shared_bar = None
+    cm = _cmap_with_bad(cmap)
     for i, ds in enumerate(datasets):
         ax = flat_axes[i]
         norm: object | None = None
@@ -108,7 +115,7 @@ def make_tile_figure(
             ds.qx,
             ds.qy,
             intensity,
-            cmap=cmap,
+            cmap=cm,
             norm=norm,
             vmin=None if log_intensity else vmin,
             vmax=None if log_intensity else vmax,
@@ -153,6 +160,21 @@ def _shared_vrange(datasets: list[Iq2D]) -> tuple[float, float]:
     mean = float(np.mean(flat))
     std = float(np.std(flat))
     return mean - 3 * std, mean + 3 * std
+
+
+def _cmap_with_bad(name: str):  # type: ignore[no-untyped-def]
+    """Copy the named colormap and set "bad" (NaN) cells to a soft grey.
+
+    matplotlib's default for masked / NaN cells is fully transparent,
+    which on a default white axes face also looks white — visually
+    indistinguishable from the colormap's lowest value. Setting an
+    explicit grey makes a beam-stop mask visible at a glance.
+    """
+    import matplotlib as mpl
+
+    cm = mpl.colormaps[name].copy()
+    cm.set_bad("#bdbdbd")
+    return cm
 
 
 def _safe_for_log(arr: np.ndarray) -> np.ndarray:

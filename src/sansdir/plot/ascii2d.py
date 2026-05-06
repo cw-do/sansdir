@@ -5,9 +5,14 @@ ASCII (whitespace or comma — same tolerant parser the 1D path uses)
 and reshapes the flat row data into a regular ``(ny, nx)`` grid via
 sorted unique qx/qy values.
 
-Files that aren't actually on a regular grid (e.g. azimuthally-resolved
-data) raise :class:`GridError` so the caller can fall back to a
-scatter plot in a later phase.
+Cells the file doesn't supply data for stay ``np.nan`` — real SANS
+Iqxqy files routinely mask out the beam-stop region and dead detector
+pixels, and matplotlib's ``pcolormesh`` renders NaN cells as the
+colormap's "bad" colour (we set this to a soft grey in
+:mod:`sansdir.plot.tile`).
+
+:class:`GridError` is reserved for the cases where we *can't* yield a
+2D grid at all — empty file, unsupported column count.
 """
 
 from __future__ import annotations
@@ -41,8 +46,13 @@ class Iq2D:
 def read_iqxqy(path: Path) -> Iq2D:
     """Load 4/6-col ``qx qy I [sigI [dqx dqy]]`` from ``path``.
 
-    Auto-detects regular vs irregular grid via unique-value counts.
-    The optional dqx / dqy columns (5-6) are read but discarded.
+    Builds the (ny, nx) grid from sorted unique qx/qy. Any cell the
+    file doesn't supply (masked beam stop, dead pixels) stays
+    ``np.nan``. The optional dqx / dqy columns (5-6) are read but
+    discarded.
+
+    Raises :class:`GridError` only for empty input or an unsupported
+    column count — gaps in the grid are *not* an error.
     """
     rows = _read_numeric_rows(path)
     if not rows:
@@ -63,14 +73,11 @@ def read_iqxqy(path: Path) -> Iq2D:
     qy = np.unique(qy_flat)
     nx = qx.size
     ny = qy.size
-    if nx * ny != qx_flat.size:
-        raise GridError(
-            f"{path}: qx={nx} x qy={ny} = {nx * ny} cells but {qx_flat.size} rows — "
-            "data is not on a regular grid"
-        )
 
-    # Map each (qx, qy) → its grid index. ``np.searchsorted`` is exact
-    # because qx/qy come from ``np.unique`` (sorted, no duplicates).
+    # ``searchsorted`` is exact because qx/qy come from ``np.unique``
+    # (sorted, no duplicates) — every flat (qx, qy) maps to a unique
+    # cell. Cells without input data stay NaN; pcolormesh renders them
+    # with the colormap's "bad" colour (soft grey, see plot.tile).
     ix = np.searchsorted(qx, qx_flat)
     iy = np.searchsorted(qy, qy_flat)
     grid = np.full((ny, nx), np.nan, dtype=float)
@@ -79,8 +86,6 @@ def read_iqxqy(path: Path) -> Iq2D:
     if sig_flat is not None:
         sig_grid = np.full((ny, nx), np.nan, dtype=float)
         sig_grid[iy, ix] = sig_flat
-    if np.isnan(grid).any():
-        raise GridError(f"{path}: regular grid has gaps (some cells unfilled)")
     return Iq2D(path=Path(path), qx=qx, qy=qy, intensity=grid, sigma_i=sig_grid)
 
 
