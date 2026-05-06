@@ -55,10 +55,12 @@ def test_init_backend_picks_agg_when_headless() -> None:
     assert info.interactive is False
 
 
-def test_init_backend_is_cached() -> None:
+def test_init_backend_returns_equivalent_info() -> None:
+    """Headless mode is deterministic — two calls report the same backend."""
     info1 = backend.init_backend()
     info2 = backend.init_backend()
-    assert info1 is info2
+    assert info1 == info2
+    assert info1.name == "Agg"
 
 
 # ---------------------------------------------------------------------------
@@ -211,3 +213,117 @@ def test_show_or_save_writes_into_cache_dir(tmp_path: Path) -> None:
     assert png.parent == backend.plot_cache_dir()
     assert os.access(png, os.R_OK)
     assert info.name == "Agg"
+
+
+# ---------------------------------------------------------------------------
+# Interactive path: spawn_plot_window calls subprocess.Popen with the right argv
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_plot_window_builds_correct_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive plotting hands off to ``python -m sansdir.plot.window``."""
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 12345
+
+    def fake_popen(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured["argv"] = list(argv)
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(backend.subprocess, "Popen", fake_popen)
+    info = backend.spawn_plot_window(
+        "iq",
+        [Path("/tmp/a.dat"), Path("/tmp/b.dat")],
+        xscale="log",
+        yscale="log",
+        errorbars=False,
+        title="my-plot",
+        log_dir=tmp_path,
+    )
+    assert info.name == "subprocess"
+    assert info.interactive
+    assert info.pid == 12345
+    argv = captured["argv"]
+    assert "-m" in argv
+    assert "sansdir.plot.window" in argv
+    assert "iq" in argv
+    assert "/tmp/a.dat" in argv
+    assert "/tmp/b.dat" in argv
+    assert "--no-errorbars" in argv
+    assert "--title" in argv and "my-plot" in argv
+    # Detach flags so closing the TUI doesn't kill the figure window.
+    assert captured["kwargs"].get("start_new_session") is True
+
+
+def test_plot_iq_with_display_uses_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a display is present, plot_iq spawns a window and returns no PNG."""
+    from sansdir.plot import ascii1d
+
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv(backend.HEADLESS_ENV, raising=False)
+
+    captured: dict = {}
+
+    def fake_spawn(kind, paths, **kwargs):  # type: ignore[no-untyped-def]
+        captured["kind"] = kind
+        captured["paths"] = list(paths)
+        captured["kwargs"] = kwargs
+        return backend.BackendInfo(name="subprocess", interactive=True, reason="fake", pid=999)
+
+    monkeypatch.setattr(ascii1d, "spawn_plot_window", fake_spawn)
+    png, info = ascii1d.plot_iq([DATA / "test_2o5m2o5a_Iq.dat"])
+    assert png is None
+    assert info.interactive
+    assert captured["kind"] == "iq"
+    assert captured["paths"] == [DATA / "test_2o5m2o5a_Iq.dat"]
+
+
+def test_window_module_main_smoke(tmp_path: Path) -> None:
+    """The subprocess module's ``main`` parses argv and would call plot funcs.
+
+    We can't actually run plt.show() blockingly in a test — instead we
+    monkeypatch the figure-builder to record the call and replace plt.show
+    with a no-op.
+    """
+    import sansdir.plot.ascii1d as ascii1d_mod
+    import sansdir.plot.window as win
+
+    calls: dict = {}
+
+    def fake_make_iq(paths, **kw):  # type: ignore[no-untyped-def]
+        calls["paths"] = list(paths)
+        calls["kw"] = kw
+        import matplotlib.pyplot as plt
+
+        return plt.figure()
+
+    def fake_show():
+        calls["show_called"] = True
+
+    def fake_pick_backend():
+        return "Agg"
+
+    import matplotlib.pyplot as plt
+
+    orig_make = ascii1d_mod.make_iq_figure
+    orig_show = plt.show
+    orig_pick = win._pick_interactive_backend
+    ascii1d_mod.make_iq_figure = fake_make_iq  # type: ignore[assignment]
+    plt.show = fake_show  # type: ignore[assignment]
+    win._pick_interactive_backend = fake_pick_backend  # type: ignore[assignment]
+    try:
+        rc = win.main(["iq", str(DATA / "test_2o5m2o5a_Iq.dat"), "--no-errorbars"])
+    finally:
+        ascii1d_mod.make_iq_figure = orig_make  # type: ignore[assignment]
+        plt.show = orig_show  # type: ignore[assignment]
+        win._pick_interactive_backend = orig_pick  # type: ignore[assignment]
+    assert rc == 0
+    assert calls["paths"] == [DATA / "test_2o5m2o5a_Iq.dat"]
+    assert calls["kw"]["errorbars"] is False
+    assert calls["show_called"] is True
