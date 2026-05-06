@@ -113,16 +113,16 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 6 — 2D plotting *(matplotlib windows + tile mode)*
 
-- [ ] `plot/ascii2d.py` — read 4/6-col qx,qy,I[,σI[,dqx,dqy]]
-- [ ] Auto-grid detection from unique qx, qy → reshape into 2D arrays
-- [ ] Single 2D plot: matplotlib `pcolormesh` with `viridis`, optional log color scale, colorbar
-- [ ] `plot/tile.py` — multi-2D tile via `plt.subplots(nrows, ncols)`; `ceil(sqrt(n))` grid
-- [ ] Colorbar mode: `shared` (one bar, common vmin/vmax = mean ± 3σ across all data) vs `independent` (per-subplot)
-- [ ] Filename as subplot title
-- [ ] Register commands: `plot.iqxqy`, `plot.tile_2d`
-- [ ] `P` options dialog adds: tile mode toggle, colorbar mode, log-intensity toggle
-- [ ] Headless mode: subplots saved to a single PNG
-- [ ] **DoD**: Tag 4 Iqxqy.dat files, dispatch `plot.tile_2d`, get a real 2×2 matplotlib window with shared colorbar; closing the window doesn't kill the TUI.
+- [x] `plot/ascii2d.py` — read 4/6-col qx,qy,I[,σI[,dqx,dqy]]
+- [x] Auto-grid detection from unique qx, qy → reshape into 2D arrays — *(GridError raised on irregular/sparse grids so caller can fall back later)*
+- [x] Single 2D plot: matplotlib `pcolormesh` with `viridis`, optional log color scale, colorbar
+- [x] `plot/tile.py` — multi-2D tile via `plt.subplots(nrows, ncols)`; `ceil(sqrt(n))` grid
+- [x] Colorbar mode: `shared` (one bar, common vmin/vmax = mean ± 3σ across all data) vs `independent` (per-subplot)
+- [x] Filename as subplot title
+- [x] Register commands: `plot.iqxqy`, `plot.tile_2d` — *(single command `plot.iqxqy` covers both: 1 file → single, N>1 → tile)*
+- [ ] `P` options dialog adds: tile mode toggle, colorbar mode, log-intensity toggle — *(deferred with the rest of P; cmdline already accepts `:plot.iqxqy …`, subprocess takes --cmap/--log-intensity/--colorbar-mode flags)*
+- [x] Headless mode: subplots saved to a single PNG
+- [x] **DoD**: Tag 4 Iqxqy.dat files, dispatch `plot.tile_2d`, get a real 2×2 matplotlib window with shared colorbar; closing the window doesn't kill the TUI. *(test_tile_four_files_uses_2x2_with_shared_colorbar + ui.plot_auto routes Iqxqy bucket through subprocess; tests written headless against synthetic 5×4 grids)*
 
 ---
 

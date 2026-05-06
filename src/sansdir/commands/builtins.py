@@ -624,11 +624,42 @@ def _plot_user_message(png: Path | None, info, paths: list[str]) -> str:  # type
     return f"plot saved → {png}"
 
 
+def _make_plot_iqxqy(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
+        from sansdir.plot.tile import make_iqxqy_figure, make_tile_figure
+
+        path_list = [Path(p) for p in paths]
+        if not path_list:
+            raise ValueError("plot.iqxqy: at least one file required")
+        if has_display():
+            info = spawn_plot_window("iqxqy", path_list)
+            return f"plot opened ({info.name})"
+        # Headless: build inline + save PNG.
+        if len(path_list) == 1:
+            fig = make_iqxqy_figure(path_list[0])
+            title = path_list[0].stem
+        else:
+            fig = make_tile_figure(path_list)
+            title = f"tile_{len(path_list)}files"
+        png, _info = save_figure_to_png(fig, title=title)
+        return f"plot saved → {png}"
+
+    return Command(
+        name="plot.iqxqy",
+        description="Plot 4/6-col Iqxqy ASCII files (single pcolormesh or tile).",
+        params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        handler=handler,
+    )
+
+
 def _make_ui_plot_auto(app: AppProtocol) -> Command:
     """Dispatch a plot for the active selection based on detected file kind."""
 
     def handler() -> str | None:
         from sansdir.plot import ascii1d, detect
+        from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
+        from sansdir.plot.tile import make_iqxqy_figure, make_tile_figure
 
         srcs = app.active_panel.selection()
         if not srcs:
@@ -637,6 +668,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         # Bucket by kind so a mixed selection still does the right thing.
         iq: list[Path] = []
         trans: list[Path] = []
+        iqxqy: list[Path] = []
         unknown: list[tuple[Path, str]] = []
         for p in srcs:
             d = detect.detect_kind(p)
@@ -644,6 +676,8 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
                 trans.append(p)
             elif d.kind == detect.KIND_IQ:
                 iq.append(p)
+            elif d.kind == detect.KIND_IQXQY:
+                iqxqy.append(p)
             else:
                 unknown.append((p, d.kind))
 
@@ -651,25 +685,21 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         # so a stale-tags surprise (cursor on a transmission file but old
         # Iq tags still active) is obvious before any window appears.
         bucket_summary: list[str] = []
-        if iq:
-            sample = ", ".join(p.name for p in iq[:3]) + (
-                f" (+{len(iq) - 3} more)" if len(iq) > 3 else ""
-            )
-            bucket_summary.append(f"{len(iq)} Iq [{sample}]")
-        if trans:
-            sample = ", ".join(p.name for p in trans[:3]) + (
-                f" (+{len(trans) - 3} more)" if len(trans) > 3 else ""
-            )
-            bucket_summary.append(f"{len(trans)} transmission [{sample}]")
+        for label, files in (("Iq", iq), ("transmission", trans), ("Iqxqy", iqxqy)):
+            if files:
+                sample = ", ".join(p.name for p in files[:3]) + (
+                    f" (+{len(files) - 3} more)" if len(files) > 3 else ""
+                )
+                bucket_summary.append(f"{len(files)} {label} [{sample}]")
         if bucket_summary:
             app.notify_user("plotting " + " · ".join(bucket_summary))
         if unknown:
             details = ", ".join(f"{p.name} [{kind}]" for p, kind in unknown[:5])
             app.notify_user(
-                f"skipping (unsupported in Phase 5): {details}",
+                f"skipping (unsupported): {details}",
                 severity="warning",
             )
-        if not iq and not trans:
+        if not (iq or trans or iqxqy):
             return None
 
         result_msgs: list[str] = []
@@ -679,11 +709,25 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
         if trans:
             png, info = ascii1d.plot_transmission(trans)
             result_msgs.append(_plot_user_message(png, info, [str(p) for p in trans]))
+        if iqxqy:
+            if has_display():
+                info = spawn_plot_window("iqxqy", iqxqy)
+                result_msgs.append(f"Iqxqy plot opened ({info.name})")
+            else:
+                # Headless: build inline + save PNG.
+                if len(iqxqy) == 1:
+                    fig = make_iqxqy_figure(iqxqy[0])
+                    title = iqxqy[0].stem
+                else:
+                    fig = make_tile_figure(iqxqy)
+                    title = f"tile_{len(iqxqy)}files"
+                png, info = save_figure_to_png(fig, title=title)
+                result_msgs.append(f"Iqxqy plot saved → {png}")
         return " · ".join(result_msgs) or None
 
     return Command(
         name="ui.plot_auto",
-        description="Plot the active selection; routes Iq vs transmission by file kind.",
+        description="Plot the active selection; routes Iq / transmission / Iqxqy by file kind.",
         params=(),
         handler=handler,
     )
@@ -1124,6 +1168,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_pane_toggle_catalog(app),
         _make_plot_iq(app),
         _make_plot_transmission(app),
+        _make_plot_iqxqy(app),
         _make_ui_plot_auto(app),
     ]
 

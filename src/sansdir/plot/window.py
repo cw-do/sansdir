@@ -59,7 +59,7 @@ def _pick_interactive_backend() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sansdir.plot.window")
-    parser.add_argument("kind", choices=("iq", "transmission"))
+    parser.add_argument("kind", choices=("iq", "transmission", "iqxqy"))
     parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("--xscale", default=None)
     parser.add_argument("--yscale", default=None)
@@ -70,6 +70,18 @@ def main(argv: list[str] | None = None) -> int:
         default=True,
     )
     parser.add_argument("--title", default=None)
+    parser.add_argument("--cmap", default="viridis", help="matplotlib colormap (2D only)")
+    parser.add_argument(
+        "--log-intensity",
+        action="store_true",
+        help="log-scale the colormap (2D only)",
+    )
+    parser.add_argument(
+        "--colorbar-mode",
+        choices=("shared", "independent"),
+        default="shared",
+        help="for tile mode: one shared bar or per-subplot bars",
+    )
     args = parser.parse_args(argv)
 
     backend = _pick_interactive_backend()
@@ -77,21 +89,38 @@ def main(argv: list[str] | None = None) -> int:
 
     import matplotlib.pyplot as plt
 
-    from sansdir.plot import ascii1d
+    if args.kind == "iqxqy":
+        from sansdir.plot import tile
 
-    kwargs: dict = {"errorbars": args.errorbars, "title": args.title}
-    if args.xscale:
-        kwargs["xscale"] = args.xscale
-    if args.yscale:
-        kwargs["yscale"] = args.yscale
-
-    if args.kind == "iq":
-        ascii1d.make_iq_figure(args.files, **kwargs)
+        if len(args.files) == 1:
+            tile.make_iqxqy_figure(
+                args.files[0],
+                cmap=args.cmap,
+                log_intensity=args.log_intensity,
+                title=args.title,
+            )
+        else:
+            tile.make_tile_figure(
+                args.files,
+                cmap=args.cmap,
+                colorbar_mode=args.colorbar_mode,
+                log_intensity=args.log_intensity,
+                title=args.title,
+            )
     else:
-        ascii1d.make_transmission_figure(args.files, **kwargs)
+        from sansdir.plot import ascii1d
 
-    # Blocking show — this subprocess owns its own GUI event loop, so the
-    # window is fully responsive and closes normally.
+        kwargs: dict = {"errorbars": args.errorbars, "title": args.title}
+        if args.xscale:
+            kwargs["xscale"] = args.xscale
+        if args.yscale:
+            kwargs["yscale"] = args.yscale
+        if args.kind == "iq":
+            ascii1d.make_iq_figure(args.files, **kwargs)
+        else:
+            ascii1d.make_transmission_figure(args.files, **kwargs)
+
+    # Blocking show — this subprocess owns its own GUI event loop.
     plt.show()
     return 0
 

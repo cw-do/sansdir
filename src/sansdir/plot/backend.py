@@ -85,6 +85,9 @@ def spawn_plot_window(
     yscale: str | None = None,
     errorbars: bool = True,
     title: str | None = None,
+    cmap: str | None = None,
+    log_intensity: bool = False,
+    colorbar_mode: str | None = None,
     log_dir: Path | None = None,
 ) -> BackendInfo:
     """Launch a detached ``python -m sansdir.plot.window`` for the given files.
@@ -92,6 +95,9 @@ def spawn_plot_window(
     The subprocess writes its stdout/stderr into the plot cache dir so a
     user can ``cat`` it after a misbehaving plot. We do **not** wait for
     the subprocess — closing the window triggers its own exit.
+
+    The 2D-only kwargs (``cmap``, ``log_intensity``, ``colorbar_mode``) are
+    silently ignored by the subprocess for 1D plots.
     """
     log_dir = log_dir or plot_cache_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -108,6 +114,12 @@ def spawn_plot_window(
         argv.append("--no-errorbars")
     if title:
         argv.extend(["--title", title])
+    if cmap:
+        argv.extend(["--cmap", cmap])
+    if log_intensity:
+        argv.append("--log-intensity")
+    if colorbar_mode:
+        argv.extend(["--colorbar-mode", colorbar_mode])
 
     log_fh = log_path.open("w", encoding="utf-8")
     proc = subprocess.Popen(
