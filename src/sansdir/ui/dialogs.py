@@ -38,6 +38,10 @@ class ConfirmDialog(ModalScreen[bool]):
     ConfirmDialog .body {
         margin-bottom: 1;
     }
+    ConfirmDialog .hint {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
     ConfirmDialog Button {
         margin: 0 1;
     }
@@ -55,8 +59,8 @@ class ConfirmDialog(ModalScreen[bool]):
         message: str,
         *,
         title: str = "Confirm",
-        yes_label: str = "Yes",
-        no_label: str = "No",
+        yes_label: str = "(Y)es",
+        no_label: str = "(N)o",
         danger: bool = False,
     ) -> None:
         super().__init__()
@@ -70,6 +74,10 @@ class ConfirmDialog(ModalScreen[bool]):
         with Vertical():
             yield Static(self._title, classes="title")
             yield Static(self._message, classes="body")
+            yield Static(
+                "[dim]Y/Enter to confirm · N/Esc to cancel[/dim]",
+                classes="hint",
+            )
             with Center():
                 yield Button(
                     self._yes_label,
@@ -95,7 +103,12 @@ class ConfirmDialog(ModalScreen[bool]):
 
 
 class TextPromptDialog(ModalScreen[str | None]):
-    """Single-line text prompt; returns the entered string, or ``None`` on cancel."""
+    """Single-line text prompt; returns the entered string, or ``None`` on cancel.
+
+    ``help_text`` (optional) renders below the input as muted multi-line text.
+    Useful for showing concrete examples — see :func:`_make_ui_zip_tagged` for
+    the path-resolution examples shown in the zip flow.
+    """
 
     DEFAULT_CSS = """
     TextPromptDialog {
@@ -106,10 +119,19 @@ class TextPromptDialog(ModalScreen[str | None]):
         border: round $accent;
         padding: 1 2;
         width: 80%;
+        height: auto;
     }
     TextPromptDialog .title {
         text-style: bold;
         margin-bottom: 1;
+    }
+    TextPromptDialog .help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    TextPromptDialog .hint {
+        color: $text-muted;
+        margin-top: 1;
     }
     """
 
@@ -117,11 +139,19 @@ class TextPromptDialog(ModalScreen[str | None]):
         Binding("escape", "cancel", "Cancel", show=False),
     ]
 
-    def __init__(self, message: str, *, default: str = "", title: str = "Prompt") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        default: str = "",
+        title: str = "Prompt",
+        help_text: str = "",
+    ) -> None:
         super().__init__()
         self._title = title
         self._message = message
         self._default = default
+        self._help_text = help_text
 
     def compose(self) -> ComposeResult:
         from textual.widgets import Input
@@ -130,6 +160,12 @@ class TextPromptDialog(ModalScreen[str | None]):
             yield Label(self._title, classes="title")
             yield Static(self._message)
             yield Input(value=self._default, id="prompt-input", select_on_focus=False)
+            if self._help_text:
+                yield Static(self._help_text, classes="help")
+            yield Static(
+                "[dim]Enter to submit · Esc to cancel[/dim]",
+                classes="hint",
+            )
 
     def on_mount(self) -> None:
         from textual.widgets import Input

@@ -648,14 +648,19 @@ def _make_ui_zip_tagged(app: AppProtocol) -> Command:
             if not fut.done():
                 fut.set_result(value)
 
+        cwd = app.active_panel.cwd
+        help_text = (
+            "Examples:\n"
+            f"  filename.zip          → {cwd}/filename.zip\n"
+            f"  ../filename.zip       → {cwd.parent}/filename.zip\n"
+            "  /abs/path/file.zip    → exactly there"
+        )
         app.push_screen(
             TextPromptDialog(
-                (
-                    f"zip {len(srcs)} item(s) — bare name or 'sub/x.zip' is "
-                    "relative to the active pane; '/abs/path' is absolute"
-                ),
+                f"zip {len(srcs)} item(s):",
                 default=default_name,
                 title="Archive name",
+                help_text=help_text,
             ),
             _cb,
         )
