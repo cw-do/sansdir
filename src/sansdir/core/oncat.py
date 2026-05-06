@@ -34,6 +34,7 @@ from sansdir.core.history import default_history_path
 
 DEFAULT_PROJECTION_EXPERIMENT: tuple[str, ...] = (
     "id",
+    "rank",
     "title",
     "members",
     "size",
@@ -386,25 +387,27 @@ class OnCatClient:
 
 
 def _normalise_experiment(raw: dict[str, Any], instrument: str, facility: str) -> Experiment:
-    members_raw = raw.get("members") or []
-    members = (members_raw,) if isinstance(members_raw, str) else tuple(str(m) for m in members_raw)
+    # IPTS identifier. Real OnCat puts the numeric IPTS in ``rank``;
+    # ``id`` is the canonical OnCat object id (often the same string,
+    # sometimes a hash). Match eqsanscli: prefer rank, fall back to id.
+    ipts = _ipts_label(raw)
+
+    # Members come back as a list of dicts on real OnCat
+    # (``{"name": "Last, First", "email": ..., "orcid": ...}``). Tests
+    # sometimes pass plain strings; tolerate both.
+    members = _extract_member_names(raw.get("members") or [])
+
+    # ``activity.acquisition`` is a *list* of timestamps per
+    # eqsanscli/_fetch_all_experiments (date_range = first → last). Older
+    # mock shapes used a {start, end} dict — keep that path working.
     activity = raw.get("activity")
-    if isinstance(activity, dict):
-        acq = activity.get("acquisition") or {}
-        if isinstance(acq, dict):
-            start = str(acq.get("start", ""))
-            end = str(acq.get("end", ""))
-        else:
-            start = end = ""
-        activity_str = str(activity.get("date", ""))
-    else:
-        start = end = ""
-        activity_str = str(activity or "")
+    start, end, activity_str = _extract_acquisition(activity)
+
     return Experiment(
-        ipts=str(raw.get("id", "")),
+        ipts=ipts,
         title=str(raw.get("title", "")),
         pi=members[0] if members else "",
-        members=members,
+        members=tuple(members),
         activity=activity_str,
         instrument=instrument,
         facility=facility,
@@ -412,6 +415,50 @@ def _normalise_experiment(raw: dict[str, Any], instrument: str, facility: str) -
         acquisition_start=start,
         acquisition_end=end,
     )
+
+
+def _ipts_label(raw: dict[str, Any]) -> str:
+    rank = raw.get("rank")
+    if rank not in (None, ""):
+        return f"IPTS-{rank}"
+    raw_id = str(raw.get("id", ""))
+    if not raw_id:
+        return ""
+    return raw_id if raw_id.startswith("IPTS-") else f"IPTS-{raw_id}"
+
+
+def _extract_member_names(members_raw: Any) -> list[str]:
+    if isinstance(members_raw, str):
+        return [members_raw]
+    out: list[str] = []
+    for m in members_raw:
+        if isinstance(m, str):
+            if m:
+                out.append(m)
+            continue
+        if not isinstance(m, dict):
+            continue
+        name = m.get("name")
+        if not name:
+            last = (m.get("last_name") or "").strip()
+            first = (m.get("first_name") or "").strip()
+            name = f"{last}, {first}".strip(", ").strip()
+        if name:
+            out.append(str(name))
+    return out
+
+
+def _extract_acquisition(activity: Any) -> tuple[str, str, str]:
+    """Return ``(start, end, activity_summary)`` from an OnCat activity field."""
+    if not isinstance(activity, dict):
+        return "", "", str(activity or "")
+    acq = activity.get("acquisition") or []
+    activity_str = str(activity.get("date", ""))
+    if isinstance(acq, list) and acq:
+        return str(acq[0]), str(acq[-1]), activity_str
+    if isinstance(acq, dict):
+        return str(acq.get("start", "")), str(acq.get("end", "")), activity_str
+    return "", "", activity_str
 
 
 def _normalise_datafile(raw: dict[str, Any]) -> Datafile:

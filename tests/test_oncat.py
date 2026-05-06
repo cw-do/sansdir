@@ -143,6 +143,46 @@ def test_normalise_experiment_pulls_size_and_acquisition() -> None:
     assert e.acquisition_end == "2026-04-27"
 
 
+def test_normalise_experiment_real_oncat_shape() -> None:
+    """OnCat returns members as dicts and acquisition as a list of timestamps."""
+    raw = {
+        "id": "IPTS-37211",
+        "rank": 37211,
+        "title": "Elucidating Solvent Effects",
+        "size": 151,
+        "members": [
+            {"name": "Solomon, Chandler", "email": "x@y", "orcid": "0000-0001"},
+            {"name": "Davis, Eric", "email": "y@z"},
+        ],
+        "activity": {
+            "acquisition": ["2026-04-01T08:00:00", "2026-04-02", "2026-04-03T20:00"],
+        },
+    }
+    e = oncat._normalise_experiment(raw, "EQSANS", "SNS")
+    assert e.ipts == "IPTS-37211"
+    assert e.runs_count == 151
+    assert e.members == ("Solomon, Chandler", "Davis, Eric")
+    assert e.acquisition_start == "2026-04-01T08:00:00"
+    assert e.acquisition_end == "2026-04-03T20:00"
+    assert e.date_range() == "2026-04-01 — 2026-04-03"
+
+
+def test_normalise_experiment_member_with_first_last_only() -> None:
+    raw = {
+        "id": "IPTS-1",
+        "members": [{"first_name": "Alice", "last_name": "Wong"}],
+    }
+    e = oncat._normalise_experiment(raw, "EQSANS", "SNS")
+    assert e.members == ("Wong, Alice",)
+
+
+def test_ipts_label_falls_back_to_id() -> None:
+    assert oncat._ipts_label({"rank": 9}) == "IPTS-9"
+    assert oncat._ipts_label({"id": "IPTS-9"}) == "IPTS-9"
+    assert oncat._ipts_label({"id": "9"}) == "IPTS-9"
+    assert oncat._ipts_label({}) == ""
+
+
 def test_normalise_datafile_extracts_daslogs() -> None:
     raw = {
         "indexed": {"run_number": 12345},
