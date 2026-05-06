@@ -648,11 +648,10 @@ def _make_ui_zip_tagged(app: AppProtocol) -> Command:
             if not fut.done():
                 fut.set_result(value)
 
-        cwd = app.active_panel.cwd
         help_text = (
             "Examples:\n"
-            f"  filename.zip          → {cwd}/filename.zip\n"
-            f"  ../filename.zip       → {cwd.parent}/filename.zip\n"
+            "  filename.zip          → current folder\n"
+            "  ../filename.zip       → parent folder\n"
             "  /abs/path/file.zip    → exactly there"
         )
         app.push_screen(
