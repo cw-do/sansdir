@@ -115,19 +115,21 @@ def make_tile_figure(
     ncols = TILE_NCOLS
     nrows = math.ceil(n / ncols)
 
-    cbar_w = 0.2  # in subplot units
-    fig_w = 2 * ncols + cbar_w * 2
-    fig_h = 2 * nrows
-    fig = plt.figure(figsize=(fig_w, fig_h))
-    gs = fig.add_gridspec(
-        nrows=nrows,
-        ncols=ncols + 1,
-        width_ratios=[1] * ncols + [cbar_w],
-        wspace=0.02,
-        hspace=0.02,
+    # Reserve room on the right for the shared colorbar + its tick labels.
+    # ``fig.colorbar(... ax=axes.ravel())`` auto-fits the bar to the data
+    # axes' bounding box, which matters because ``set_box_aspect(1)`` makes
+    # tiles square — a gridspec-column cbar would span the full figure
+    # height and dwarf single-row layouts.
+    fig_w = 2.4 * ncols + 1.0  # +1 inch for the cbar gutter
+    fig_h = 2.4 * nrows + 0.6  # +0.6 for bottom-left axis labels
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(fig_w, fig_h),
+        squeeze=False,
+        gridspec_kw={"wspace": 0.02, "hspace": 0.02},
     )
-    axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(ncols)] for r in range(nrows)])
-    cax = fig.add_subplot(gs[:, -1])
+    axes_flat = axes.ravel()
 
     shared_norm: LogNorm | None = None
     shared_vmin: float | None = None
@@ -141,8 +143,7 @@ def make_tile_figure(
     mappable_for_cbar = None
 
     for i in range(nrows * ncols):
-        r, c = divmod(i, ncols)
-        ax = axes[r, c]
+        ax = axes_flat[i]
         if i >= n:
             ax.axis("off")
             continue
@@ -200,12 +201,18 @@ def make_tile_figure(
         bl.tick_params(which="both", length=2, labelsize=8)
 
     if colorbar_mode == "shared" and mappable_for_cbar is not None:
-        cb = fig.colorbar(mappable_for_cbar, cax=cax, orientation="vertical")
+        # ``ax=axes_flat.tolist()`` makes matplotlib steal a slice from the
+        # right of the data axes' bounding box for the colorbar — the bar
+        # ends up the same height as a tile (not the whole figure), and
+        # tick labels stay inside ``bbox_inches="tight"``.
+        cb = fig.colorbar(
+            mappable_for_cbar,
+            ax=axes_flat.tolist(),
+            orientation="vertical",
+            shrink=0.95,
+            pad=0.02,
+        )
         cb.set_label(r"$I(q_x, q_y)$")
-    else:
-        cax.axis("off")
-
-    fig.subplots_adjust(left=0.06, right=0.98, top=0.98, bottom=0.08)
     if title:
         fig.suptitle(title)
     return fig
