@@ -157,7 +157,18 @@ def test_tile_one_file_falls_through_to_single(tmp_path: Path) -> None:
     plt.close(fig)
 
 
-def test_tile_four_files_uses_2x2_with_shared_colorbar(tmp_path: Path) -> None:
+def _count_data_tiles(fig) -> int:  # type: ignore[no-untyped-def]
+    """Count axes that render an Iqxqy tile (vs. colorbar / spare cells).
+
+    Data tiles in :func:`make_tile_figure` set ``box_aspect == 1`` so
+    they stay square; colorbars and the off-axes spare cells don't.
+    Filtering on that flag distinguishes them cleanly.
+    """
+    return sum(1 for ax in fig.axes if ax.get_box_aspect() == 1)
+
+
+def test_tile_four_files_uses_4wide_with_shared_colorbar(tmp_path: Path) -> None:
+    """eqsanstools-style: 4 columns x ceil(N/4) rows + dedicated cbar column."""
     import matplotlib.pyplot as plt
 
     files = []
@@ -166,13 +177,8 @@ def test_tile_four_files_uses_2x2_with_shared_colorbar(tmp_path: Path) -> None:
         _write_iqxqy(f)
         files.append(f)
     fig = tile.make_tile_figure(files, colorbar_mode="shared")
+    assert _count_data_tiles(fig) == 4
     plt.close(fig)
-    # 4 data axes + 1 shared colorbar axes = 5.
-    # (the figure caches them on .axes after creation)
-    # We also separately confirm the layout by checking ceil(sqrt(4)) = 2.
-    import math
-
-    assert math.ceil(math.sqrt(4)) == 2
 
 
 def test_tile_four_files_independent_colorbars(tmp_path: Path) -> None:
@@ -184,27 +190,39 @@ def test_tile_four_files_independent_colorbars(tmp_path: Path) -> None:
         _write_iqxqy(f)
         files.append(f)
     fig = tile.make_tile_figure(files, colorbar_mode="independent")
-    # 4 data axes + 4 per-subplot colorbars = 8.
-    assert len(fig.axes) == 8
+    # 4 data subplots, each with its own colorbar.
+    assert _count_data_tiles(fig) == 4
     plt.close(fig)
 
 
-def test_tile_three_files_hides_unused_subplot(tmp_path: Path) -> None:
+def test_tile_five_files_wraps_into_two_rows(tmp_path: Path) -> None:
+    """5 files with TILE_NCOLS=4 → 2 rows; spare cells in row 2 are off."""
     import matplotlib.pyplot as plt
 
     files = []
-    for i in range(3):
+    for i in range(5):
         f = tmp_path / f"Iqxqy_{i}.dat"
         _write_iqxqy(f)
         files.append(f)
-    fig = tile.make_tile_figure(files, colorbar_mode="independent")
-    # The 2x2 layout has one un-used cell — make_tile_figure marks it
-    # invisible. We can't easily filter "data axes" from "colorbar axes"
-    # via has_data(), so just check that exactly one axes is invisible
-    # (the spare slot) and the rest are visible.
-    invisible = [ax for ax in fig.axes if not ax.get_visible()]
-    assert len(invisible) == 1
+    fig = tile.make_tile_figure(files)
+    assert _count_data_tiles(fig) == 5
     plt.close(fig)
+
+
+def test_tile_natural_sort_orders_files(tmp_path: Path) -> None:
+    """run2 must come before run10 when files are sorted naturally."""
+    files = [
+        tmp_path / f"run{i}_Iqxqy.dat"
+        for i in (10, 1, 2)  # alphabetical would put run10 between run1 and run2
+    ]
+    for f in files:
+        _write_iqxqy(f)
+    sorted_paths = sorted(files, key=tile._natural_key)
+    assert [p.name for p in sorted_paths] == [
+        "run1_Iqxqy.dat",
+        "run2_Iqxqy.dat",
+        "run10_Iqxqy.dat",
+    ]
 
 
 def test_tile_rejects_empty_paths() -> None:

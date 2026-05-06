@@ -1,17 +1,26 @@
 """Single + multi-2D plot layouts for Iqxqy data.
 
-* :func:`make_iqxqy_figure` — one file, one ``pcolormesh`` with colorbar.
-* :func:`make_tile_figure`  — N files in a ``ceil(sqrt(N))`` grid, with
-  either one shared colorbar or per-subplot colorbars.
+Conventions follow ``/SNS/EQSANS/shared/script/eqsanstools/plot_iqxqy.py``,
+which is the reference 2D plot for EQSANS users:
 
-Both functions return the matplotlib :class:`~matplotlib.figure.Figure`
-so the caller (TUI subprocess or headless save path) decides what to
-do with it — same split as the 1D path.
+* **log intensity by default** — SANS data spans many orders of magnitude;
+  set ``log_intensity=False`` to override.
+* **Cell edges, not centres** — qx/qy in the file are bin centres, so we
+  derive edges via half-spacing (``centers_to_edges``) before passing to
+  ``pcolormesh``. Otherwise cells are offset by half a bin.
+* **Tile layout: 4 columns x ceil(N/4) rows**, with one shared colorbar in
+  a dedicated last column. Per-subplot colorbars available via
+  ``colorbar_mode="independent"``.
+* **Filename overlay** in each tile (small white-on-black tag at the
+  top), and axis labels only on the bottom-left subplot.
+* **Natural file ordering** by basename so ``run10`` comes after
+  ``run2``, not before.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -35,28 +44,29 @@ def make_iqxqy_figure(
     path: Path,
     *,
     cmap: str = "viridis",
-    log_intensity: bool = False,
+    log_intensity: bool = True,
     title: str | None = None,
 ) -> Figure:
     """One Iqxqy file → one pcolormesh + colorbar.
 
-    NaN cells (masked beam stop, dead pixels) render in a soft grey via
-    :func:`_cmap_with_bad`, so the user can see the *shape* of the mask
-    rather than mistaking it for missing data.
+    Defaults to log-scaled intensity (the SANS norm). Non-positive cells
+    are masked rather than floored — they render in the colormap's
+    "bad" colour (soft grey) so a beam-stop or dead-pixel mask reads as
+    "no data" instead of "minimum intensity".
     """
     import matplotlib.pyplot as plt
-    from matplotlib.colors import LogNorm
 
     ds = read_iqxqy(Path(path))
     fig, ax = plt.subplots(figsize=(7, 6))
-    norm = LogNorm() if log_intensity else None
-    intensity = _safe_for_log(ds.intensity) if log_intensity else ds.intensity
+    intensity, norm = _intensity_and_norm(ds.intensity, log_intensity=log_intensity)
     cm = _cmap_with_bad(cmap)
-    pcm = ax.pcolormesh(ds.qx, ds.qy, intensity, cmap=cm, norm=norm, shading="auto")
+    x_edges, y_edges = _grid_edges(ds.qx, ds.qy)
+    pcm = ax.pcolormesh(x_edges, y_edges, intensity, cmap=cm, norm=norm, shading="flat")
     fig.colorbar(pcm, ax=ax, label=r"$I(q_x, q_y)$ (cm$^{-1}$)")
     ax.set_xlabel(r"$q_x$ (Å$^{-1}$)")
     ax.set_ylabel(r"$q_y$ (Å$^{-1}$)")
-    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_box_aspect(1)
     ax.set_title(title or ds.path.name)
     fig.tight_layout()
     return fig
@@ -67,81 +77,135 @@ def make_iqxqy_figure(
 # ---------------------------------------------------------------------------
 
 
+TILE_NCOLS: int = 4
+
+
 def make_tile_figure(
     paths: Iterable[Path],
     *,
     cmap: str = "viridis",
     colorbar_mode: ColorbarMode = "shared",
-    log_intensity: bool = False,
+    log_intensity: bool = True,
     title: str | None = None,
 ) -> Figure:
-    """N Iqxqy files → ceil(sqrt(N)) x ceil(sqrt(N)) grid.
+    """N Iqxqy files → 4-wide tile with one shared colorbar.
 
-    ``colorbar_mode`` selects between one shared colorbar (vmin/vmax =
-    common mean +- 3 sigma across all data, matches :pep:`PLANNING.md` §4.5)
-    and per-subplot colorbars.
+    Shared mode uses a single :class:`LogNorm` (log-default for SANS)
+    spanning the union of positive intensities across all files. Per-
+    subplot colorbars are available via ``colorbar_mode="independent"``.
+
+    Filenames are sorted in natural order (``run2`` before ``run10``)
+    and shown as a small overlay tag inside each tile so the layout
+    stays compact at small sizes.
     """
     import matplotlib.pyplot as plt
     from matplotlib.colors import LogNorm
+    from matplotlib.ticker import MaxNLocator
 
-    datasets = [read_iqxqy(Path(p)) for p in paths]
-    if not datasets:
+    path_list = sorted([Path(p) for p in paths], key=_natural_key)
+    if not path_list:
         raise ValueError("make_tile_figure: at least one file required")
+    datasets = [read_iqxqy(p) for p in path_list]
     n = len(datasets)
     if n == 1:
         return make_iqxqy_figure(
             datasets[0].path, cmap=cmap, log_intensity=log_intensity, title=title
         )
 
-    side = math.ceil(math.sqrt(n))
-    fig, axes = plt.subplots(side, side, figsize=(4 * side, 4 * side), squeeze=False)
-    flat_axes = axes.ravel()
+    ncols = TILE_NCOLS
+    nrows = math.ceil(n / ncols)
 
-    vmin: float | None = None
-    vmax: float | None = None
+    cbar_w = 0.2  # in subplot units
+    fig_w = 2 * ncols + cbar_w * 2
+    fig_h = 2 * nrows
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    gs = fig.add_gridspec(
+        nrows=nrows,
+        ncols=ncols + 1,
+        width_ratios=[1] * ncols + [cbar_w],
+        wspace=0.02,
+        hspace=0.02,
+    )
+    axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(ncols)] for r in range(nrows)])
+    cax = fig.add_subplot(gs[:, -1])
+
+    shared_norm: LogNorm | None = None
+    shared_vmin: float | None = None
+    shared_vmax: float | None = None
     if colorbar_mode == "shared":
-        vmin, vmax = _shared_vrange(datasets)
+        shared_vmin, shared_vmax = _shared_positive_range(datasets)
+        if log_intensity and shared_vmin is not None and shared_vmax is not None:
+            shared_norm = LogNorm(vmin=shared_vmin, vmax=shared_vmax)
 
-    pcm_for_shared_bar = None
     cm = _cmap_with_bad(cmap)
-    for i, ds in enumerate(datasets):
-        ax = flat_axes[i]
-        norm: object | None = None
-        intensity = ds.intensity
-        if log_intensity:
-            intensity = _safe_for_log(intensity)
-            norm = LogNorm(vmin=vmin if vmin and vmin > 0 else None, vmax=vmax)
-        pcm = ax.pcolormesh(
-            ds.qx,
-            ds.qy,
-            intensity,
-            cmap=cm,
-            norm=norm,
-            vmin=None if log_intensity else vmin,
-            vmax=None if log_intensity else vmax,
-            shading="auto",
+    mappable_for_cbar = None
+
+    for i in range(nrows * ncols):
+        r, c = divmod(i, ncols)
+        ax = axes[r, c]
+        if i >= n:
+            ax.axis("off")
+            continue
+        ds = datasets[i]
+        intensity, per_norm = _intensity_and_norm(
+            ds.intensity, log_intensity=log_intensity, shared_norm=shared_norm
         )
-        ax.set_xlabel(r"$q_x$ (Å$^{-1}$)")
-        ax.set_ylabel(r"$q_y$ (Å$^{-1}$)")
-        ax.set_aspect("equal", adjustable="datalim")
-        ax.set_title(ds.path.name, fontsize="small")
+        x_edges, y_edges = _grid_edges(ds.qx, ds.qy)
+        if shared_norm is not None:
+            pcm = ax.pcolormesh(
+                x_edges, y_edges, intensity, cmap=cm, norm=shared_norm, shading="flat"
+            )
+        else:
+            pcm = ax.pcolormesh(
+                x_edges,
+                y_edges,
+                intensity,
+                cmap=cm,
+                norm=per_norm,
+                vmin=None if log_intensity else shared_vmin,
+                vmax=None if log_intensity else shared_vmax,
+                shading="flat",
+            )
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_box_aspect(1)
+        # Filename overlay in the panel — keeps tiles compact.
+        ax.text(
+            0.5,
+            0.98,
+            ds.path.name,
+            ha="center",
+            va="top",
+            fontsize=7,
+            color="white",
+            weight="bold",
+            transform=ax.transAxes,
+            bbox={"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"},
+        )
+        _hide_ticks(ax)
         if colorbar_mode == "independent":
             fig.colorbar(pcm, ax=ax)
-        elif pcm_for_shared_bar is None:
-            pcm_for_shared_bar = pcm
+        elif mappable_for_cbar is None:
+            mappable_for_cbar = pcm
 
-    # Hide any unused subplots in the trailing row.
-    for j in range(n, side * side):
-        flat_axes[j].set_visible(False)
+    # Bottom-left tile keeps axis labels so the user has a reference
+    # for the (qx, qy) units.
+    bl = axes[nrows - 1, 0]
+    if n > 0:
+        for spine in bl.spines.values():
+            spine.set_visible(True)
+        bl.set_xlabel(r"$Q_x$ (Å$^{-1}$)")
+        bl.set_ylabel(r"$Q_y$ (Å$^{-1}$)")
+        bl.xaxis.set_major_locator(MaxNLocator(4))
+        bl.yaxis.set_major_locator(MaxNLocator(4))
+        bl.tick_params(which="both", length=2, labelsize=8)
 
-    if colorbar_mode == "shared" and pcm_for_shared_bar is not None:
-        # One colorbar on the right, spanning the full figure height.
-        fig.subplots_adjust(right=0.88)
-        cax = fig.add_axes((0.91, 0.1, 0.02, 0.8))
-        fig.colorbar(pcm_for_shared_bar, cax=cax, label=r"$I(q_x, q_y)$")
+    if colorbar_mode == "shared" and mappable_for_cbar is not None:
+        cb = fig.colorbar(mappable_for_cbar, cax=cax, orientation="vertical")
+        cb.set_label(r"$I(q_x, q_y)$")
     else:
-        fig.tight_layout()
+        cax.axis("off")
 
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.98, bottom=0.08)
     if title:
         fig.suptitle(title)
     return fig
@@ -152,40 +216,83 @@ def make_tile_figure(
 # ---------------------------------------------------------------------------
 
 
-def _shared_vrange(datasets: list[Iq2D]) -> tuple[float, float]:
-    """``mean +- 3 sigma`` across every cell of every dataset (PLANNING.md §4.5)."""
-    flat = np.concatenate([d.intensity[~np.isnan(d.intensity)].ravel() for d in datasets])
-    if flat.size == 0:
-        return 0.0, 1.0
-    mean = float(np.mean(flat))
-    std = float(np.std(flat))
-    return mean - 3 * std, mean + 3 * std
+def _intensity_and_norm(
+    arr: np.ndarray,
+    *,
+    log_intensity: bool,
+    shared_norm: object | None = None,
+) -> tuple[np.ndarray, object | None]:
+    """Mask non-positives for log scaling; return (array, norm)."""
+    from matplotlib.colors import LogNorm
+
+    if not log_intensity:
+        return arr, None
+    masked = np.where(arr > 0, arr, np.nan)
+    if shared_norm is not None:
+        return masked, None  # caller passes shared_norm directly
+    finite = masked[np.isfinite(masked)]
+    if finite.size == 0:
+        return masked, None
+    vmin = float(finite.min())
+    vmax = float(finite.max())
+    if vmax <= vmin:
+        vmax = vmin * 1.01
+    return masked, LogNorm(vmin=vmin, vmax=vmax)
+
+
+def _shared_positive_range(datasets: list[Iq2D]) -> tuple[float | None, float | None]:
+    """Strict-positive vmin/vmax across every dataset, for the shared LogNorm."""
+    mins: list[float] = []
+    maxs: list[float] = []
+    for d in datasets:
+        positive = d.intensity[(d.intensity > 0) & np.isfinite(d.intensity)]
+        if positive.size:
+            mins.append(float(positive.min()))
+            maxs.append(float(positive.max()))
+    if not mins:
+        return None, None
+    vmin = min(mins)
+    vmax = max(maxs)
+    if vmax <= vmin:
+        vmax = vmin * 1.01
+    return vmin, vmax
+
+
+def _grid_edges(qx_centers: np.ndarray, qy_centers: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """qx/qy in the file are bin centres; pcolormesh wants edges."""
+    return _centers_to_edges(qx_centers), _centers_to_edges(qy_centers)
+
+
+def _centers_to_edges(c: np.ndarray) -> np.ndarray:
+    if c.size == 1:
+        w = 0.5 * (abs(c[0]) if c[0] != 0 else 1e-3)
+        return np.array([c[0] - w, c[0] + w])
+    dc = np.diff(c)
+    edges = np.empty(c.size + 1, dtype=float)
+    edges[1:-1] = c[:-1] + dc / 2
+    edges[0] = c[0] - dc[0] / 2
+    edges[-1] = c[-1] + dc[-1] / 2
+    return edges
+
+
+def _hide_ticks(ax) -> None:  # type: ignore[no-untyped-def]
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def _natural_key(path: Path) -> list:  # type: ignore[type-arg]
+    """Number-aware sort key on the file basename — ``run2`` < ``run10``."""
+    name = path.name
+    parts = re.findall(r"\d+|\D+", name)
+    return [int(p) if p.isdigit() else p.lower() for p in parts]
 
 
 def _cmap_with_bad(name: str):  # type: ignore[no-untyped-def]
-    """Copy the named colormap and set "bad" (NaN) cells to a soft grey.
-
-    matplotlib's default for masked / NaN cells is fully transparent,
-    which on a default white axes face also looks white — visually
-    indistinguishable from the colormap's lowest value. Setting an
-    explicit grey makes a beam-stop mask visible at a glance.
-    """
+    """Copy the named colormap and set "bad" (NaN) cells to a soft grey."""
     import matplotlib as mpl
 
     cm = mpl.colormaps[name].copy()
     cm.set_bad("#bdbdbd")
     return cm
-
-
-def _safe_for_log(arr: np.ndarray) -> np.ndarray:
-    """Replace non-positive values with the smallest positive in the array.
-
-    LogNorm chokes on ``≤ 0``; SANS data does have legitimate zeros and
-    occasional negatives from background subtraction. Floor at the
-    minimum positive so log scaling stays well-defined.
-    """
-    positive = arr[arr > 0]
-    if positive.size == 0:
-        return arr
-    floor = float(positive.min())
-    return np.where(arr > 0, arr, floor)
