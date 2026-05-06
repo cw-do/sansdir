@@ -112,8 +112,9 @@ def main(argv: list[str] | None = None) -> int:
 
         # One subprocess handles one NeXus file — the launcher fires N
         # subprocesses for N tagged files so each can be closed
-        # independently.
-        make_detector_figure(args.files[0], log_intensity=not args.no_errorbars and True)
+        # independently. log_intensity is the SANS default; the
+        # subprocess CLI doesn't expose a flag to flip it yet.
+        make_detector_figure(args.files[0], log_intensity=True)
     else:
         from sansdir.plot import ascii1d
 

@@ -24,6 +24,29 @@ if TYPE_CHECKING:
     from sansdir.core.oncat import Datafile
 
 
+class CatalogTable(DataTable):
+    """DataTable subclass that delegates ``p`` / ``Enter`` to the catalog parent.
+
+    Bindings live here (not on the parent ``Vertical``) because the
+    DataTable is the focusable widget — Tab into the slot lands the
+    cursor here, not on the wrapping container, so this is where keys
+    actually arrive.
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("p", "plot_current", "Plot raw NeXus", show=False),
+        Binding("enter", "plot_current", "Plot raw NeXus", show=False),
+    ]
+
+    def action_plot_current(self) -> None:
+        # Walk up to the RunCatalogPanel ancestor and run its handler.
+        node = self.parent
+        while node is not None and not isinstance(node, RunCatalogPanel):
+            node = node.parent  # type: ignore[assignment]
+        if node is not None:
+            node.action_plot_current()
+
+
 def _r(value: str) -> Text:
     """Right-justified Rich Text — used for numeric columns."""
     return Text(value, justify="right")
@@ -73,8 +96,6 @@ class RunCatalogPanel(Vertical):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "close", "Close catalog", show=False),
-        Binding("p", "plot_current", "Plot raw NeXus", show=False),
-        Binding("enter", "plot_current", "Plot raw NeXus", show=False),
     ]
 
     def __init__(self, panel_id: str) -> None:
@@ -82,7 +103,9 @@ class RunCatalogPanel(Vertical):
         self._panel_id = panel_id
         self._header = Static("", id="catalog-header")
         self._meta = Static("", id="catalog-meta")
-        self._table: DataTable = DataTable(
+        # Use the CatalogTable subclass so Up/Down navigates rows AND
+        # ``p`` / ``Enter`` plot the cursor row's raw NeXus.
+        self._table: CatalogTable = CatalogTable(
             cursor_type="row",
             zebra_stripes=False,
             show_header=True,
@@ -95,7 +118,9 @@ class RunCatalogPanel(Vertical):
         self._files: list[Datafile] = []
         self._instrument: str = "EQSANS"
         self._facility: str = "SNS"
-        self.can_focus = True
+        # The container itself isn't focusable — focus belongs to the
+        # CatalogTable inside, which handles cursor nav and key bindings.
+        self.can_focus = False
 
     def compose(self):  # type: ignore[override]
         yield self._header
@@ -165,6 +190,11 @@ class RunCatalogPanel(Vertical):
     @property
     def facility(self) -> str:
         return self._facility
+
+    @property
+    def table(self) -> CatalogTable:
+        """The inner DataTable — what callers should focus when entering this slot."""
+        return self._table
 
     @property
     def current_run_number(self) -> int | None:

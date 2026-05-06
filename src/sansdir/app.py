@@ -118,12 +118,12 @@ class SansdirApp(App[int]):
             raise ValueError(f"unknown panel_id {panel_id!r}")
         self._active_id = panel_id
         self._apply_active_class()
-        # If the new active slot is showing a catalog, focus the catalog
-        # widget directly — Tab onto a hidden FilePanel would do nothing
-        # useful. The user gets a visible cursor on a runnable widget.
+        # If the new active slot is showing a catalog, focus the inner
+        # DataTable so Up/Down nav works and `p` / `Enter` reach the
+        # CatalogTable bindings. The wrapping Vertical isn't focusable.
         target_slot = self._left_slot if panel_id == "left" else self._right_slot
         if target_slot.catalog_visible:
-            self.set_focus(target_slot.catalog)
+            self.set_focus(target_slot.catalog.table)
         else:
             self.set_focus(self.active_panel)
         self._refresh_status()
@@ -295,6 +295,11 @@ class SansdirApp(App[int]):
         # own bindings handle Up/Down/Tab/Esc and normal characters.
         if self.focused is self._cmdline:
             return
+        # If the focused widget binds this key itself (e.g. CatalogTable
+        # binds `p` / `Enter` for plot-from-catalog), let its action run
+        # instead of dispatching the App's keymap entry.
+        if self.focused is not None and _focused_has_binding(self.focused, event.key):
+            return
         for kb in self.keymap:
             if event.key == kb.key:
                 event.stop()
@@ -421,6 +426,27 @@ class SansdirApp(App[int]):
             count,
             filter_substring=panel.filter_substring,
         )
+
+
+def _focused_has_binding(widget, key: str) -> bool:  # type: ignore[no-untyped-def]
+    """True if ``widget`` (or a Textual binding key alias) catches ``key`` itself.
+
+    Textual stores bindings as a list of :class:`textual.binding.Binding`
+    objects on each widget class via the ``BINDINGS`` attribute. We walk
+    the widget's MRO so subclasses inherit their parents' bindings.
+    """
+    try:
+        from textual.binding import Binding
+    except ImportError:  # pragma: no cover
+        return False
+    seen: set[str] = set()
+    for cls in type(widget).__mro__:
+        for b in getattr(cls, "BINDINGS", ()) or ():
+            if isinstance(b, Binding):
+                seen.add(b.key)
+            elif isinstance(b, tuple) and b:
+                seen.add(b[0])
+    return key in seen
 
 
 def run_tui(start_path: str | Path | None = None) -> int:
