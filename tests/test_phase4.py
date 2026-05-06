@@ -157,16 +157,23 @@ async def test_oncat_auth_error_surfaces_clean_message(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # No credentials → OnCatAuthError; UI must notify and stay alive.
+    # Explicitly empty credentials → OnCatAuthError; UI must notify and
+    # stay alive. We override BOTH the config and the env vars so the
+    # built-in defaults can't accidentally make the test hit a real
+    # network.
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         """
         [oncat]
         endpoint = "https://oncat.test"
+        client_id = ""
+        client_secret = ""
         """,
         encoding="utf-8",
     )
     monkeypatch.setenv("SANSDIR_CONFIG", str(cfg))
+    monkeypatch.delenv("ONCAT_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ONCAT_CLIENT_SECRET", raising=False)
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()

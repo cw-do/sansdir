@@ -39,16 +39,22 @@ class MailConfig:
 class OnCatConfig:
     """``[oncat]`` section.
 
-    The ORNL OnCat REST API requires OAuth2 ``client_credentials``. We do
-    not bundle credentials with the source — set them in the config file
-    or via the ``ONCAT_CLIENT_ID`` / ``ONCAT_CLIENT_SECRET`` env vars.
-    Users on the ORNL analysis cluster typically have them in their
-    home directory already.
+    Defaults reuse the public OAuth client identifiers that the same
+    author's ``cw-do/eqsanscli`` ships with — they're application IDs
+    for an OnCat read-only catalog client, not user secrets, so anyone
+    running sansdir on the ORNL cluster gets a working out-of-the-box
+    experience.
+
+    Override per host via ``[oncat]`` in
+    ``~/.config/sansdir/config.toml`` or the ``ONCAT_CLIENT_ID`` /
+    ``ONCAT_CLIENT_SECRET`` env vars.
     """
 
     endpoint: str = "https://oncat.ornl.gov"
-    client_id: str = ""
-    client_secret: str = ""
+    # Public OAuth client_credentials for the EQSANS catalog tooling.
+    # Source: cw-do/eqsanscli/src/eqsanscli/integrations/oncat.py.
+    client_id: str = "17ddcb3e-a727-41a2-aec5-43533988ab69"
+    client_secret: str = "3027a2b1-da09-4e13-bf97-f389ff1a747f"
     default_instrument: str = "EQSANS"
     cache_ttl_seconds: int = 86400
     request_timeout_seconds: float = 30.0
@@ -95,9 +101,18 @@ def load_config(path: Path | None = None) -> Config:
         ),
         oncat=OnCatConfig(
             endpoint=str(oncat_section.get("endpoint", OnCatConfig.endpoint)),
-            client_id=str(oncat_section.get("client_id", os.environ.get("ONCAT_CLIENT_ID", ""))),
+            # Override chain: [oncat] section → env var → built-in default.
+            client_id=str(
+                oncat_section.get(
+                    "client_id",
+                    os.environ.get("ONCAT_CLIENT_ID", OnCatConfig.client_id),
+                )
+            ),
             client_secret=str(
-                oncat_section.get("client_secret", os.environ.get("ONCAT_CLIENT_SECRET", ""))
+                oncat_section.get(
+                    "client_secret",
+                    os.environ.get("ONCAT_CLIENT_SECRET", OnCatConfig.client_secret),
+                )
             ),
             default_instrument=str(
                 oncat_section.get("default_instrument", OnCatConfig.default_instrument)
