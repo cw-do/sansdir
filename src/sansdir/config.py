@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Python 3.11+ ships ``tomllib``; we depend on ``tomli`` for 3.10.
@@ -25,6 +25,33 @@ else:  # pragma: no cover — exercised only on 3.10 CI
 
 
 CONFIG_ENV_VAR: str = "SANSDIR_CONFIG"
+
+
+@dataclass(frozen=True)
+class UiConfig:
+    """``[ui]`` section."""
+
+    # Default Textual theme. Anything in ``app.available_themes`` works
+    # — built-ins include ``textual-dark``, ``textual-light``, ``monokai``,
+    # ``nord``, ``dracula``, ``gruvbox``, ``catppuccin-mocha``,
+    # ``solarized-dark``, ``tokyo-night``, ``rose-pine``, etc. Unknown
+    # values fall back to the built-in default with a notify, so a
+    # typo never blocks startup.
+    theme: str = "textual-dark"
+
+
+@dataclass(frozen=True)
+class KeysConfig:
+    """``[keys]`` section.
+
+    Maps keystroke (Textual key syntax — ``f5``, ``ctrl+u``, ``slash``,
+    ``space``, ``a``, ``A``…) to a registry command name (e.g.
+    ``ui.copy_tagged``, ``view.set_filter``). Entries override or extend
+    the built-in keymap loaded from :mod:`sansdir.ui.keys`. Unknown
+    command names are dropped at startup with a notify.
+    """
+
+    overrides: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -64,8 +91,10 @@ class OnCatConfig:
 class Config:
     """Top-level config. Add new sections here as later phases need them."""
 
-    mail: MailConfig = MailConfig()
-    oncat: OnCatConfig = OnCatConfig()
+    ui: UiConfig = field(default_factory=UiConfig)
+    keys: KeysConfig = field(default_factory=KeysConfig)
+    mail: MailConfig = field(default_factory=MailConfig)
+    oncat: OnCatConfig = field(default_factory=OnCatConfig)
 
 
 def default_config_path() -> Path:
@@ -92,9 +121,19 @@ def load_config(path: Path | None = None) -> Config:
         return Config()
     except OSError:
         return Config()
+    ui_section = data.get("ui", {}) if isinstance(data, dict) else {}
+    keys_section = data.get("keys", {}) if isinstance(data, dict) else {}
     mail_section = data.get("mail", {}) if isinstance(data, dict) else {}
     oncat_section = data.get("oncat", {}) if isinstance(data, dict) else {}
     return Config(
+        ui=UiConfig(theme=str(ui_section.get("theme", UiConfig.theme))),
+        keys=KeysConfig(
+            # Drop non-string values defensively (e.g. user wrote
+            # `f5 = 123`); the rest are normalised to lowercase keys.
+            overrides={
+                str(k): str(v) for k, v in keys_section.items() if isinstance(v, str)
+            }
+        ),
         mail=MailConfig(
             command=str(mail_section.get("command", MailConfig.command)),
             default_subject=str(mail_section.get("default_subject", MailConfig.default_subject)),

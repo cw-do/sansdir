@@ -130,30 +130,46 @@ def move_paths(srcs: Iterable[Path], dst_dir: Path) -> list[Path]:
 def delete_paths(paths: Iterable[Path], *, trash: bool = True) -> list[Path]:
     """Delete each path. Uses ``send2trash`` when available and ``trash=True``.
 
-    Returns the list of paths actually removed (deletes that raised are
-    skipped and logged separately).
+    On filesystems where ``send2trash`` can't create its ``.Trash`` dir
+    (the ORNL cluster's GPFS mount is one such — root is unwritable),
+    we fall back to a plain ``unlink`` / ``rmtree`` so the F8 keystroke
+    still removes the file. Returns the list of paths actually removed;
+    failures are logged but never raise.
     """
     path_list = [Path(p) for p in paths]
     removed: list[Path] = []
     use_trash = trash
+    send2trash_fn = None
     if use_trash:
         try:
-            from send2trash import send2trash
+            from send2trash import send2trash as send2trash_fn
         except ImportError:
             use_trash = False
 
+    fell_back = False
     for p in path_list:
-        try:
-            if use_trash:
-                send2trash(os.fspath(p))  # type: ignore[name-defined]
-            elif p.is_dir() and not p.is_symlink():
-                shutil.rmtree(p)
-            else:
-                p.unlink()
+        deleted = False
+        if use_trash and send2trash_fn is not None:
+            try:
+                send2trash_fn(os.fspath(p))
+                deleted = True
+            except OSError:
+                # Trash dir unavailable on this filesystem (cluster
+                # mounts, NFS without /.Trash, etc.). Fall through
+                # to a plain delete rather than silently doing nothing.
+                fell_back = True
+        if not deleted:
+            try:
+                if p.is_dir() and not p.is_symlink():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+                deleted = True
+            except OSError:
+                _log("delete-failed", [p])
+                continue
+        if deleted:
             removed.append(p)
-        except OSError:
-            _log("delete-failed", [p])
-            continue
     if removed:
-        _log("trash" if use_trash else "delete", removed)
+        _log("trash" if use_trash and not fell_back else "delete", removed)
     return removed

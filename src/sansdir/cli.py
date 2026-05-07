@@ -29,11 +29,29 @@ class _SansdirGroup(click.Group):
         return super().resolve_command(ctx, args)
 
 
+_EPILOG = """\
+Examples:
+
+  \b
+  sansdir                                # launch the TUI in cwd
+  sansdir /SNS/EQSANS/IPTS-12345/shared  # launch the TUI in a folder
+  sansdir extract -k /entry/duration *.nxs.h5
+  sansdir version
+
+Config: ~/.config/sansdir/config.toml (sections: [ui], [keys], [oncat], [mail]).
+Override the path with $SANSDIR_CONFIG.
+
+Docs / issues: see PLANNING.md and TASKS.md in the repo.
+"""
+
+
 @click.group(
     cls=_SansdirGroup,
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
+    epilog=_EPILOG,
 )
+@click.version_option(version=__version__, prog_name="sansdir", message="sansdir %(version)s")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """sansdir — MDIR-style terminal file manager for SANS data.
@@ -48,27 +66,56 @@ def main(ctx: click.Context) -> None:
 @main.command()
 @click.argument("path", required=False, type=click.Path(exists=True, file_okay=False))
 def tui(path: str | None) -> None:
-    """Launch the interactive TUI."""
+    """Launch the interactive dual-pane TUI.
+
+    PATH is the starting directory for the left pane (default: cwd).
+    The right pane mirrors PATH initially. From inside the TUI press
+    ``?`` for keybindings, ``i`` for OnCat IPTS search, ``M`` for
+    batch metadata extract.
+    """
     # Lazy import: avoids paying Textual's import cost on `version`/`extract`.
     from sansdir.app import run_tui
 
     run_tui(start_path=path)
 
 
-@main.command()
+_EXTRACT_EPILOG = """\
+Examples:
+
+  \b
+  # Summary table: one row per file, time-series reduced to means.
+  sansdir extract -k /entry/DASlogs/temperature/value \\
+                  -k /entry/duration \\
+                  --out summary.tsv \\
+                  /SNS/EQSANS/IPTS-12345/nexus/EQSANS_*.nxs.h5
+
+  \b
+  # Per-file mode: <filename> in --out → one CSV per input
+  # with the *full* DASlogs arrays preserved.
+  sansdir extract -k /entry/DASlogs/temperature/time \\
+                  -k /entry/DASlogs/temperature/value \\
+                  --out '<filename>_temp.csv' \\
+                  EQSANS_172749.nxs.h5 EQSANS_172750.nxs.h5
+"""
+
+
+@main.command(epilog=_EXTRACT_EPILOG)
 @click.option(
     "--keys",
     "-k",
     multiple=True,
     required=True,
-    help="HDF5 key path (repeatable). E.g. -k DASlogs/temperature/value",
+    help="HDF5 key path (repeatable). E.g. -k /entry/DASlogs/temperature/value",
 )
 @click.option(
     "--out",
     "-o",
     default=None,
     type=click.Path(dir_okay=False, writable=True),
-    help="Output file (default: ./extracted_<timestamp>.tsv).",
+    help=(
+        "Output file. Summary mode: ./extracted_<timestamp>.<ext> if blank. "
+        "Per-file mode: include '<filename>' to emit one file per input."
+    ),
 )
 @click.option(
     "--format",
@@ -76,13 +123,58 @@ def tui(path: str | None) -> None:
     type=click.Choice(["tsv", "csv", "columns"]),
     default="tsv",
     show_default=True,
+    help="Output table format.",
+)
+@click.option(
+    "--with-stats",
+    is_flag=True,
+    default=False,
+    help="Add <key>_stdev and <key>_n columns next to each value.",
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1),
+    default=8,
+    show_default=True,
+    help="Thread pool size for parallel reads.",
 )
 @click.argument("files", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
-def extract(keys: tuple[str, ...], out: str | None, fmt: str, files: tuple[str, ...]) -> None:
-    """Batch-extract HDF5 metadata from FILES into a tabular file."""
+def extract(
+    keys: tuple[str, ...],
+    out: str | None,
+    fmt: str,
+    with_stats: bool,
+    workers: int,
+    files: tuple[str, ...],
+) -> None:
+    """Batch-extract HDF5 metadata from FILES into a tabular file.
+
+    Two modes, picked by the shape of --out:
+
+    \b
+    * Summary mode (default): one row per input file, time-series
+      values reduced to their mean. --with-stats adds <key>_stdev
+      and <key>_n columns.
+    * Per-file mode: triggered by '<filename>' in --out — each input
+      gets its own table with the *full* arrays preserved.
+    """
+    from pathlib import Path
+
     from sansdir.hdf.batch import extract_to_file
 
-    extract_to_file(files=files, keys=keys, out_path=out, fmt=fmt)
+    written = extract_to_file(
+        files=[Path(f) for f in files],
+        keys=keys,
+        out_path=out,
+        fmt=fmt,  # type: ignore[arg-type]
+        with_stats=with_stats,
+        max_workers=workers,
+    )
+    if isinstance(written, list):
+        for p in written:
+            click.echo(str(p))
+    else:
+        click.echo(str(written))
 
 
 @main.command()

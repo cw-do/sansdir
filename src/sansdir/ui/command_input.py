@@ -94,9 +94,16 @@ class CommandInput(Input):
 
     def action_cancel(self) -> None:
         self.value = ""
-        # Return focus to the active pane so navigation keys work again.
+        # Return focus to whichever surface is active — prefer the
+        # catalog table when the active slot is in catalog mode so the
+        # user lands back where they were typing from.
         with contextlib.suppress(AttributeError, LookupError):
-            self.app.set_focus(self.app.active_panel)  # type: ignore[attr-defined]
+            app = self.app
+            focus = getattr(app, "focus_active_surface", None)
+            if focus is not None:
+                focus()
+            else:
+                app.set_focus(app.active_panel)  # type: ignore[attr-defined]
 
     # ---- completion ----------------------------------------------------------
 

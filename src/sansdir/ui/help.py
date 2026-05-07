@@ -16,6 +16,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Static
 
+from sansdir import __version__
 from sansdir.commands.registry import CommandRegistry
 from sansdir.ui.keys import KeyBinding
 
@@ -36,6 +37,10 @@ class HelpScreen(ModalScreen[None]):
     }
     HelpScreen .title {
         text-style: bold;
+        margin-bottom: 1;
+    }
+    HelpScreen .contact {
+        color: $text-muted;
         margin-bottom: 1;
     }
     HelpScreen .section {
@@ -61,7 +66,14 @@ class HelpScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll():
-            yield Static("sansdir — help", classes="title")
+            yield Static(
+                f"[b cyan]▣[/] [b orange1]SansDIR[/]  [dim]v{__version__}[/dim] — help",
+                classes="title",
+            )
+            yield Static(
+                "Contact: [b]Changwoo Do[/]  ·  doc1@ornl.gov",
+                classes="contact",
+            )
 
             yield Static("Key bindings", classes="section")
             keys_table: DataTable[str] = DataTable(show_header=True, cursor_type=None)

@@ -33,6 +33,10 @@ class ExtractedValue:
     units: str
     is_scalar: bool
     n_points: int  # number of samples backing the value (1 for true scalars)
+    # Population stdev of the time series (only set for numeric series with
+    # ``n_points > 1``). ``None`` for scalars and string series — the batch
+    # extractor renders the cell empty in that case.
+    stdev: float | None = None
 
 
 def extract_value(file: h5py.File, key: str) -> ExtractedValue:
@@ -85,7 +89,12 @@ def extract_value(file: h5py.File, key: str) -> ExtractedValue:
     # Numeric time series → mean. Strings → first entry.
     if np.issubdtype(flat.dtype, np.number):
         return ExtractedValue(
-            key=key, value=float(flat.mean()), units=units, is_scalar=False, n_points=n
+            key=key,
+            value=float(flat.mean()),
+            units=units,
+            is_scalar=False,
+            n_points=n,
+            stdev=float(flat.std()),
         )
     first = flat[0]
     if isinstance(first, bytes):

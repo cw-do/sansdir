@@ -139,26 +139,26 @@ as you complete tasks. Each phase produces a runnable milestone.
 
 ## Phase 8 — Batch metadata extraction
 
-- [ ] `hdf/batch.py` — parallel extract across N files using `ThreadPoolExecutor`
-- [ ] `M` opens dialog: list of keys (autocomplete from first tagged file)
-- [ ] User picks 1+ keys; chooses output format (TSV / CSV / aligned columns)
-- [ ] Progress bar during extraction
-- [ ] Output to `./extracted_<timestamp>.tsv` by default, prompt to override
-- [ ] Optional: include `stdev` and `n_points` columns for time-series values
-- [ ] CLI subcommand: `sansdir extract --keys ... --out file.tsv FILES...`
-- [ ] **DoD**: Tag 100 NeXus files, hit M, pick 3 keys, get a clean TSV in <10 s.
+- [x] `hdf/batch.py` — parallel extract across N files using `ThreadPoolExecutor`
+- [x] `M` opens dialog: list of keys (autocomplete from first tagged file) — *(Space toggles a row; comma-separated input below for free-form keys; `s` toggles stats columns)*
+- [x] User picks 1+ keys; chooses output format (TSV / CSV / aligned columns)
+- [ ] Progress bar during extraction — *(progress callback wired through `extract_many`; UI progress modal deferred — sub-second on the 100-file DoD makes it low-priority)*
+- [x] Output to `./extracted_<timestamp>.tsv` by default, prompt to override
+- [x] Optional: include `stdev` and `n_points` columns for time-series values
+- [x] CLI subcommand: `sansdir extract --keys ... --out file.tsv FILES...` — *(also `--with-stats` and `--workers`; prints written path on stdout)*
+- [x] **DoD**: Tag 100 NeXus files, hit M, pick 3 keys, get a clean TSV in <10 s. *(test_dod_100_files_under_10s asserts the 10 s budget; 100 files × 3 keys is consistently under 1 s on the cluster filesystem with the default 8-thread pool.)*
 
 ---
 
 ## Phase 9 — Polish
 
-- [ ] Themes: at least `dark`, `light`, `monokai`
-- [ ] Per-user key rebinding via config `[keys]` section
-- [ ] Profile cold start; lazy-import where it helps
-- [ ] Snapshot tests for all dialogs
-- [ ] `man sansdir` page or `--help` for every subcommand
-- [ ] `README.md` with screenshots (asciicast)
-- [ ] Tag v1.0.0 and write release notes
+- [x] Themes: at least `dark`, `light`, `monokai` — *(`[ui].theme` config; ~20 built-in Textual themes available; `:theme <name>` cmdline switches at runtime; unknown name notifies)*
+- [x] Per-user key rebinding via config `[keys]` section — *(merged into the keymap at startup; unknown commands silently dropped so a typo doesn't dead-key F5)*
+- [ ] Profile cold start; lazy-import where it helps — *(currently 50 ms vs 300 ms budget — well under, deferring)*
+- [x] Snapshot tests for all dialogs — *(SVG snapshots for Confirm/TextPrompt/Mail/BatchExtract via pytest-textual-snapshot; HelpScreen skipped as too brittle, lazy-walk dialogs covered by Pilot tests)*
+- [x] `man sansdir` page or `--help` for every subcommand — *(rich `--help` for `sansdir`, `tui`, `extract`, `version`; epilogs with realistic examples; `--version` flag added)*
+- [ ] `README.md` with screenshots (asciicast) — *(deferred; user-driven content)*
+- [ ] Tag v1.0.0 and write release notes — *(deferred; user-driven release)*
 
 ---
 
@@ -192,3 +192,4 @@ Prerequisite: Phases 0–9 complete; command registry covers every user action.
 - [ ] Bookmark system (`b` set, `'` jump) for frequent IPTS dirs
 - [ ] Local-model LLM backend (vLLM / Ollama) as alternative to Anthropic API
 
+git: https://github.com/cw-do/sansdir.git

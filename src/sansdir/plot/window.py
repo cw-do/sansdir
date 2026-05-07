@@ -59,7 +59,10 @@ def _pick_interactive_backend() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sansdir.plot.window")
-    parser.add_argument("kind", choices=("iq", "transmission", "iqxqy", "nexus"))
+    parser.add_argument(
+        "kind",
+        choices=("iq", "transmission", "iqxqy", "nexus", "generic", "image"),
+    )
     parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("--xscale", default=None)
     parser.add_argument("--yscale", default=None)
@@ -115,6 +118,14 @@ def main(argv: list[str] | None = None) -> int:
         # independently. log_intensity is the SANS default; the
         # subprocess CLI doesn't expose a flag to flip it yet.
         make_detector_figure(args.files[0], log_intensity=True)
+    elif args.kind == "generic":
+        from sansdir.plot.generic import make_generic_figure
+
+        make_generic_figure(args.files, title=args.title)
+    elif args.kind == "image":
+        from sansdir.plot.image import make_image_figure
+
+        make_image_figure(args.files[0])
     else:
         from sansdir.plot import ascii1d
 

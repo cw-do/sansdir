@@ -1,0 +1,39 @@
+#!/bin/bash
+# SansDIR launcher for the ORNL analysis cluster.
+#
+# This is a *zero-install* entry point: any user with read access to
+# /SNS/EQSANS/shared/script/sansdir can run it directly. We forward all
+# arguments to the venv-installed CLI, so:
+#
+#   /SNS/EQSANS/shared/script/sansdir/bin/sansdir
+#   /SNS/EQSANS/shared/script/sansdir/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
+#   /SNS/EQSANS/shared/script/sansdir/bin/sansdir extract -k /entry/duration ./*.nxs.h5
+#
+# To save typing, symlink this into your $PATH:
+#   ln -s /SNS/EQSANS/shared/script/sansdir/bin/sansdir ~/.local/bin/sansdir
+# or add the bin dir to PATH:
+#   export PATH="/SNS/EQSANS/shared/script/sansdir/bin:$PATH"
+# then just type `sansdir`.
+#
+# The launcher uses absolute paths so it doesn't matter what cwd you call
+# it from or what your virtualenv / conda env happens to be — the
+# bundled venv supplies its own Python and dependencies.
+
+set -e
+
+# Resolve our own location (handles symlinks → still finds the real venv).
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+SANSDIR_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
+VENV_PY="$SANSDIR_ROOT/.venv/bin/python"
+
+if [[ ! -x "$VENV_PY" ]]; then
+    echo "sansdir launcher: venv python not found at $VENV_PY" >&2
+    echo "  (expected the bundled venv to live at $SANSDIR_ROOT/.venv)" >&2
+    echo "  contact: doc1@ornl.gov" >&2
+    exit 1
+fi
+
+# Use the venv's installed entry point (so we get the same dependency
+# surface as `pip install -e .` produced). exec replaces this shell
+# process so signals (Ctrl+C, SIGTERM) reach the Python process directly.
+exec "$VENV_PY" -m sansdir "$@"

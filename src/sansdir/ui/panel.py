@@ -28,6 +28,54 @@ from sansdir.core.filesystem import (
     list_dir,
 )
 
+# A tiny palette for at-a-glance file kinds. Kept short on purpose:
+# users came here for a file manager, not a Christmas tree.
+_KIND_STYLES: tuple[tuple[str, str], ...] = (
+    # SANS reduced data — separable green/magenta so 1D and 2D
+    # outputs in the same dir don't bleed together.
+    ("iqxqy", "magenta"),  # *Iqxqy*.dat
+    ("iq", "green"),  # *Iq*.dat
+    ("trans", "cyan"),  # *trans*.txt
+    # Raw / processed NeXus stand out — they're the heaviest files
+    # and the ones M / m / p act on.
+    ("nxs", "bright_yellow"),
+)
+
+
+def _is_executable(path: Path) -> bool:
+    """True for regular files with the user's exec bit set."""
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    import stat as _stat
+
+    if not _stat.S_ISREG(st.st_mode):
+        return False
+    return bool(st.st_mode & 0o111)
+
+
+def _kind_style(entry: FileEntry) -> str:
+    """Pick a Rich style for a file row based on extension / mode bits.
+
+    Returns "" for plain files so the default terminal colour is
+    used — keeps the panel readable instead of every row being
+    coloured.
+    """
+    if entry.is_parent:
+        return "dim"
+    if entry.is_dir:
+        return "bold blue"
+    if entry.is_symlink:
+        return "cyan"
+    name_lower = entry.name.lower()
+    for needle, style in _KIND_STYLES:
+        if needle in name_lower:
+            return style
+    if _is_executable(entry.path):
+        return "bold red"
+    return ""
+
 
 class FilePanel(DataTable):
     """A file/directory listing pane."""
@@ -280,9 +328,12 @@ class FilePanel(DataTable):
         if entry.is_symlink:
             name_text = f"{name_text} @"
         if entry.path in self.tags:
+            # Tag color always wins — keeps the "* prefix in yellow"
+            # convention consistent regardless of underlying file kind.
             name_col: Text | str = Text(f"* {name_text}", style="bold yellow")
         else:
-            name_col = name_text
+            style = _kind_style(entry)
+            name_col = Text(name_text, style=style) if style else name_text
         size_col = "<DIR>" if entry.is_dir else format_size(entry.size)
         if entry.mtime > 0:
             mtime_col = datetime.fromtimestamp(entry.mtime).strftime("%Y-%m-%d %H:%M")

@@ -180,6 +180,44 @@ async def test_phase4_dod_i_browse_filter_select_catalog(
         await pilot.press("f2")
         await pilot.pause()
         assert slot.catalog_visible
+        # Tab into the catalog pane; F2 from there should also return
+        # that slot to its filelist (the catalog is the *active* slot
+        # now).
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._active_slot is slot
+        await pilot.press("f2")
+        await pilot.pause()
+        assert not slot.catalog_visible
+        # F2 again from the same active slot should restore the catalog
+        # *focused* — Up/Down must work without the user pressing Tab.
+        await pilot.press("f2")
+        await pilot.pause()
+        assert slot.catalog_visible
+        assert app.focused is slot.catalog.table
+        # `/` from the catalog pane filters the run list (not the
+        # FilePanel underneath).
+        if app._active_slot is not slot:
+            await pilot.press("tab")
+            await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        for ch in "sample":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert slot.catalog.filter_substring == "sample"
+        assert [f.run_number for f in slot.catalog.files] == [12002]
+        # Esc clears the filter without closing the catalog.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert slot.catalog.filter_substring == ""
+        assert slot.catalog_visible
+        assert [f.run_number for f in slot.catalog.files] == [12001, 12002]
+        # A second Esc closes the catalog (no filter active now).
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not slot.catalog_visible
         await pilot.press("q")
 
 

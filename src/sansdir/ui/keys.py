@@ -139,7 +139,11 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("=", "pane.sync", "Sync inactive pane to active path", show_in_help=False),
         KeyBinding("ctrl+o", "pane.toggle_max", "Maximize / restore active pane"),
         # Navigation
-        KeyBinding("enter", "nav.cd", "Open directory under cursor", _cd_to_cursor),
+        KeyBinding(
+            "enter",
+            "ui.activate_cursor",
+            "Open dir / image under cursor",
+        ),
         KeyBinding("backspace", "nav.up", "Go up one directory"),
         # Tagging (Phase 2)
         KeyBinding("space", "tag.toggle", "Tag/untag current row"),
@@ -195,8 +199,10 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("f2", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
         # Plotting (Phase 5/6/7)
         KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans / 2D / NeXus)"),
-        # NeXus tree (Phase 7)
+        KeyBinding("l", "ui.plot_generic", "Plot selection (linear-linear, headered tables)"),
+        # NeXus tree (Phase 7) + batch extract (Phase 8)
         KeyBinding("m", "hdf.show_keys", "HDF5 metadata tree", _hdf_under_cursor),
+        KeyBinding("M", "ui.batch_extract", "Batch extract metadata → table"),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(

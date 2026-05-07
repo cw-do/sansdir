@@ -27,6 +27,8 @@ htmlcov/
 .nox/
 .mypy_cache/
 .ruff_cache/
+# pytest-textual-snapshot writes this on a failed snapshot run
+snapshot_report.html
 
 # IDE
 .idea/

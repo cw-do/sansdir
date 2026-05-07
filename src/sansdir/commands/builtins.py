@@ -17,6 +17,7 @@ through :meth:`CommandRegistry.dispatch` — handlers never bypass it.
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -174,14 +175,70 @@ def _make_view_toggle_hidden(app: AppProtocol) -> Command:
     )
 
 
+def _make_ui_set_theme(app: AppProtocol) -> Command:
+    """``:theme <name>`` — switch Textual theme at runtime.
+
+    Acceptable names come from ``app.available_themes`` (Textual ships
+    monokai, nord, dracula, gruvbox, catppuccin-mocha, tokyo-night,
+    rose-pine, solarized-{dark,light}, ansi-{dark,light}, plus the
+    built-in textual-{dark,light}). Unknown names notify with the list.
+    """
+
+    def handler(name: str = "") -> str:
+        from sansdir.app import SansdirApp as _RealApp
+
+        if not isinstance(app, _RealApp):
+            return ""  # pragma: no cover
+        if not name:
+            app.notify_user(
+                "themes: " + ", ".join(sorted(app.available_themes)),
+            )
+            return ""
+        if name not in app.available_themes:
+            app.notify_user(
+                f"unknown theme {name!r}. try: "
+                + ", ".join(sorted(app.available_themes)),
+                severity="warning",
+            )
+            return ""
+        app.theme = name
+        app.notify_user(f"theme: {name}")
+        return name
+
+    return Command(
+        name="ui.set_theme",
+        description="Switch Textual theme (no arg lists available).",
+        params=(
+            CommandParam(
+                name="name",
+                type="string",
+                description="Theme name (blank to list).",
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        aliases=("theme",),
+    )
+
+
 def _make_view_set_filter(app: AppProtocol) -> Command:
     def handler(pattern: str = "") -> str:
-        app.active_panel.filter_substring = pattern
+        # If the active slot currently displays the run catalog, filter
+        # *that* table; otherwise fall back to the file panel. Both
+        # surfaces expose the same ``filter_substring`` attribute, so
+        # the rest of the system (status bar, ``:filter`` cmdline, …)
+        # doesn't need to care which is which.
+        slot = getattr(app, "_active_slot", None)
+        if slot is not None and slot.catalog_visible:
+            slot.catalog.filter_substring = pattern
+        else:
+            app.active_panel.filter_substring = pattern
         return pattern
 
     return Command(
         name="view.set_filter",
-        description="Filter the active pane by substring (empty clears).",
+        description="Filter the active pane (or catalog) by substring (empty clears).",
         params=(
             CommandParam(
                 name="pattern",
@@ -533,7 +590,13 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                 if chosen is None:
                     return None
                 # `chosen` is a sansdir.core.oncat.Experiment.
-                target = chosen.cluster_path()  # type: ignore[attr-defined]
+                ipts_root = chosen.cluster_path()  # type: ignore[attr-defined]
+                # Most users want the per-experiment ``shared/`` folder
+                # (notebooks, reduced data, scripts) — not the root,
+                # which mainly holds raw nexus / images. Drop into
+                # ``shared`` when it exists, otherwise the root.
+                shared_dir = ipts_root / "shared"
+                target = shared_dir if shared_dir.is_dir() else ipts_root
                 ok = await _push_modal(
                     ConfirmDialog(
                         f"Go to {target}\nand load the run catalog in the other pane?",
@@ -603,6 +666,109 @@ def _make_plot_iq(app: AppProtocol) -> Command:
         name="plot.iq",
         description="Plot one or more 2/3/4-col I(q) ASCII files (overlay).",
         params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        handler=handler,
+    )
+
+
+def _make_plot_generic(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        from sansdir.plot.generic import plot_generic
+
+        png, info = plot_generic([Path(p) for p in paths])
+        return _plot_user_message(png, info, paths)
+
+    return Command(
+        name="plot.generic",
+        description="Linear-linear plot of any tabular file (CSV/TSV/whitespace).",
+        params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        handler=handler,
+        aliases=("plot.linear", "lplot"),
+    )
+
+
+def _make_plot_image(app: AppProtocol) -> Command:
+    def handler(paths: list[str]) -> str:
+        from sansdir.plot.image import plot_image
+
+        png, info = plot_image([Path(p) for p in paths])
+        return _plot_user_message(png, info, paths)
+
+    return Command(
+        name="plot.image",
+        description="Open one or more image files (PNG / JPG / GIF / TIFF) in matplotlib.",
+        params=(CommandParam(name="paths", type="files", description="Image file(s)."),),
+        handler=handler,
+        aliases=("image", "view.image"),
+    )
+
+
+def _make_ui_activate_cursor(app: AppProtocol) -> Command:
+    """``Enter`` smart-dispatch: dir → cd, image → plot, else → cd (errors).
+
+    The classic file-manager Enter only had to mean "cd into the
+    folder under the cursor" — but with images on disk the natural
+    expectation is "open it". We branch by path kind:
+
+    * directory → :command:`nav.cd`
+    * known image extension → :command:`plot.image`
+    * anything else → :command:`nav.cd` (which raises a clean
+      :class:`NotADirectoryError`, surfaced as a status notify)
+    """
+
+    async def handler() -> str | None:
+        from sansdir.plot.image import is_image
+
+        cur = app.active_panel.cursor_path
+        if cur is None:
+            # Mirror nav.cd's empty-pane behaviour.
+            return await app.registry.dispatch(  # type: ignore[attr-defined]
+                "nav.cd", path=str(app.active_panel.cwd)
+            )
+        target = Path(cur)
+        if target.is_dir():
+            return await app.registry.dispatch(  # type: ignore[attr-defined]
+                "nav.cd", path=str(target)
+            )
+        if is_image(target):
+            return await app.registry.dispatch(  # type: ignore[attr-defined]
+                "plot.image", paths=[str(target)]
+            )
+        # Fall back so the user gets the existing "not a directory"
+        # notification rather than a silent no-op.
+        return await app.registry.dispatch(  # type: ignore[attr-defined]
+            "nav.cd", path=str(target)
+        )
+
+    return Command(
+        name="ui.activate_cursor",
+        description="Smart Enter: cd into a directory, open an image, …",
+        params=(),
+        handler=handler,
+    )
+
+
+def _make_ui_plot_generic(app: AppProtocol) -> Command:
+    """``l`` keystroke: linear-linear plot of the active selection."""
+
+    def handler() -> str | None:
+        srcs = app.active_panel.selection()
+        if not srcs:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return None
+        # Drop any directories that snuck in via tags.
+        files = [p for p in srcs if p.is_file()]
+        if not files:
+            app.notify_user("no files in selection", severity="warning")
+            return None
+        from sansdir.plot.generic import plot_generic
+
+        png, info = plot_generic(files)
+        return _plot_user_message(png, info, [str(p) for p in files])
+
+    return Command(
+        name="ui.plot_generic",
+        description="Linear-linear plot of the active selection (column-headered tables).",
+        params=(),
         handler=handler,
     )
 
@@ -810,6 +976,231 @@ def _make_plot_detector_sum(app: AppProtocol) -> Command:
         name="plot.detector_sum",
         description="Render NeXus detector banks as 2D heatmaps (one window per file).",
         params=(CommandParam(name="paths", type="files", description="*.nxs.h5 file(s)."),),
+        handler=handler,
+    )
+
+
+def _make_hdf_batch_extract(app: AppProtocol) -> Command:
+    def handler(
+        paths: list[str],
+        keys: str | list[str],
+        out: str = "",
+        fmt: str = "tsv",
+        with_stats: bool = False,
+    ) -> str:
+        from sansdir.hdf.batch import extract_to_file
+
+        # ``keys`` arrives as a comma-separated string from the cmdline
+        # but as a list when called programmatically (the M dialog
+        # handler passes a list). Normalise to list.
+        if isinstance(keys, str):
+            key_list = [k.strip() for k in keys.split(",") if k.strip()]
+        else:
+            key_list = list(keys)
+        if not paths:
+            raise ValueError("hdf.batch_extract: at least one file required")
+        if not key_list:
+            raise ValueError("hdf.batch_extract: at least one key required")
+        if fmt not in ("tsv", "csv", "columns"):
+            raise ValueError(f"hdf.batch_extract: unknown fmt {fmt!r}")
+        # ``out`` is a string param so the cmdline can pass it; treat
+        # the empty string as "use the default timestamped path".
+        out_path = Path(out).expanduser() if out else None
+        if out_path is not None and not out_path.is_absolute():
+            out_path = app.active_panel.cwd / out_path
+        written = extract_to_file(
+            files=[Path(p) for p in paths],
+            keys=key_list,
+            out_path=out_path,
+            fmt=fmt,  # type: ignore[arg-type]
+            with_stats=with_stats,
+        )
+        if isinstance(written, list):
+            # Per-file mode: one output per input.
+            app.notify_user(
+                f"wrote {len(written)} per-file table(s) "
+                f"(first: {written[0].name})"
+                if written
+                else "no files written"
+            )
+            return ", ".join(str(p) for p in written)
+        app.notify_user(f"wrote {len(paths)} row(s) → {written}")
+        return str(written)
+
+    return Command(
+        name="hdf.batch_extract",
+        description="Extract DASlogs values from many NeXus files into a TSV/CSV/columns file.",
+        params=(
+            CommandParam(name="paths", type="files", description="*.nxs.h5 files."),
+            CommandParam(
+                name="keys",
+                type="string",
+                description=(
+                    "Comma-separated HDF5 key paths (e.g. /entry/DASlogs/temperature/value)."
+                ),
+            ),
+            CommandParam(
+                name="out",
+                type="path",
+                description="Output file. Empty → ./extracted_<timestamp>.<ext>.",
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="fmt",
+                type="string",
+                description="Output format: tsv | csv | columns.",
+                required=False,
+                default="tsv",
+            ),
+            CommandParam(
+                name="with_stats",
+                type="bool",
+                description="Add <key>_stdev and <key>_n columns.",
+                required=False,
+                default=False,
+            ),
+        ),
+        handler=handler,
+        aliases=("extract",),
+    )
+
+
+def _make_ui_batch_extract(app: AppProtocol) -> Command:
+    """``M`` keystroke: open the BatchExtractDialog for the active selection.
+
+    Two entry points:
+
+    * From a file pane (the keystroke fires with no args): we resolve
+      the user's tags / cursor selection to ``*.nxs.h5`` paths.
+    * From the catalog pane (the catalog binding fires with explicit
+      ``paths=[...]``): we honour the supplied list verbatim, since
+      the catalog has already resolved IPTS run numbers to cluster
+      NeXus paths on its end.
+    """
+
+    async def handler(paths: list[str] | None = None) -> str | None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.hdf.batch import (
+            extract_many,
+            extract_per_file,
+            write_table,
+        )
+        from sansdir.ui.dialogs import BatchExtractDialog
+
+        if not isinstance(app, _RealApp):
+            return None  # pragma: no cover
+        if paths is not None:
+            nexus_files = [Path(p) for p in paths]
+        else:
+            srcs = app.active_panel.selection()
+            nexus_files = [
+                p
+                for p in srcs
+                if p.is_file()
+                and (p.name.endswith(".nxs.h5") or p.suffix.lower() == ".nxs")
+            ]
+        if not nexus_files:
+            app.notify_user(
+                "no NeXus files selected — tag *.nxs.h5 / *.nxs files first",
+                severity="warning",
+            )
+            return None
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[dict | None] = loop.create_future()
+
+        def _cb(value: dict | None) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        # Pass the write dir up-front so the dialog can show it next
+        # to the Output field — the same value the dispatcher uses to
+        # resolve relative paths a few lines down.
+        app.push_screen(
+            BatchExtractDialog(nexus_files, write_dir=app.inactive_panel.cwd),
+            _cb,
+        )
+        data = await fut
+        if not data:
+            return None
+        # MDIR semantic: write to *the other pane* by default. The
+        # active source might be a read-only IPTS folder (raw data) or
+        # the OnCat catalog (which has no real cwd at all), so anchoring
+        # the output to the inactive pane's cwd avoids permission errors
+        # and matches users' "copy/move from active → inactive" muscle
+        # memory.
+        write_dir = app.inactive_panel.cwd
+        keys = data["keys"]
+        fmt = data.get("fmt", "tsv")
+        mode = data.get("mode", "per_file")
+        with_stats = bool(data.get("with_stats", False))
+        out_value = (data.get("out") or "").strip()
+        # Per-file mode requires ``<filename>`` somewhere in the path so
+        # each input gets its own output. We inject it into the basename
+        # if missing so users can type ``my_extract.csv`` and still get
+        # one CSV per run (rather than the cross-run summary table).
+        if mode == "per_file":
+            if not out_value:
+                out_value = "<filename>_extracted." + (
+                    "csv" if fmt == "csv" else "tsv" if fmt == "tsv" else "txt"
+                )
+            elif "<filename>" not in out_value:
+                p = Path(out_value)
+                stem_name = f"<filename>_{p.name}"
+                out_value = (
+                    str(p.parent / stem_name) if str(p.parent) not in (".", "") else stem_name
+                )
+                app.notify_user(
+                    f"per-file mode: writing to '{out_value}' (auto-prepended <filename>_)",
+                )
+        if out_value:
+            p = Path(out_value).expanduser()
+            out_path: Path = p if p.is_absolute() else write_dir / p
+        else:
+            # Summary mode with empty output → timestamped table in the
+            # writable pane.
+            ext = {"tsv": "tsv", "csv": "csv", "columns": "txt"}[fmt]
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            out_path = write_dir / f"extracted_{stamp}.{ext}"
+        try:
+            if mode == "per_file":
+                written_paths = extract_per_file(
+                    nexus_files, keys, out_path, fmt=fmt  # type: ignore[arg-type]
+                )
+                if not written_paths:
+                    app.notify_user("no files written", severity="warning")
+                    return None
+                app.notify_user(
+                    f"wrote {len(written_paths)} per-file table(s) "
+                    f"(first: {written_paths[0].name})"
+                )
+                return ", ".join(str(p) for p in written_paths)
+            # Summary mode: one row per file with means.
+            rows = extract_many(nexus_files, keys)
+            written = write_table(
+                rows, keys, out_path, fmt=fmt, with_stats=with_stats  # type: ignore[arg-type]
+            )
+        except (OSError, ValueError) as exc:
+            app.notify_user(f"extract failed: {exc}", severity="error")
+            return None
+        app.notify_user(f"wrote {len(nexus_files)} row(s) → {written}")
+        return str(written)
+
+    return Command(
+        name="ui.batch_extract",
+        description="Open the metadata-extraction dialog for the active selection.",
+        params=(
+            CommandParam(
+                name="paths",
+                type="files",
+                description=(
+                    "Explicit *.nxs.h5 list (catalog pane uses this); "
+                    "blank → fall back to the active file pane's selection."
+                ),
+                required=False,
+                default=None,
+            ),
+        ),
         handler=handler,
     )
 
@@ -1112,8 +1503,22 @@ def _make_view_file(app: AppProtocol) -> Command:
 
 def _make_view_toggle_other_pane(app: AppProtocol) -> Command:
     def handler() -> bool:
-        # If the inactive pane is already showing a viewer, F3 dismisses it.
-        if app.is_other_pane_viewing():
+        from sansdir.app import SansdirApp as _RealApp
+
+        # If *either* pane is showing a viewer, F3 dismisses that one —
+        # users routinely Tab into the viewer pane to scroll, then hit
+        # F3 (or Esc) to close from there. Without this branch, F3 from
+        # the viewer pane would try to view its own (FilePanel-less)
+        # cursor and warn.
+        if isinstance(app, _RealApp):
+            if app._active_slot.viewer_visible:
+                app.close_inline_viewer(app._active_id)
+                return False
+            if app._inactive_slot.viewer_visible:
+                other_id = "right" if app._active_id == "left" else "left"
+                app.close_inline_viewer(other_id)
+                return False
+        elif app.is_other_pane_viewing():  # protocol-only fallback
             app.close_inline_viewer("right" if app.active_panel is _left_of(app) else "left")
             return False
         cur = app.active_panel.cursor_path
@@ -1125,7 +1530,7 @@ def _make_view_toggle_other_pane(app: AppProtocol) -> Command:
 
     return Command(
         name="view.toggle_other_pane",
-        description="Show the file under the cursor in the inactive pane (toggle).",
+        description="Show the file under the cursor in the other pane (toggle from either side).",
         params=(),
         handler=handler,
     )
@@ -1178,7 +1583,15 @@ def _make_ui_delete_tagged(app: AppProtocol) -> Command:
         removed = fileops.delete_paths(srcs)
         app.active_panel.clear_tags()
         app.active_panel.refresh_listing()
-        app.notify_user(f"deleted {len(removed)} entries")
+        failed = len(srcs) - len(removed)
+        if failed:
+            app.notify_user(
+                f"deleted {len(removed)} of {len(srcs)} entries "
+                f"({failed} failed — check permissions)",
+                severity="warning",
+            )
+        else:
+            app.notify_user(f"deleted {len(removed)} entries")
         return len(removed)
 
     return Command(
@@ -1251,8 +1664,15 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_plot_transmission(app),
         _make_plot_iqxqy(app),
         _make_plot_detector_sum(app),
+        _make_plot_generic(app),
         _make_hdf_show_keys(app),
+        _make_hdf_batch_extract(app),
+        _make_ui_batch_extract(app),
         _make_ui_plot_auto(app),
+        _make_ui_plot_generic(app),
+        _make_plot_image(app),
+        _make_ui_activate_cursor(app),
+        _make_ui_set_theme(app),
     ]
 
 

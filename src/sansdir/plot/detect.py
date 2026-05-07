@@ -44,9 +44,18 @@ class Detected:
 
 
 def detect_kind(path: Path) -> Detected:
-    """Classify ``path``. Doesn't read the whole file."""
+    """Classify ``path``. Doesn't read the whole file.
+
+    Picks NeXus / HDF5 by checking the first 8 bytes for the HDF5
+    magic signature in addition to the ``.nxs.h5`` filename. Mantid
+    sometimes writes its processed output as just ``.nxs`` (without
+    ``.h5``); the file is still HDF5 so detector plot / metadata
+    extract still apply. Falls back to extension if the file isn't
+    readable for the magic check.
+    """
     suffixes = "".join(path.suffixes).lower()
-    if suffixes.endswith(".nxs.h5"):
+    name_says_nexus = suffixes.endswith(".nxs.h5") or suffixes.endswith(".nxs")
+    if name_says_nexus or _is_hdf5_magic(path):
         return Detected(kind=KIND_NEXUS, columns=0)
     if not path.is_file():
         return Detected(kind=KIND_UNKNOWN, columns=0)
@@ -71,6 +80,22 @@ def detect_kind(path: Path) -> Detected:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+# First 8 bytes of every HDF5 file (and therefore every NeXus file
+# Mantid or the DAS writes). Used to sniff content rather than rely
+# on the extension, since processed Mantid output is sometimes saved
+# as plain ``.nxs`` rather than ``.nxs.h5``.
+_HDF5_MAGIC: bytes = b"\x89HDF\r\n\x1a\n"
+
+
+def _is_hdf5_magic(path: Path) -> bool:
+    """Cheap content sniff: first 8 bytes match the HDF5 signature."""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(len(_HDF5_MAGIC)) == _HDF5_MAGIC
+    except OSError:
+        return False
 
 
 def _iter_data_lines(path: Path, *, max_lines: int = 8) -> Iterable[str]:

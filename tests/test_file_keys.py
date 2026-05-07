@@ -208,6 +208,76 @@ async def test_f3_shows_file_in_other_pane(tmp_path: Path) -> None:
         await pilot.press("q")
 
 
+async def test_f3_tab_into_viewer_then_close(tmp_path: Path) -> None:
+    """F3 → Tab into viewer pane → Esc / F3 close from there.
+
+    The viewer keeps focus when Tab brings it into the active slot;
+    `Esc` (the viewer's own binding) and `F3` (the toggle handler)
+    both dismiss it from inside.
+    """
+    from sansdir.ui.inline_viewer import InlineFileViewer
+
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("f3")
+        await pilot.pause()
+        assert app._inactive_slot.viewer_visible
+        # Tab → active slot is now the viewer slot, and focus follows
+        # to the InlineFileViewer (so Esc / q reach the widget).
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._active_slot.viewer_visible
+        assert isinstance(app.focused, InlineFileViewer)
+        # Esc closes it from inside the viewer.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not app._active_slot.viewer_visible
+        # Re-open and verify F3 from inside the viewer also closes.
+        # First Tab back to the file pane to set up the F3.
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("f3")
+        await pilot.pause()
+        assert app._inactive_slot.viewer_visible
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._active_slot.viewer_visible
+        await pilot.press("f3")
+        await pilot.pause()
+        assert not app._active_slot.viewer_visible
+        await pilot.press("q")
+
+
+async def test_focus_sync_keeps_active_id_aligned_with_textual_focus(
+    tmp_path: Path,
+) -> None:
+    """Mouse clicks (or any focus change) drag ``_active_id`` along.
+
+    Without this sync the visible "active" border and the keymap's
+    target panel can desync — the user sees the yellow border on the
+    left but arrows still scroll the right pane.
+    """
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Start active = left.
+        assert app._active_id == "left"
+        # Move Textual focus to the right panel directly (the same
+        # thing Textual does when you click on it).
+        right_panel = app._right
+        right_panel.focus()
+        await pilot.pause()
+        assert app._active_id == "right"
+        # And back.
+        app._left.focus()
+        await pilot.pause()
+        assert app._active_id == "left"
+        await pilot.press("q")
+
+
 async def test_f3_on_directory_notifies(tmp_path: Path) -> None:
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:

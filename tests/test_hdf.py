@@ -185,7 +185,7 @@ def test_load_processed_rejects_wrong_size(tmp_path: Path) -> None:
     with h5py.File(f, "w") as fh:
         fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("x"))
         fh.create_dataset("mantid_workspace_1/workspace/values", data=np.arange(10))
-    with pytest.raises(reader.HdfError, match="expected"):
+    with pytest.raises(reader.HdfError, match="can't be reduced"):
         hdf5_detector.load_processed(f)
 
 
@@ -218,6 +218,117 @@ def test_load_detector_image_neither_shape_raises(tmp_path: Path) -> None:
         hdf5_detector.load_detector_image(f)
 
 
+def test_make_detector_figure_dispatches_to_iqxy_for_2d_workspace(
+    tmp_path: Path,
+) -> None:
+    """A Mantid Iqxy workspace renders as a pcolormesh with q axes."""
+    import h5py
+    import matplotlib.pyplot as plt
+
+    f = tmp_path / "fake_iqxy.nxs"
+    n_qx, n_qy = 16, 12
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("iqxy-fixture"))
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/values",
+            data=np.random.default_rng(1).poisson(5.0, size=(n_qy, n_qx)).astype(float),
+        )
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/axis1",
+            data=np.linspace(-0.3, 0.3, n_qx + 1),
+        )
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/axis2",
+            data=np.linspace(-0.3, 0.3, n_qy + 1),
+        )
+    fig = hdf5_detector.make_detector_figure(f)
+    ax = fig.axes[0]
+    # pcolormesh adds a Collection, not an Image — that's the
+    # signature that says "we took the Iqxy branch" rather than the
+    # detector imshow path.
+    assert len(list(ax.get_images())) == 0
+    assert len(ax.collections) == 1
+    assert "q_x" in ax.get_xlabel()
+    assert "q_y" in ax.get_ylabel()
+    assert "iqxy-fixture" in ax.get_title()
+    plt.close(fig)
+
+
+def test_load_processed_per_pixel_histogram_sums_bins(tmp_path: Path) -> None:
+    """``(49152, n_bins)`` layout: sum across bins → detector image."""
+    import h5py
+
+    f = tmp_path / "per_pixel_hist.nxs"
+    n_pix = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    n_bins = 30
+    rng = np.random.default_rng(0)
+    raw = rng.poisson(1.0, size=(n_pix, n_bins)).astype(float)
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("multi-bin"))
+        fh.create_dataset("mantid_workspace_1/workspace/values", data=raw)
+    img = hdf5_detector.load_processed(f)
+    assert img.image.shape == (256, 192)
+    # Total counts == raw.sum() — bins are summed, no data dropped.
+    assert float(img.image.sum()) == pytest.approx(raw.sum())
+
+
+def test_load_processed_transposed_histogram_sums_along_axis0(tmp_path: Path) -> None:
+    """``(n_bins, 49152)`` is also accepted; sum on axis 0."""
+    import h5py
+
+    f = tmp_path / "transposed_hist.nxs"
+    n_pix = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    raw = np.random.default_rng(1).poisson(1.0, size=(7, n_pix)).astype(float)
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("t"))
+        fh.create_dataset("mantid_workspace_1/workspace/values", data=raw)
+    img = hdf5_detector.load_processed(f)
+    assert img.image.shape == (256, 192)
+    assert float(img.image.sum()) == pytest.approx(raw.sum())
+
+
+def test_load_iqxy_reduced_rejects_inconsistent_axes(tmp_path: Path) -> None:
+    """``axis1`` / ``axis2`` must be ``n_bins+1`` / ``n_spectra+1`` long."""
+    import h5py
+
+    f = tmp_path / "bad_axes.nxs"
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("bad"))
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/values", data=np.zeros((4, 4))
+        )
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/axis1", data=np.linspace(0, 1, 4)
+        )
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/axis2", data=np.linspace(0, 1, 4)
+        )
+    with pytest.raises(reader.HdfError, match="bin-edge"):
+        hdf5_detector.load_iqxy_reduced(f)
+
+
+def test_make_detector_figure_for_processed_short_nxs(tmp_path: Path) -> None:
+    """Processed Mantid output with ``.nxs`` (no ``.h5``) plots end-to-end."""
+    import h5py
+    import matplotlib.pyplot as plt
+
+    f = tmp_path / "processed.nxs"
+    n = hdf5_detector.EQSANS_NPIXELS_TOTAL
+    with h5py.File(f, "w") as fh:
+        fh.create_dataset(
+            "mantid_workspace_1/title", data=np.bytes_("processed-sample")
+        )
+        fh.create_dataset(
+            "mantid_workspace_1/workspace/values",
+            data=np.arange(n, dtype=float).reshape(192, 256).ravel(),
+        )
+    fig = hdf5_detector.make_detector_figure(f)
+    main = fig.axes[0]
+    assert "processed-sample" in main.get_title()
+    assert len(list(main.get_images())) == 1
+    plt.close(fig)
+
+
 def test_make_detector_figure_renders_imshow(tmp_path: Path) -> None:
     """Single (256x192) imshow with colorbar — not a tile of banks."""
     import matplotlib.pyplot as plt
@@ -230,6 +341,8 @@ def test_make_detector_figure_renders_imshow(tmp_path: Path) -> None:
     assert len(list(main.get_images())) == 1
     assert main.get_xlabel() == "Tube"
     assert main.get_ylabel() == "Pixel"
+    # Initial layout is a square plot box; user can press `a` to flip.
+    assert main.get_box_aspect() == 1
     plt.close(fig)
 
 

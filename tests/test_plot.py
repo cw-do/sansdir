@@ -111,6 +111,26 @@ def test_detect_nexus_by_extension(tmp_path: Path) -> None:
     assert d.kind == detect.KIND_NEXUS
 
 
+def test_detect_nexus_by_short_nxs_extension(tmp_path: Path) -> None:
+    """Mantid sometimes writes processed output with just ``.nxs``."""
+    f = tmp_path / "processed_42.nxs"
+    f.write_bytes(b"")
+    d = detect.detect_kind(f)
+    assert d.kind == detect.KIND_NEXUS
+
+
+def test_detect_nexus_by_hdf5_magic_regardless_of_extension(tmp_path: Path) -> None:
+    """If the bytes say HDF5, classify as NeXus even with a wrong extension."""
+    f = tmp_path / "weird-name.dat"
+    # Real HDF5 file — quickest way is to let h5py write it.
+    import h5py
+
+    with h5py.File(f, "w") as fh:
+        fh.create_group("entry")
+    d = detect.detect_kind(f)
+    assert d.kind == detect.KIND_NEXUS
+
+
 def test_detect_iqxqy_by_repeated_first_col(tmp_path: Path) -> None:
     """4-col with repeating qx values in first rows → 2D, not 1D Iq."""
     f = tmp_path / "Iqxqy_4col.dat"
