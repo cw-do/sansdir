@@ -271,16 +271,27 @@ edge without having to land the first click on column 0 / row 0.
   press `Delete` to **remove** that one shape. Outside edit mode
   `Delete` falls back to plain undo so the keystroke is never a
   no-op.
-- **Mask spec** (text input below the button bar): type
-  `b3` / `t50` / `b5-7 t10-15` and hit Enter to mask whole
-  banks / tubes by number. Bank → 4 tubes; ranges and mixed tokens
-  work; the resulting Rectangles round-trip through
-  `mask_log.json` like any other shape.
+- **Mask spec** (the **Mask Spec... (k)** button or the `k`
+  shortcut opens a Tk dialog): type `b3` / `t50` / `b5-7 t10-15`
+  to mask whole banks / tubes by number. Bank → 4 tubes; ranges
+  and mixed tokens work; the resulting Rectangles round-trip
+  through `mask_log.json` like any other shape. (Earlier drafts
+  used an inline matplotlib `TextBox` here — switched to a
+  dialog because matplotlib's text-widget redraws on every
+  keystroke, which on a 256x192 LogNorm imshow lands as visible
+  per-character lag.)
 - **Cursor readout:** matplotlib's status bar shows
   `tube=N pixel=M counts=K · bank=B tube_in_bank=T` as you hover.
-- **Other action keys:** `z` undo · `i` invert · `s` save · `Esc`
-  quit. The bottom button row is `Rect (r) · Ellipse (e) · Edit (v)
-  · Undo (z) · Clear · Invert (i) · Save... (s) · Quit (Esc)`.
+- **Other action keys:** `z` undo · `i` invert · `k` mask spec
+  dialog · `s` save · `Esc` quit. The bottom button row is
+  `Rect (r) · Ellipse (e) · Edit (v) · Undo (z) · Clear · Invert (i)
+  · Save... (s) · Quit (Esc)`, with `Mask Spec... (k)` on the row
+  below.
+- **Move-in-edit-mode is blit-fast.** When you press to start
+  dragging a shape, the editor snapshots the static canvas; each
+  motion event then restores that snapshot and re-blits only the
+  patch you're moving — orders of magnitude cheaper than redrawing
+  the whole heatmap on every mouse pixel.
 - **Save dialog:** `Save... (s)` opens a Tk file chooser pre-filled
   with the default path (the inactive pane's cwd /
   `<source-stem>_mask.nxs`). Pick a different folder or filename if

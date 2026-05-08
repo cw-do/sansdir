@@ -34,6 +34,7 @@ masking workflows; deeper edits land later):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -345,7 +346,6 @@ def run_editor(
         Button,
         EllipseSelector,
         RectangleSelector,
-        TextBox,
     )
 
     from sansdir.mask.banktube import (
@@ -657,43 +657,58 @@ def run_editor(
     btn_save = make_button("Save... (s)", 0.66, 0.13, cb_save)
     btn_quit = make_button("Quit (Esc)", 0.80, 0.10, cb_quit)
 
-    # ---- Mask-by-bank/tube text input ------------------------------
-    # A second row beneath the button bar. The user types e.g.
-    # ``b3``, ``t50``, ``b5-7 t10-15`` and hits Enter to add one
-    # Rectangle per consecutive run of columns. We reuse Rectangle
-    # because (a) every run is a contiguous strip and (b) the saved
-    # mask_log.json then round-trips through ``--shapes-json``.
-    spec_label_ax = fig.add_axes((0.02, 0.09, 0.16, 0.04))
-    spec_label_ax.axis("off")
-    spec_label_ax.text(
-        0.0, 0.5,
-        "Mask spec  (e.g. b3, t50, b5-7):",
-        transform=spec_label_ax.transAxes,
-        ha="left", va="center", fontsize=9,
-    )
-    spec_box_ax = fig.add_axes((0.20, 0.09, 0.55, 0.04))
-    spec_box = TextBox(spec_box_ax, "", initial="")
-    spec_status_ax = fig.add_axes((0.76, 0.09, 0.22, 0.04))
+    # ---- Mask-by-bank/tube spec --------------------------------------
+    # A button + Tk askstring dialog instead of an inline TextBox:
+    # matplotlib's TextBox calls ``draw_idle()`` on every keystroke,
+    # which on a 256x192 LogNorm imshow lands as visible per-character
+    # lag. Tk's askstring runs in its own (fast) widget and fires a
+    # single rebuild on submit. The status text below the button bar
+    # shows the most recent spec's outcome.
+    spec_status_ax = fig.add_axes((0.20, 0.09, 0.78, 0.04))
     spec_status_ax.axis("off")
     spec_status_text = spec_status_ax.text(
-        0.0, 0.5, "",
+        0.0, 0.5,
+        "Mask spec — click [Mask Spec... (k)] or press k  "
+        "(e.g. b3, t50, b5-7 t10-15)",
         transform=spec_status_ax.transAxes,
         ha="left", va="center", fontsize=9, color="#888",
     )
 
-    def _on_spec_submit(text: str) -> None:
+    def _ask_mask_spec() -> str | None:
+        """Open a Tk simpledialog for a bank/tube spec.
+
+        Returns the entered string (possibly empty), or ``None`` if
+        the user cancelled or Tk isn't available on this Python.
+        """
+        try:
+            import tkinter as tk
+            from tkinter import simpledialog
+        except ImportError:
+            return None
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            return simpledialog.askstring(
+                title="Mask spec",
+                prompt="Bank / tube spec\n(e.g. b3, t50, b5-7 t10-15):",
+                parent=root,
+            )
+        finally:
+            root.destroy()
+
+    def _apply_mask_spec(text: str) -> None:
         text = text.strip()
         if not text:
             return
         try:
             cols = parse_spec(text)
         except ValueError as exc:
-            spec_status_text.set_text(f"err: {exc}")
+            spec_status_text.set_text(f"spec err: {exc}")
             spec_status_text.set_color("#c00")
             fig.canvas.draw_idle()
             return
         if not cols:
-            spec_status_text.set_text("(no columns matched)")
+            spec_status_text.set_text(f"(no columns matched in {text!r})")
             spec_status_text.set_color("#888")
             fig.canvas.draw_idle()
             return
@@ -717,19 +732,27 @@ def run_editor(
             patch.set_height(image.shape[0])
             n_added += 1
         spec_status_text.set_text(
-            f"+{n_added} rect{'s' if n_added != 1 else ''}, {len(cols)} cols"
+            f"+{n_added} rect{'s' if n_added != 1 else ''}, "
+            f"{len(cols)} cols  ({text!r})"
         )
         spec_status_text.set_color("#080")
-        spec_box.set_val("")
         update_status()
 
-    spec_box.on_submit(_on_spec_submit)
+    def cb_mask_spec(_event) -> None:  # type: ignore[no-untyped-def]
+        text = _ask_mask_spec()
+        if text is None:  # cancelled or Tk unavailable
+            return
+        _apply_mask_spec(text)
+
+    btn_spec_ax = fig.add_axes((0.02, 0.09, 0.16, 0.04))
+    btn_spec = Button(btn_spec_ax, "Mask Spec... (k)")
+    btn_spec.on_clicked(cb_mask_spec)
 
     # Hold refs so GC doesn't collect the widgets.
     fig._sansdir_buttons = [  # type: ignore[attr-defined]
         btn_rect, btn_ell, btn_edit, btn_undo,
         btn_clear, btn_invert, btn_save, btn_quit,
-        spec_box,
+        btn_spec,
     ]
 
     # ---- Keyboard shortcuts -----------------------------------------
@@ -747,6 +770,7 @@ def run_editor(
         "drag_origin": None,    # (x, y) where the drag started
         "saved_edge": None,     # original edgecolor / lw to restore
         "saved_lw": None,
+        "drag_bg": None,        # cached static background for blit-fast drags
     }
 
     def _highlight(idx: int | None) -> None:
@@ -784,6 +808,22 @@ def run_editor(
         _highlight(hit_idx)
         if hit_idx is not None:
             edit_state["drag_origin"] = (event.xdata, event.ydata)
+            # Set up blit-fast drags: mark the moving patch
+            # ``animated`` so it's excluded from the canvas's full
+            # render, do one synchronous draw to flush the rest, then
+            # snapshot the canvas. Each subsequent motion event
+            # restores that snapshot and re-renders only the moving
+            # patch — orders of magnitude cheaper than ``draw_idle()``
+            # on a 256x192 LogNorm imshow.
+            try:
+                moving = controller.patches[hit_idx]
+                moving.set_animated(True)
+                fig.canvas.draw()
+                edit_state["drag_bg"] = fig.canvas.copy_from_bbox(ax.bbox)
+            except Exception:
+                # Some non-Agg backends don't support copy_from_bbox;
+                # fall back to the slow draw_idle() path silently.
+                edit_state["drag_bg"] = None
         else:
             edit_state["drag_origin"] = None
 
@@ -803,10 +843,25 @@ def run_editor(
             return
         controller.translate(idx, dx, dy)  # type: ignore[arg-type]
         edit_state["drag_origin"] = (event.xdata, event.ydata)
-        fig.canvas.draw_idle()
+        bg = edit_state.get("drag_bg")
+        if bg is not None:
+            fig.canvas.restore_region(bg)  # type: ignore[arg-type]
+            ax.draw_artist(controller.patches[idx])  # type: ignore[arg-type]
+            fig.canvas.blit(ax.bbox)
+        else:
+            fig.canvas.draw_idle()
 
     def on_mouse_release(_event) -> None:  # type: ignore[no-untyped-def]
+        idx = edit_state.get("selected_index")
+        if idx is not None and edit_state.get("drag_bg") is not None:
+            with contextlib.suppress(Exception):
+                controller.patches[idx].set_animated(False)  # type: ignore[arg-type]
+            # One final full redraw to fold the patch back into the
+            # normal layer (otherwise the next zoom / resize could
+            # render without it).
+            fig.canvas.draw_idle()
         edit_state["drag_origin"] = None
+        edit_state["drag_bg"] = None
 
     fig.canvas.mpl_connect("button_press_event", on_mouse_press)
     fig.canvas.mpl_connect("motion_notify_event", on_mouse_motion)
@@ -842,6 +897,10 @@ def run_editor(
             update_status()
         elif k == "s":
             _do_save()
+        elif k == "k":
+            text = _ask_mask_spec()
+            if text is not None:
+                _apply_mask_spec(text)
         elif k == "escape":
             plt.close(fig)
 
