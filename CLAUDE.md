@@ -219,13 +219,15 @@ files (or current row if none tagged); copy/move default destination is the
 | `Backspace` | Go up one level in active pane |
 | `Space` | Tag/untag current row |
 | `+` / `*` | Tag by glob (`*.txt`, `*Iq*.dat`); `-` to untag by glob |
+| `F2` | **Rename** the file under the cursor (in-place) |
 | `F3` | View file (read-only pager) |
 | `F4` | Edit file (`$EDITOR`) |
 | `F5` | **Refresh** both panes (re-read directory listings) |
 | `F6` | **Copy** tagged → other pane (with confirm) |
-| `F7` | **Move/rename** tagged → other pane (with confirm) |
-| `F8` / `Del` | Delete tagged (with confirm) |
+| `F7` | **Move** tagged → other pane (with confirm) |
+| `F8` / `Del` | Delete tagged (with confirm; cursor sticks near the deleted file) |
 | `F9` | Make directory (in active pane) |
+| `F10` | Toggle the run catalog (right pane) |
 | `q` | Quit |
 | `p` | Plot current/tagged |
 | `P` | Plot with options dialog (axes, colorbar mode) |

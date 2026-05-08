@@ -28,6 +28,7 @@ HINT_ROW_1: tuple[str, ...] = (
     "f7",
     "f8",
     "f9",
+    "f10",
     "tab",
     "ctrl+u",
 )
@@ -50,7 +51,7 @@ HINT_ROW_2: tuple[str, ...] = (
 HINT_ORDER: tuple[str, ...] = HINT_ROW_1 + HINT_ROW_2
 
 LABEL_OVERRIDES: dict[str, str] = {
-    "f2": "Catalog",
+    "f2": "Rename",
     "f3": "View",
     "f4": "Edit",
     "f5": "Refresh",
@@ -58,6 +59,7 @@ LABEL_OVERRIDES: dict[str, str] = {
     "f7": "Move",
     "f8": "Delete",
     "f9": "Mkdir",
+    "f10": "Catalog",
     "tab": "Pane",
     "ctrl+u": "Swap",
     "space": "Tag",
@@ -83,6 +85,7 @@ KEY_DISPLAY: dict[str, str] = {
     "f7": "F7",
     "f8": "F8",
     "f9": "F9",
+    "f10": "F10",
     "tab": "Tab",
     "ctrl+u": "^U",
     "space": "Spc",

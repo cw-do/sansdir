@@ -1497,6 +1497,90 @@ def _make_mail_send(app: AppProtocol) -> Command:
     )
 
 
+def _make_ui_rename(app: AppProtocol) -> Command:
+    """``F2`` / ``:rename`` — rename the cursor file, in-place.
+
+    Uses the same TextPromptDialog as zip / batch-extract; the
+    dialog opens with the current basename pre-filled and pre-selected
+    so the user can either edit it or just type a fresh name. Submit
+    on Enter, cancel on Esc. The renamed file becomes the new cursor
+    row after the panel refresh.
+
+    The single-file form of ``fileops.move_paths`` already handles
+    rename (treats a non-existent destination path as the new full
+    path), so we reuse that rather than introducing a parallel
+    code path.
+    """
+
+    async def handler() -> str | None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.ui.dialogs import TextPromptDialog
+
+        if not isinstance(app, _RealApp):
+            return None  # pragma: no cover — only meaningful in real app
+        panel = app.active_panel
+        cur = panel.cursor_path
+        cur_entry = panel.current_entry
+        if cur is None or cur_entry is None or cur_entry.is_parent:
+            app.notify_user("no file under cursor to rename", severity="warning")
+            return None
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str | None] = loop.create_future()
+
+        def _cb(value: str | None) -> None:
+            if not fut.done():
+                fut.set_result(value)
+
+        app.push_screen(
+            TextPromptDialog(
+                f"rename {cur.name} →",
+                default=cur.name,
+                title="Rename",
+                help_text=(
+                    "Enter a new basename (relative paths land in the\n"
+                    "same directory). Esc to cancel."
+                ),
+            ),
+            _cb,
+        )
+        new_name = await fut
+        if new_name is None:
+            return None
+        new_name = new_name.strip()
+        if not new_name or new_name == cur.name:
+            return None
+        target = Path(new_name).expanduser()
+        if not target.is_absolute():
+            target = cur.parent / target
+        target = target.resolve()
+        if target.exists():
+            app.notify_user(f"already exists: {target}", severity="error")
+            return None
+        try:
+            fileops.move_paths([cur], target)
+        except (OSError, ValueError) as exc:
+            app.notify_user(f"rename failed: {exc}", severity="error")
+            return None
+        panel.refresh_listing()
+        # Re-anchor the cursor on the renamed file so the user can
+        # immediately keep working on it.
+        entries = panel._entries  # type: ignore[attr-defined]
+        for i, e in enumerate(entries):
+            if e.path == target:
+                panel.move_cursor(row=i)
+                break
+        app.notify_user(f"renamed {cur.name} → {target.name}")
+        return str(target)
+
+    return Command(
+        name="ui.rename",
+        description="Rename the file under the cursor (in-place).",
+        params=(),
+        handler=handler,
+        aliases=("rename",),
+    )
+
+
 def _make_ui_zip_tagged(app: AppProtocol) -> Command:
     async def handler() -> str | None:
         from sansdir.app import SansdirApp as _RealApp
@@ -1724,9 +1808,29 @@ def _make_ui_delete_tagged(app: AppProtocol) -> Command:
         )
         if not ok:
             return 0
+        # Remember the cursor row + path so we can restore the cursor
+        # after refresh. Without this the cursor jumps to row 0 and
+        # the user has to scroll back to where they were working —
+        # mc / Norton both keep the cursor near the deleted file.
+        panel = app.active_panel
+        prev_row = panel.cursor_row
+        prev_path = panel.cursor_path
         removed = fileops.delete_paths(srcs)
-        app.active_panel.clear_tags()
-        app.active_panel.refresh_listing()
+        panel.clear_tags()
+        panel.refresh_listing()
+        # Re-anchor the cursor: prefer the same path if it survived,
+        # else the entry at the same row index (clamped) — that's
+        # whichever file was just below the deleted one (or the new
+        # last row if we deleted the bottom file).
+        entries = panel._entries  # type: ignore[attr-defined]
+        if entries:
+            target = max(0, min(prev_row, len(entries) - 1))
+            if prev_path is not None:
+                for i, e in enumerate(entries):
+                    if e.path == prev_path:
+                        target = i
+                        break
+            panel.move_cursor(row=target)
         failed = len(srcs) - len(removed)
         if failed:
             app.notify_user(
@@ -1794,6 +1898,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_ui_copy_tagged(app),
         _make_ui_move_tagged(app),
         _make_ui_delete_tagged(app),
+        _make_ui_rename(app),
         _make_archive_zip(app),
         _make_archive_tar_gz(app),
         _make_mail_send(app),

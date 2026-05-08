@@ -1,12 +1,14 @@
-"""End-to-end tests for the F5..F9 file-op keys.
+"""End-to-end tests for the F2..F10 file-op keys.
 
 Layout (post-2026 reshuffle):
 
-* F5 = Refresh both panes
-* F6 = Copy tagged → other pane
-* F7 = Move tagged → other pane
-* F8 = Delete tagged
-* F9 = Make directory
+* F2  = Rename file under cursor
+* F5  = Refresh both panes
+* F6  = Copy tagged → other pane
+* F7  = Move tagged → other pane
+* F8  = Delete tagged
+* F9  = Make directory
+* F10 = Toggle catalog (Phase 4 feature; tested in test_phase4.py)
 """
 
 from __future__ import annotations
@@ -323,6 +325,136 @@ async def test_f3_on_directory_notifies(tmp_path: Path) -> None:
         await pilot.press("f3")
         await pilot.pause()
         assert not app._inactive_slot.viewer_visible
+        await pilot.press("q")
+
+
+async def test_f8_delete_keeps_cursor_near_deleted_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After delete + refresh the cursor lands on the entry just below
+    (or the new last row), not back at row 0 — mc / Norton convention.
+    Without this preservation users have to scroll back every time
+    they delete a single file from a long listing.
+    """
+    import sys
+    import types
+
+    fake_mod = types.ModuleType("send2trash")
+    fake_mod.send2trash = lambda p: Path(p).unlink()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "send2trash", fake_mod)
+
+    # _scratch lays down: a.dat, b.dat, noise.txt (sorted alphabetically
+    # under default sort, with ``..`` at row 0).
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Step the cursor to ``b.dat`` (row 2: ``..`` at 0, ``a.dat``
+        # at 1, ``b.dat`` at 2).
+        await pilot.press("down")
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.active_panel.current_entry.name == "b.dat"
+        # Delete via F8 → confirm.
+        await pilot.press("f8")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        # ``b.dat`` is gone; the row index 2 now points to
+        # ``noise.txt`` (the file that was below it). The cursor
+        # should land there, NOT on row 0.
+        cur = app.active_panel.current_entry
+        assert cur is not None
+        assert cur.name == "noise.txt", (
+            f"cursor jumped away from the delete site to {cur.name!r}"
+        )
+        await pilot.press("q")
+
+
+async def test_f8_delete_last_file_clamps_to_new_last(tmp_path: Path) -> None:
+    """If the cursor was on the bottom-most file, after delete it
+    sticks to the new bottom rather than going to row 0.
+    """
+    import sys
+    import types
+
+    fake_mod = types.ModuleType("send2trash")
+    fake_mod.send2trash = lambda p: Path(p).unlink()  # type: ignore[attr-defined]
+
+    import pytest as _pytest
+    monkey = _pytest.MonkeyPatch()
+    monkey.setitem(sys.modules, "send2trash", fake_mod)
+    try:
+        app = _real_app(tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Default sort: ``..``, ``a.dat``, ``b.dat``, ``noise.txt``.
+            # Step to noise.txt (row 3).
+            for _ in range(3):
+                await pilot.press("down")
+            await pilot.pause()
+            assert app.active_panel.current_entry.name == "noise.txt"
+            await pilot.press("f8")
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            cur = app.active_panel.current_entry
+            assert cur is not None
+            # noise.txt was at row 3; new list has 3 entries (``..``,
+            # ``a.dat``, ``b.dat``). Cursor clamps to row 2 = ``b.dat``.
+            assert cur.name == "b.dat"
+            await pilot.press("q")
+    finally:
+        monkey.undo()
+
+
+async def test_f2_renames_cursor_file(tmp_path: Path) -> None:
+    """F2 → rename dialog → new name → file renamed in-place,
+    cursor follows the renamed file."""
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Cursor on a.dat (row 1).
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.active_panel.current_entry.name == "a.dat"
+        await pilot.press("f2")
+        await pilot.pause()
+        # The TextPromptDialog is open with "a.dat" pre-filled.
+        from sansdir.ui.dialogs import TextPromptDialog
+
+        dialog = next(
+            s for s in app.screen_stack if isinstance(s, TextPromptDialog)
+        )
+        # Replace the pre-filled value.
+        from textual.widgets import Input
+
+        inp = dialog.query_one(Input)
+        inp.value = "renamed.dat"
+        await pilot.press("enter")
+        await pilot.pause()
+        left = app.active_panel.cwd
+        assert not (left / "a.dat").exists()
+        assert (left / "renamed.dat").exists()
+        # Cursor should now be on the renamed file.
+        cur = app.active_panel.current_entry
+        assert cur is not None
+        assert cur.name == "renamed.dat"
+        await pilot.press("q")
+
+
+async def test_f2_on_parent_row_notifies(tmp_path: Path) -> None:
+    """F2 with the cursor on ``..`` warns instead of crashing."""
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Cursor starts on ``..``.
+        assert app.active_panel.current_entry.is_parent
+        await pilot.press("f2")
+        await pilot.pause()
+        # No dialog pushed.
+        from sansdir.ui.dialogs import TextPromptDialog
+
+        assert not any(isinstance(s, TextPromptDialog) for s in app.screen_stack)
         await pilot.press("q")
 
 
