@@ -432,7 +432,7 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
   `/gpfs/neutronsfs/instruments` → `/SNS` rewrite), bottom status with
   catalog-loaded indicator.
 - Cold start: ~50 ms.
-- 500 tests, ruff-clean.
+- 506 tests, ruff-clean.
 
 ---
 

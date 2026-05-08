@@ -41,7 +41,7 @@ as you complete tasks. Each phase produces a runnable milestone.
 - [x] `=` syncs inactive panel's cwd to match active panel
 - [x] `Ctrl+O` toggles active-panel maximize (full-width); restores on 2nd press
 - [x] `ui/statusbar.py` shows active panel's path, file count, free disk
-- [x] `q` / `F10` quits cleanly (dispatches `app.quit`)
+- [x] `q` quits cleanly (dispatches `app.quit`) — *(F10 was bound to quit too originally; rebound to ``pane.toggle_catalog`` in the 9.7 follow-up since the catalog toggle was crowded out of F2 by ``ui.rename``)*
 - [x] `?` opens help overlay — generated from `registry.all()` metadata
 - [x] Hidden file toggle (`H`) — affects active panel only — *(bound to lowercase `h`; help overlay reflects this)*
 - [x] Sort menu (`s` cycles name/mtime/size/ext; `S` toggles reverse) — active panel only — *(simplified: keys 1/2/3/4 set name/mtime/size/ext directly; `s` aliased to "name". Reverse-toggle deferred — handler accepts `reverse` kwarg, no key bound yet.)*
@@ -621,9 +621,11 @@ real EQSANS runs. Each item is a small, reviewable change.
 
 ## Tests
 
-- 500 passed, 1 skipped, ruff clean. Test count rose from 392 → 500
+- 506 passed, 1 skipped, ruff clean. Test count rose from 392 → 506
   through Phase 9.6 + 9.7 (mask core / writers / CLI / GUI / GUI
-  perf / banktube / catalog `K` / `F5` refresh / debounce / cap).
+  perf / banktube / catalog `K` / `F5` refresh / `F2` rename /
+  delete cursor preservation / mask save auto-refresh / debounce /
+  cap).
 
 ## Mask GUI responsiveness pass (follow-up)
 
@@ -651,6 +653,43 @@ feedback after using the editor on real EQSANS runs.
       one timer fire before being cancelled by the next keystroke);
       asserts `1 ≤ rebuilds ≤ 2` instead of `== 1`. The point was
       always "fewer than per-keystroke", not exactly one.
+
+## File-pane cursor + F-key tweaks (follow-up)
+
+Driven by mc / Norton muscle memory.
+
+- [x] **Delete preserves cursor position.**
+      `_make_ui_delete_tagged` snapshots ``cursor_row`` +
+      ``cursor_path`` before the delete and re-anchors the cursor
+      after ``refresh_listing()``. If the cursor's file survived a
+      multi-tag delete, cursor stays on it; otherwise it sticks to
+      the same row index (= the file just below the deleted one)
+      or clamps to the new last row. Without this the cursor
+      jumped to row 0 every time, forcing the user to scroll back.
+- [x] **F2 = Rename, F10 = Catalog toggle.** New ``ui.rename``
+      Command opens a ``TextPromptDialog`` pre-filled with the
+      cursor's basename, dispatches via the single-file form of
+      ``fileops.move_paths``, refreshes the panel, and re-anchors
+      the cursor on the renamed file. The catalog toggle moved
+      from F2 to F10 (consulted less often than rename;
+      `q` already covers quit so F10 was free).
+
+## Mask save auto-refresh (follow-up)
+
+- [x] **`_make_ui_mask` is async; awaits the subprocess.** The
+      mask GUI is a detached matplotlib subprocess so the TUI
+      stays responsive. After ``subprocess.Popen`` we now run
+      ``rc = await asyncio.to_thread(proc.wait)``. The registry
+      runs async handlers as Textual workers (``exclusive=False``),
+      so multiple editors can be open at once and the wait
+      doesn't block the event loop. On ``rc == 0`` (= save) both
+      panes refresh and the user sees ``mask saved (panes
+      refreshed) — <name>``. On ``rc == 1`` (cancel /
+      quit-without-save) nothing happens. We refresh both panes
+      because the Tk save dialog lets users redirect the output
+      anywhere, so we don't know the exact destination without
+      parsing subprocess stdout — and ``refresh_listing`` is
+      cheap enough that the simpler approach wins.
 
 ---
 
