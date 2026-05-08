@@ -111,6 +111,15 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         ("date", "Date↓ (newest acquisition)"),
     )
 
+    # Cap the rendered window so a wildcard filter (or no filter at
+    # all) doesn't have to mount thousands of two-Static ListItems on
+    # every keystroke. The overflow hint tells the user to narrow.
+    MAX_VISIBLE: ClassVar[int] = 200
+    # ms of quiet typing before we actually rebuild the list — the
+    # cost of `lv.clear() + N x lv.append(...)` dominates the input
+    # latency, so coalescing keystrokes is a huge win on big catalogs.
+    FILTER_DEBOUNCE_MS: ClassVar[int] = 200
+
     filter_text: reactive[str] = reactive("")
     sort_mode: reactive[str] = reactive("ipts")
 
@@ -124,6 +133,9 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         self._all = experiments
         # Initial filter — set as reactive after compose so the watcher fires.
         self._initial_keyword = keyword
+        # Pending debounced refresh (cancelled if another keystroke
+        # arrives before it fires).
+        self._refresh_timer: object | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -136,6 +148,7 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
                 compact=True,
             )
             yield ListView(id="results-list")
+            yield Static("", id="overflow-hint", classes="hint")
             yield Static(
                 "[dim]↑/↓ navigate · Enter select · / filter · s sort · Esc cancel[/dim]",
                 classes="hint",
@@ -162,19 +175,42 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "filter-input":
             # Pressing Enter in the filter moves focus to the list so the
-            # next Enter picks an item.
+            # next Enter picks an item — but if a debounced refresh is
+            # still pending, run it now so the list reflects the latest
+            # filter before the user moves on.
+            self._cancel_pending_refresh()
+            self._refresh_list()
             self.query_one("#results-list", ListView).focus()
 
     def watch_filter_text(self, _old: str, _new: str) -> None:
-        self._refresh_list()
+        # Debounce — schedule a rebuild after a short quiet period.
+        # The first call from on_mount happens before any timer is
+        # available; in that case we just rebuild inline.
+        self._cancel_pending_refresh()
+        try:
+            self._refresh_timer = self.set_timer(
+                self.FILTER_DEBOUNCE_MS / 1000, self._refresh_list
+            )
+        except Exception:
+            # Fallback: not mounted yet → rebuild inline.
+            self._refresh_list()
 
     def watch_sort_mode(self, _old: str, _new: str) -> None:
+        # Sort cycles via a key press, not typing — refresh immediately.
+        self._cancel_pending_refresh()
         self._refresh_list()
         # Reflect the new mode in the title bar.
         with contextlib.suppress(Exception):
             self.query_one("#browser-title", Static).update(self._title_text())
 
+    def _cancel_pending_refresh(self) -> None:
+        if self._refresh_timer is not None:
+            with contextlib.suppress(Exception):
+                self._refresh_timer.stop()  # type: ignore[attr-defined]
+            self._refresh_timer = None
+
     def _refresh_list(self) -> None:
+        self._refresh_timer = None
         kw = self.filter_text.strip()
         matches = [e for e in self._all if e.matches(kw)]
         matches = self._sorted(matches)
@@ -182,11 +218,29 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
             lv = self.query_one("#results-list", ListView)
         except Exception:
             return
-        lv.clear()
-        for exp in matches:
-            lv.append(_ExpItem(exp))
-        if matches:
-            lv.index = 0
+        total = len(matches)
+        truncated = matches[: self.MAX_VISIBLE]
+        # Batch the swap so Textual issues a single layout pass for
+        # the whole rebuild instead of one per appended row.
+        with self.app.batch_update():
+            lv.clear()
+            for exp in truncated:
+                lv.append(_ExpItem(exp))
+            if truncated:
+                lv.index = 0
+        # Update the overflow hint underneath the list.
+        with contextlib.suppress(Exception):
+            hint = self.query_one("#overflow-hint", Static)
+            if total > self.MAX_VISIBLE:
+                extra = total - self.MAX_VISIBLE
+                hint.update(
+                    f"[dim]showing first {self.MAX_VISIBLE} of {total} "
+                    f"matches  [b]·[/]  +{extra} more — narrow your filter[/]"
+                )
+            elif total == 0 and kw:
+                hint.update(f"[dim]no matches for {kw!r}[/]")
+            else:
+                hint.update("")
 
     def _sorted(self, items: list[Experiment]) -> list[Experiment]:
         if self.sort_mode == "date":

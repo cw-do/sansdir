@@ -177,6 +177,143 @@ def extract(
         click.echo(str(written))
 
 
+_MASK_EPILOG = """\
+Examples:
+
+  \b
+  # Beam-stop circle + four corner rectangles in pixel coordinates.
+  sansdir mask EQSANS_172749.nxs.h5 \\
+    --circle 96,128,12 \\
+    --rect 0,0,15,15 --rect 176,0,191,15 \\
+    --rect 0,240,15,255 --rect 176,240,191,255 \\
+    --output beam_stop_mask.nxs
+
+  \b
+  # Replay the same mask later from its sidecar log.
+  sansdir mask EQSANS_172749.nxs.h5 \\
+    --shapes-json beam_stop_mask.mask_log.json \\
+    --output replay_mask.xml --format xml
+"""
+
+
+@main.command(epilog=_MASK_EPILOG)
+@click.option(
+    "--rect",
+    "rects",
+    multiple=True,
+    metavar="X0,Y0,X1,Y1",
+    help="Axis-aligned rectangle in pixel coords (repeatable).",
+)
+@click.option(
+    "--ellipse",
+    "ellipses",
+    multiple=True,
+    metavar="XC,YC,RX,RY",
+    help="Axis-aligned ellipse (repeatable).",
+)
+@click.option(
+    "--circle",
+    "circles",
+    multiple=True,
+    metavar="XC,YC,R",
+    help="Circle (repeatable).",
+)
+@click.option(
+    "--polygon",
+    "polygons",
+    multiple=True,
+    metavar="X1,Y1,X2,Y2,...",
+    help="Polygon, ≥3 vertices, comma-separated (repeatable).",
+)
+@click.option(
+    "--shapes-json",
+    "shapes_json",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a mask_log.json (or compatible) — appended to --rect/etc.",
+)
+@click.option(
+    "--inverse",
+    is_flag=True,
+    default=False,
+    help="Invert the FINAL union mask (1 ↔ 0).",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Output file. Default: <source-stem>_mask.<ext> next to the source.",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["xml", "nxs", "npy"]),
+    default="nxs",
+    show_default=True,
+    help="Output format.",
+)
+@click.argument(
+    "source",
+    type=click.Path(exists=True, dir_okay=False),
+)
+def mask(
+    source: str,
+    rects: tuple[str, ...],
+    ellipses: tuple[str, ...],
+    circles: tuple[str, ...],
+    polygons: tuple[str, ...],
+    shapes_json: str | None,
+    inverse: bool,
+    output: str | None,
+    fmt: str,
+) -> None:
+    """Build a Mantid-loadable detector mask for a raw EQSANS .nxs.h5 file.
+
+    Mask convention: 1 = masked (excluded), 0 = kept.
+    """
+    from sansdir.mask.api import (
+        create_mask,
+        parse_circle,
+        parse_ellipse,
+        parse_polygon,
+        parse_rect,
+        shapes_from_json,
+    )
+
+    shapes = []
+    for spec in rects:
+        shapes.append(parse_rect(spec))
+    for spec in ellipses:
+        shapes.append(parse_ellipse(spec))
+    for spec in circles:
+        shapes.append(parse_circle(spec))
+    for spec in polygons:
+        shapes.append(parse_polygon(spec))
+    json_inverse = False
+    if shapes_json:
+        from_json, json_inverse = shapes_from_json(shapes_json)
+        shapes.extend(from_json)
+    if not shapes:
+        raise click.UsageError(
+            "no shapes given — use --rect / --ellipse / --circle / "
+            "--polygon / --shapes-json"
+        )
+    result = create_mask(
+        source=source,
+        shapes=shapes,
+        output=output,
+        fmt=fmt,
+        inverse=inverse or json_inverse,
+    )
+    click.echo(str(result.output_path))
+    click.echo(
+        f"# masked {result.n_masked} of {result.n_total} pixels "
+        f"({result.n_masked / result.n_total:.2%})"
+    )
+    click.echo(f"# log: {result.log_path}")
+
+
 @main.command()
 def version() -> None:
     """Print the sansdir version and exit."""

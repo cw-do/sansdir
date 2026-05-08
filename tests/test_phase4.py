@@ -350,3 +350,96 @@ async def test_browser_s_cycles_sort_mode(
         assert order == ["IPTS-300", "IPTS-100"]
         await pilot.press("escape")
         await pilot.press("q")
+
+
+async def test_browser_caps_visible_rows_with_overflow_hint(
+    tmp_path: Path,
+    httpx_mock,  # type: ignore[no-untyped-def]
+    fake_oncat_config: Path,
+) -> None:
+    """A 250-row catalog mounts only ``MAX_VISIBLE`` items; hint shows overflow.
+
+    Per-keystroke widget-mount cost is the dominant lag on big OnCat
+    catalogs, so the browser caps the rendered window. This test pins
+    that contract — if a future change removes the cap and re-mounts
+    the full list on every refresh, the input will go laggy again.
+    """
+    rows = [
+        {
+            "id": f"IPTS-{1000 + i}",
+            "rank": 1000 + i,
+            "title": f"row {i}",
+            "size": 1,
+        }
+        for i in range(250)
+    ]
+    _stub_oauth_and_experiments(httpx_mock, rows)
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        from textual.widgets import ListView, Static
+
+        from sansdir.ui.oncat_browser import OnCatBrowserScreen
+
+        browser = next(
+            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
+        )
+        lv = browser.query_one("#results-list", ListView)
+        # Cap honoured — never more than MAX_VISIBLE children mounted.
+        assert len(lv.children) == OnCatBrowserScreen.MAX_VISIBLE
+        # Overflow hint mentions the truncation count.
+        hint = browser.query_one("#overflow-hint", Static).render()
+        text = hint.plain if hasattr(hint, "plain") else str(hint)
+        assert f"+{250 - OnCatBrowserScreen.MAX_VISIBLE} more" in text
+        await pilot.press("escape")
+        await pilot.press("q")
+
+
+async def test_browser_filter_is_debounced(
+    tmp_path: Path,
+    httpx_mock,  # type: ignore[no-untyped-def]
+    fake_oncat_config: Path,
+) -> None:
+    """Several quick keystrokes in the filter trigger only one rebuild.
+
+    We monkey-patch ``_refresh_list`` to count calls, then type four
+    characters. With debouncing, the rebuild fires once after the
+    quiet period, not four times.
+    """
+    rows = [
+        {"id": f"IPTS-{200 + i}", "rank": 200 + i, "title": f"r{i}", "size": 1}
+        for i in range(20)
+    ]
+    _stub_oauth_and_experiments(httpx_mock, rows)
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        from sansdir.ui.oncat_browser import OnCatBrowserScreen
+
+        browser = next(
+            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
+        )
+        # Establish a baseline AFTER the on_mount refresh ran.
+        calls = {"n": 0}
+        original = browser._refresh_list
+
+        def _counting() -> None:
+            calls["n"] += 1
+            original()
+
+        browser._refresh_list = _counting  # type: ignore[method-assign]
+        await pilot.press("/")
+        for ch in "row1":
+            await pilot.press(ch)
+        # Wait past the debounce window so the timer fires.
+        await pilot.pause(0.5)
+        # Without debouncing this would be 4 (one per keystroke). With
+        # the 200ms debounce, the four characters typed inside that
+        # window collapse into a single rebuild.
+        assert calls["n"] == 1, f"expected 1 rebuild, got {calls['n']}"
+        await pilot.press("escape")
+        await pilot.press("q")

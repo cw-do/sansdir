@@ -24,7 +24,7 @@ def test_hint_render_returns_text_with_keys_and_labels() -> None:
     bar = KeyHintBar(default_keymap())
     rendered = bar.render().plain
     # F-keys and signature shortcuts should all show up.
-    for token in ("F3:View", "F5:Copy", "F8:Delete", ":Cmd", "Tab:Pane"):
+    for token in ("F3:View", "F5:Refresh", "F6:Copy", "F8:Delete", ":Cmd", "Tab:Pane"):
         assert token in rendered, f"missing {token!r} in {rendered!r}"
 
 

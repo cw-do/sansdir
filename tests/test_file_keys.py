@@ -1,4 +1,13 @@
-"""End-to-end tests for the F5/F6/F7/F8 file-op keys."""
+"""End-to-end tests for the F5..F9 file-op keys.
+
+Layout (post-2026 reshuffle):
+
+* F5 = Refresh both panes
+* F6 = Copy tagged → other pane
+* F7 = Move tagged → other pane
+* F8 = Delete tagged
+* F9 = Make directory
+"""
 
 from __future__ import annotations
 
@@ -33,15 +42,43 @@ def _real_app(tmp_path: Path) -> SansdirApp:
 
 
 # ---------------------------------------------------------------------------
-# F7 mkdir (via cmdline prompt)
+# F5 refresh
 # ---------------------------------------------------------------------------
 
 
-async def test_f7_prompts_for_mkdir(tmp_path: Path) -> None:
+async def test_f5_refreshes_both_panes(tmp_path: Path) -> None:
+    """F5 picks up files written outside the TUI (e.g. mask GUI subprocess)."""
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("f7")
+        # Drop a new file in the *active* pane after start-up.
+        new_left = app.active_panel.cwd / "external.dat"
+        new_left.write_text("xx", encoding="utf-8")
+        # And one in the inactive pane too.
+        new_right = app.inactive_panel.cwd / "remote.txt"
+        new_right.write_text("yy", encoding="utf-8")
+        # Sanity: the panel cache hasn't seen them yet.
+        active_names_before = {e.name for e in app.active_panel._all_entries}
+        assert "external.dat" not in active_names_before
+        await pilot.press("f5")
+        await pilot.pause()
+        active_names_after = {e.name for e in app.active_panel._all_entries}
+        inactive_names_after = {e.name for e in app.inactive_panel._all_entries}
+        assert "external.dat" in active_names_after
+        assert "remote.txt" in inactive_names_after
+        await pilot.press("q")
+
+
+# ---------------------------------------------------------------------------
+# F9 mkdir (via cmdline prompt)
+# ---------------------------------------------------------------------------
+
+
+async def test_f9_prompts_for_mkdir(tmp_path: Path) -> None:
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f9")
         await pilot.pause()
         assert app.focused is app._cmdline
         assert app._cmdline.value == "mkdir "
@@ -54,7 +91,7 @@ async def test_f7_prompts_for_mkdir(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# F5 / F6 copy / move (with confirm dialog)
+# F6 / F7 copy / move (with confirm dialog)
 # ---------------------------------------------------------------------------
 
 
@@ -64,7 +101,7 @@ async def _confirm_yes(pilot) -> None:  # type: ignore[no-untyped-def]
     await pilot.pause()
 
 
-async def test_f5_copy_tagged_to_other_pane(tmp_path: Path) -> None:
+async def test_f6_copy_tagged_to_other_pane(tmp_path: Path) -> None:
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -76,8 +113,8 @@ async def test_f5_copy_tagged_to_other_pane(tmp_path: Path) -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert len(app.active_panel.tags) == 2
-        # F5 → confirm dialog → Yes
-        await pilot.press("f5")
+        # F6 → confirm dialog → Yes
+        await pilot.press("f6")
         await pilot.pause()
         await pilot.press("y")
         await pilot.pause()
@@ -89,13 +126,13 @@ async def test_f5_copy_tagged_to_other_pane(tmp_path: Path) -> None:
         await pilot.press("q")
 
 
-async def test_f5_no_selection_notifies(tmp_path: Path) -> None:
-    """No tags, cursor on '..' — F5 should warn, not crash."""
+async def test_f6_no_selection_notifies(tmp_path: Path) -> None:
+    """No tags, cursor on '..' — F6 should warn, not crash."""
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
         # Cursor starts on '..' — selection() is empty.
-        await pilot.press("f5")
+        await pilot.press("f6")
         await pilot.pause()
         # No copy happened; right pane unchanged.
         right_files = list(app.inactive_panel.cwd.iterdir())
@@ -103,7 +140,7 @@ async def test_f5_no_selection_notifies(tmp_path: Path) -> None:
         await pilot.press("q")
 
 
-async def test_f6_move_tagged_to_other_pane(tmp_path: Path) -> None:
+async def test_f7_move_tagged_to_other_pane(tmp_path: Path) -> None:
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -112,7 +149,7 @@ async def test_f6_move_tagged_to_other_pane(tmp_path: Path) -> None:
             await pilot.press(ch)
         await pilot.press("enter")
         await pilot.pause()
-        await pilot.press("f6")
+        await pilot.press("f7")
         await pilot.pause()
         await pilot.press("y")
         await pilot.pause()
@@ -123,7 +160,7 @@ async def test_f6_move_tagged_to_other_pane(tmp_path: Path) -> None:
         await pilot.press("q")
 
 
-async def test_f5_can_be_cancelled(tmp_path: Path) -> None:
+async def test_f6_can_be_cancelled(tmp_path: Path) -> None:
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -132,7 +169,7 @@ async def test_f5_can_be_cancelled(tmp_path: Path) -> None:
             await pilot.press(ch)
         await pilot.press("enter")
         await pilot.pause()
-        await pilot.press("f5")
+        await pilot.press("f6")
         await pilot.pause()
         await pilot.press("n")
         await pilot.pause()

@@ -360,6 +360,79 @@ async def test_catalog_space_tags_run_and_capital_m_uses_tags(
         await pilot.press("q")
 
 
+async def test_catalog_capital_k_launches_mask_for_cursor_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``K`` from the catalog spawns the mask GUI for the cursor row's run.
+
+    Mirrors the file-pane K binding but reaches the mask command
+    through the catalog's ``raw_nexus_path`` resolver instead of
+    ``app.active_panel.cursor_path``. We intercept ``subprocess.Popen``
+    so the test never actually tries to spawn matplotlib.
+    """
+    from sansdir.core.oncat import Datafile
+
+    fake_root = tmp_path / "FAKE"
+    nx_dir = fake_root / "EQSANS" / "IPTS-99999" / "nexus"
+    nx_dir.mkdir(parents=True)
+    nexus_path = nx_dir / "EQSANS_100.nxs.h5"
+    _write_nx(nexus_path, temperature=298.0, duration=600.0, seed=0)
+    runs = [
+        Datafile(
+            run_number=100,
+            title="sample",
+            start_time="",
+            duration_s=600,
+            detector_distance_mm=2500.0,
+            wavelength_a=2.5,
+            total_counts=1000,
+        )
+    ]
+
+    captured: list[list[str]] = []
+
+    class _FakePopen:
+        def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
+            captured.append(list(cmd))
+
+    monkeypatch.setattr("subprocess.Popen", _FakePopen)
+    # ``has_display`` is the gate inside the mask command; the headless
+    # CI cluster would otherwise short-circuit with a "no $DISPLAY"
+    # warning before Popen runs.
+    monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        slot = app._inactive_slot
+        slot.show_catalog(
+            "IPTS-99999", runs, instrument="EQSANS", facility=str(fake_root)[1:]
+        )
+        await pilot.pause()
+        assert slot.catalog.raw_nexus_path(100).exists()
+        # Tab into the catalog so K reaches the CatalogTable binding.
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._active_slot is slot
+        await pilot.press("K")
+        # The dispatch happens on a worker; let it run.
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("q")
+    # subprocess.Popen got called once with the cursor row's NeXus.
+    assert len(captured) == 1, f"expected 1 Popen call, got {len(captured)}"
+    cmd = captured[0]
+    assert "sansdir.mask.gui" in cmd
+    assert str(nexus_path) in cmd
+    # Output goes to the *active* file-pane's cwd by convention. After
+    # ``Tab`` into the catalog slot, the *other* slot is the file pane
+    # (the left pane in this fixture).
+    out_idx = cmd.index("--output") + 1
+    # Path.stem on ``EQSANS_100.nxs.h5`` strips only the last suffix,
+    # so the default output basename keeps the inner ``.nxs``.
+    assert cmd[out_idx].endswith("EQSANS_100.nxs_mask.nxs")
+
+
 async def test_capital_m_with_no_nexus_selection_notifies(tmp_path: Path) -> None:
     """If no .nxs.h5 is selected, M warns instead of opening the dialog."""
     left = tmp_path / "L"

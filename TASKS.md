@@ -159,6 +159,779 @@ as you complete tasks. Each phase produces a runnable milestone.
 - [x] `man sansdir` page or `--help` for every subcommand — *(rich `--help` for `sansdir`, `tui`, `extract`, `version`; epilogs with realistic examples; `--version` flag added)*
 - [ ] `README.md` with screenshots (asciicast) — *(deferred; user-driven content)*
 - [ ] Tag v1.0.0 and write release notes — *(deferred; user-driven release)*
+---
+
+# Phase 9.6 — Interactive mask creation from raw NeXus data
+
+> **Revision (v3):** detector mapping is read directly from the source
+> `.nxs.h5` file (`bank1/pixel_id`). No instrument-specific code, no
+> formulas, no instrument registry. The writer is one short function;
+> the envelope is fixed boilerplate. See § 9.6.3.
+
+## Goal
+
+A `:mask` command in the sansdir TUI that opens an interactive matplotlib
+window on a raw `.nxs.h5` file, lets the user draw multiple shapes
+(rectangles, ellipses, circles, polygons, lassos) on the detector heatmap,
+accumulates them into a Mantid-convention binary mask, and saves to either
+`.xml` (Mantid SaveMask format) or `.nxs` (Mantid Processed-NeXus format).
+The detector mapping is borrowed from the source file — no Mantid runtime
+dependency, no instrument-specific code. A `sansdir mask` CLI subcommand
+exposes the non-interactive path.
+
+## Design decisions (locked)
+
+1. **Mask convention: `1 = masked` (excluded), `0 = unmasked` (kept).**
+   Matches Mantid's `SpecialWorkspace2D`. The first unit test pins this
+   convention; nothing else lands until it passes.
+2. **GUI is matplotlib in a separate window.** Reuses the existing
+   plot-window pattern. Requires `$DISPLAY`; CLI mode covers headless use.
+3. **Two output formats**, both pure Python:
+   - `.xml` — Mantid SaveMask format. `xml.etree.ElementTree`.
+   - `.nxs` — Mantid Processed NeXus, written with `h5py` to the structure
+     in § 9.6.3. **Detector IDs come from the source file's
+     `bank1/pixel_id`** — no formula, no instrument-specific code.
+4. **Multi-shape accumulation.** matplotlib selectors are one-at-a-time;
+   on each `onselect`, freeze as a translucent red `Patch`, append to
+   the `MaskBuilder`, rearm the selector. Edit mode allows
+   click-to-select, drag, resize, delete.
+5. **Reuse existing detector-heatmap rendering.** Refactor the existing
+   event-mode histogramming into `load_detector_image(path)` used by
+   both the heatmap plotter and the mask GUI.
+6. **Pixel ordering must match histogram ordering.** The mask is
+   flattened in the same row-major order sansdir already uses for
+   plotting, and `detector_list` is written in that same order. A unit
+   test verifies the alignment.
+7. **No Mantid runtime imports anywhere in `src/sansdir/`.**
+   Verify with `grep -r "import mantid" src/` returning nothing.
+8. **Reference-fixture verification.** A captured Mantid-Workbench-saved
+   reference mask under `tests/mask/fixtures/reference_mask.nxs`
+   provides the canonical structure for the diff test.
+9. **`mask_log.json` next to every saved mask.** Round-trippable shape
+   list for editing/regenerating.
+10. **Inverse mask flag** inverts the FINAL union mask (`1 - mask`),
+    not individual shapes. Defaults off.
+
+## What v3 simplifies (vs earlier drafts)
+
+- No `mask/instruments/eqsans.py` module
+- No instrument registry pattern
+- No hardcoded pixel-to-detector-id formula
+- No `DetectorMeta.pixel_to_detid` callable — the mapping is just an
+  array read from the source file
+- The writer works for any SNS event-mode file with a standard
+  `bank1/pixel_id` layout (EQSANS, BIOSANS, GP-SANS, …) without code
+  changes
+
+## Out of scope for 9.6
+
+- Free-hand brush painting
+- Per-tube / per-bank region templates
+- Boolean ops between shapes (only union for v1)
+- Real-time mask preview during drawing
+- Loading existing `.xml` / `.nxs` masks for editing
+- Mask versioning / propagation across runs
+- Files without a `bank1/pixel_id` layout (handle via clear error)
+
+---
+
+## 9.6.1 — Pure mask-building core
+
+Module: `src/sansdir/mask/core.py`
+
+- [x] `Shape` ABC + subclasses: `Rectangle`, `Ellipse`, `Circle`,
+      `Polygon`. All coordinates in pixel space.
+- [x] `Shape.rasterise(detector_shape) -> np.ndarray[bool]` — numpy
+      meshgrid for rect/ellipse/circle, `matplotlib.path.Path.contains_points`
+      for polygons. No Python pixel loops.
+- [x] `MaskBuilder` with `add(shape)`, `remove(index)`,
+      `build(*, inverse=False) -> np.ndarray[uint8]`, `to_dict()`,
+      `from_dict()` — *(the convention is held on the builder via
+      ``inverse`` flag; defaulting to ``False`` matches Mantid)*
+- [x] **Convention test as the very first test** (gates everything else):
+
+  ```python
+  def test_mask_convention_1_means_masked():
+      """Mantid: 1 = masked, 0 = kept."""
+      b = MaskBuilder((10, 10))
+      b.add(Rectangle(2, 2, 5, 5))
+      m = b.build()
+      assert m.dtype == np.uint8
+      assert m[3, 3] == 1, "interior must be masked (1)"
+      assert m[0, 0] == 0, "exterior must be kept (0)"
+      assert m.sum() == 16
+  ```
+
+---
+
+## 9.6.2 — Detector image loader
+
+Module: `src/sansdir/mask/detector.py`
+
+- [x] `load_detector_image(path) -> (image_2d, source_meta)` wraps the
+      existing event-mode histogramming (`load_eqsans_raw`).
+- [x] `SourceMeta` dataclass: `source_path`, `instrument_name`,
+      `detector_shape`, `pixel_ids`, `run_number`.
+- [x] **Critical:** `image_2d.flatten()[k]` aligns with
+      `pixel_ids[k]`. The heatmap loader applies the
+      `[0,4,1,5,2,6,3,7]` tube reorder; we replay the *same* reorder
+      on `arange(EQSANS_NPIXELS_TOTAL)` to derive matching
+      `pixel_ids` for the canonical EQSANS event-mode case.
+- [x] No instrument-specific code. Files with explicit
+      `bank1/pixel_id` honour it verbatim; canonical EQSANS event-
+      mode (no pixel_id, but the existing heatmap path supports it)
+      derives `pixel_ids` from the same reorder. Anything else
+      raises `UnsupportedFileLayoutError`.
+
+**Acceptance:** unit test loads a synthetic h5py-built fixture file with
+a known `pixel_id` array, asserts the loader returns the expected image
+shape and `pixel_ids` matches the fixture.
+
+---
+
+## 9.6.3 — Output writers (pure Python)
+
+Module: `src/sansdir/mask/writers.py`
+
+### XML writer
+
+- [x] `write_xml(path, mask, source_meta)` — Mantid SaveMask format:
+
+  ```xml
+  <?xml version="1.0"?>
+  <detector-masking>
+    <group>
+      <detids>5,9-15,42-44,...</detids>
+    </group>
+  </detector-masking>
+  ```
+
+- [x] Compute detector-id list from `mask.flatten()` non-zero positions
+      indexed into `source_meta.pixel_ids`. Compress contiguous runs to
+      `n-m` ranges.
+- [x] Pure stdlib `xml.etree.ElementTree`.
+
+### NeXus writer
+
+- [x] `write_nxs(path, mask, source_meta)` — Mantid Processed NeXus,
+      detector mapping borrowed from source. **Layout adapted to
+      Mantid 6.13+** — group `mask_workspace` (not `workspace`),
+      `definition = "Mantid Processed Workspace"`, the canonical
+      5-dataset `instrument/detector` block. Verified end-to-end via
+      `LoadNexusProcessed` on Mantid 6.15: 697-pixel mask round-trips
+      with the right masked count and `MaskWorkspace` type.
+- [ ] Reference implementation:
+
+  ```python
+  def write_mask_nxs(output_path, source_meta, mask_2d):
+      n = source_meta.pixel_ids.size
+      assert mask_2d.size == n, "mask / pixel_ids ordering mismatch"
+
+      y = mask_2d.astype(np.float64).reshape(n, 1)
+      e = np.zeros_like(y)
+      iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+      s = lambda v: np.bytes_(v.encode() if isinstance(v, str) else v)
+
+      with h5py.File(output_path, "w") as f:
+          f.attrs["NeXus_version"] = s("4.3.0")
+          f.attrs["file_name"]     = s(str(output_path))
+          f.attrs["HDF5_Version"]  = s(h5py.version.hdf5_version)
+
+          ent = f.create_group("mantid_workspace_1")
+          ent.attrs["NX_class"] = s("NXentry")
+          ent.create_dataset("title", data=s("MaskWorkspace"))
+          d = ent.create_dataset("definition", data=s("mantidworkspace"))
+          d.attrs["Version"] = s("1.0")
+          ent.create_dataset("workspace_type", data=s("MaskWorkspace"))
+
+          ws = ent.create_group("workspace")
+          ws.attrs["NX_class"] = s("NXdata")
+          v = ws.create_dataset("values", data=y)
+          v.attrs["signal"] = 1
+          v.attrs["axes"]   = s("axis2,axis1")
+          ws.create_dataset("errors", data=e)
+          ws.create_dataset("axis1", data=np.array([0.0, 1.0]))
+          ws.create_dataset("axis2", data=np.arange(n, dtype=np.float64))
+
+          inst = ent.create_group("instrument")
+          inst.attrs["NX_class"] = s("NXinstrument")
+          inst.create_dataset("name", data=s(source_meta.instrument_name))
+          det = inst.create_group("detector")
+          det.attrs["NX_class"] = s("NXdetector")
+          det.create_dataset("detector_list",
+                             data=source_meta.pixel_ids.astype(np.int32))
+          det.create_dataset("detector_count",
+                             data=np.ones(n, dtype=np.int32))
+          det.create_dataset("detector_index",
+                             data=np.arange(n, dtype=np.int32))
+          det.create_dataset("spectrum_index",
+                             data=np.arange(1, n+1, dtype=np.int32))
+
+          smp = ent.create_group("sample")
+          smp.attrs["NX_class"] = s("NXsample")
+          smp.create_dataset("name", data=s(""))
+
+          proc = ent.create_group("process")
+          proc.attrs["NX_class"] = s("NXprocess")
+          for note, desc in [
+              ("MantidEnvironment", "sansdir mask creation"),
+              ("MantidAlgorithm_1", "sansdir.mask.create"),
+          ]:
+              g = proc.create_group(note)
+              g.attrs["NX_class"] = s("NXnote")
+              g.create_dataset("author",      data=s("sansdir"))
+              g.create_dataset("date",        data=s(iso))
+              g.create_dataset("description", data=s(desc))
+              g.create_dataset("data",
+                               data=s(f"SourceFile={source_meta.source_path}"))
+  ```
+
+- [x] String encoding: `np.bytes_(...)` for fixed-length ASCII (max
+      compatibility across Mantid versions). Mantid 6.15 accepts the
+      result without complaint.
+
+### npy writer
+
+- [x] `write_npy(path, mask, source_meta)` — `np.save` plus
+      `<basename>.meta.json` sidecar.
+
+### Common log writer
+
+- [x] `write_log(path, source_meta, builder, mask_stats)` —
+      `<basename>.mask_log.json` per § 9.6.6.
+
+---
+
+## 9.6.4 — Interactive matplotlib GUI
+
+Module: `src/sansdir/mask/gui.py`
+
+- [x] Detector heatmap with `LogNorm` (vmin/vmax sliders deferred —
+      autoscale per-image is fine for the common workflow).
+- [x] Mode buttons:
+      `Rectangle / Ellipse / Circle / Polygon` *(Lasso wired as a
+      polygon-select alias; explicit Select-Edit deferred)*.
+- [x] Action buttons:
+      `Undo / Clear / Invert / Save XML / Save NeXus / Quit`.
+- [x] Keyboard shortcuts: `r e c p z i s Esc Delete`.
+- [x] :class:`MaskController` freezes each completed shape as a
+      translucent red `Patch`, adds it to the :class:`MaskBuilder`,
+      and rearms the selector for the next gesture.
+- [ ] Edit mode (click-to-select, drag, resize handles) — deferred;
+      delete + redraw is the v1 workflow and tests cover it.
+- [x] `useblit=True` on the rectangle/ellipse/polygon/lasso selectors.
+
+Subprocess wiring: the TUI's ``K`` keystroke fires
+``python -m sansdir.mask.gui <source.nxs.h5> --output <…>`` via
+``subprocess.Popen`` (start_new_session=True), same forking pattern
+as :mod:`sansdir.plot.window`. Tests cover the controller against a
+real ``Agg`` backend; the rendered widget graph is left to manual
+verification.
+
+---
+
+## 9.6.5 — TUI command + CLI subcommand
+
+- [x] `:mask` operates on the cursor's `.nxs.h5` (single-file)
+- [x] Keybinding: `K`
+- [x] `$DISPLAY` unset → status-bar pointer to CLI
+- [x] `sansdir mask <input.nxs.h5> [options]`:
+      `--rect`, `--ellipse`, `--circle`, `--polygon`, `--shapes-json`,
+      `--inverse`, `--output`, `--format {xml,nxs,npy}` —
+      *(interactive matplotlib editor is the next iteration; CLI
+      form is the canonical entry point)*
+
+---
+
+## 9.6.6 — `mask_log.json` round-trip
+
+```json
+{
+  "sansdir_version": "0.9.0",
+  "created_at": "2026-05-07T18:42:11Z",
+  "source_nxs": "/SNS/EQSANS/IPTS-31415/nexus/EQSANS_172749.nxs.h5",
+  "instrument": "EQSANS",
+  "detector_shape": [256, 192],
+  "inverse": false,
+  "shapes": [
+    {"type": "rectangle", "x0": 10, "y0": 20, "x1": 30, "y1": 50},
+    {"type": "circle", "xc": 128, "yc": 96, "r": 25}
+  ],
+  "stats": {"masked_pixels": 1247, "masked_fraction": 0.0254}
+}
+```
+
+`MaskBuilder.from_log(path)` reconstructs builder + shapes.
+
+---
+
+## 9.6.7 — Tests
+
+- [x] **Convention test** (§ 9.6.1) — runs first.
+- [x] Per-shape rasterise tests with hand-verified fixtures
+      (rect / circle / ellipse / polygon).
+- [x] **Pixel-ordering alignment test** — synthetic source file with
+      both an explicit `bank1/pixel_id` permutation and the canonical
+      derive-from-reorder path; mask a pixel at known `(row, col)`,
+      verify the matching detector ID lands in `detector_list[nz]`.
+- [x] `Shape` → JSON round-trip semantic equality (parametrised over
+      every shape kind).
+- [x] XML writer: trivial inputs, parse round-trip, range compression.
+- [x] NeXus writer:
+  - [x] Group hierarchy matches the Mantid 6.13+ layout (the spec's
+        reference layout was the earlier draft; we adapted to what
+        Mantid 6.15 actually writes).
+  - [x] Critical attributes (`NX_class`, `signal`, `axes`, `units`,
+        `caption`) present and correct.
+  - [ ] Reference-fixture structural-diff test — *(the cluster's
+        Mantid happily round-trips our output as a `MaskWorkspace`;
+        capturing a canonical fixture and committing it is a
+        follow-up since file-size + retention policy is undecided)*.
+- [x] CLI integration tests for each `--<shape>` flag, both XML and
+      NeXus, plus `--inverse`, `--shapes-json` replay, default-output
+      naming, error paths.
+- [ ] Mantid-load smoke test gated on `pytest.importorskip("mantid")`
+      — *(verified manually on the cluster: `sansdir mask` →
+      `LoadNexusProcessed` → 697 masked spectra match what the CLI
+      reported; turning that into a gated pytest is a follow-up)*.
+- [x] All tests `ruff` clean. `grep -r "import mantid" src/` returns
+      nothing.
+
+### How to capture the reference fixture
+
+On a machine with MantidWorkbench, once:
+
+1. Open a small EQSANS `.nxs.h5` in MantidWorkbench
+2. InstrumentView → draw a couple of mask shapes
+3. Apply and Save → As Detector Mask to workspace → `MaskWorkspace` in ADS
+4. Right-click → Save NeXus → `reference_mask.nxs`
+5. Commit to `tests/mask/fixtures/`
+
+If the file is large, subset the source first to keep ~100 spectra. The
+fixture is canonical; if a future Mantid release changes the format and
+the diff test fails, regenerate fixture + writer in the same PR.
+
+---
+
+## 9.6.8 — Documentation
+
+- [x] README: `K` / `:mask` row in keymap; "Mask creation" section
+      with Mantid-loadable example.
+- [x] PLANNING.md §12.7 "Mask architecture" — shape model, writer
+      strategies, source-file-as-template approach, no-Mantid-dep
+      rationale, the Mantid 6.13+ layout adaptation.
+- [x] CLI worked example: beam-stop circle plus four corner
+      rectangles, in both `sansdir mask --help` epilog and the README
+      CLI-examples section.
+- [x] Compatibility note: writer borrows detector mapping from the
+      source file. EQSANS event-mode files (canonical layout) work
+      without `bank1/pixel_id`; files with explicit `bank1/pixel_id`
+      get verbatim use; everything else raises
+      `UnsupportedFileLayoutError` with a clear message.
+
+---
+
+## Acceptance criteria
+
+- [ ] Convention test passes first
+- [ ] Pixel-ordering alignment test passes
+- [ ] Reference-fixture structural-diff test passes against a real
+      Mantid-Workbench-saved mask
+- [ ] End-to-end TUI: open a `.nxs.h5`, press `K`, draw shapes, Save
+      NeXus, load with `LoadNexusProcessed` in Mantid, verify masked
+      detector IDs match what was drawn (NOT the inverse — verify the
+      convention end-to-end on a real run)
+- [ ] End-to-end XML: same flow with `LoadMask`
+- [ ] CLI round-trip via `--shapes-json` produces byte-identical output
+- [ ] All unit tests green, `ruff check` clean
+- [ ] `grep -r "import mantid" src/` returns nothing
+- [ ] No `mask/instruments/` directory exists (the simplification holds)
+
+
+
+# Phase 9.7 — Polish from real-user feedback (post-9.6)
+
+Driven by direct feedback from the first scientist using `K` against
+real EQSANS runs. Each item is a small, reviewable change.
+
+## Mask GUI
+
+- [x] **Cell aspect tuned to the EQSANS pitch.** Heatmap now uses
+      `aspect=1.0/1.3` (≈ `tube_pitch / pixel_pitch`). Previous
+      `aspect="equal"` made circles look vertically elongated.
+- [x] **Larger drawing canvas.** ~5%-or-8-cell margin around the
+      detector via `set_xlim`/`set_ylim` so users can start a drag
+      gesture *outside* the heatmap. Rasteriser already clips
+      out-of-bounds shapes; visible dotted boundary marks where the
+      mask actually applies.
+- [x] **On-disk mask convention inverted to match `mask_4m2.nxs`.**
+      Each *unmasked* detector now carries one synthetic event;
+      masked detectors carry zero, so the masked region renders grey
+      via the normal `p` plot path (matches the visual users get
+      from real beamstop files). Internal `MaskBuilder` still uses
+      `1 = masked`.
+- [x] **Circle and Polygon dropped from the GUI menu.** Ellipse
+      covers Circle without the cell-aspect rubber-band weirdness.
+      The bank/tube spec input covers the strip-mask case better
+      than freehand polygons. Both Shapes + CLI flags stay.
+- [x] **Cursor readout** (`format_coord`):
+      `tube=N pixel=M counts=K · bank=B tube_in_bank=T`. Bank/tube
+      bridge in new `src/sansdir/mask/banktube.py` with 34 unit
+      tests covering the round-trip and the spec parser.
+- [x] **Mask-by-bank/tube text input** below the button bar:
+      `b3` (bank → 4 tubes), `t50` (display column), ranges + mixed
+      tokens (`b5-7 t10-15`); each consecutive run of columns
+      becomes one Rectangle. Runs round-trip through
+      `--shapes-json` like any other shape.
+- [x] **Patch-vs-cell alignment fix for spec-input rectangles.**
+      `MplRect((lo + 0.5, 0.5), w = hi - lo + 1, h = n_rows)` —
+      without the `+1`/`+0.5`, a single-tube spec like `t130`
+      collapsed to a zero-width strip on the imshow extent.
+- [x] **Save dialog.** Tk `asksaveasfilename` pre-filled with the
+      default path; `Save .xml` button removed (CLI still writes
+      XML).
+
+## TUI ergonomics
+
+- [x] **F-key reshuffle.** `F5 = Refresh`, `F6 = Copy`,
+      `F7 = Move`, `F8 = Delete`, `F9 = Mkdir`. Drop `F10 = Quit`
+      (`q` is enough). New `ui.refresh` Command (also `:refresh`).
+- [x] **Auto-refresh in batch extract.** Whichever pane shows the
+      directory the new files landed in gets `refresh_listing()`
+      after a successful write — same pattern `ui.zip_tagged`
+      already followed.
+- [x] **`K` from the catalog.** `RunCatalogPanel.action_mask_current`
+      mirrors `action_show_keys_current` / `action_batch_extract_selection`;
+      dispatches `ui.mask` with an explicit `path=` so the file-pane
+      cursor is bypassed. `_make_ui_mask` accepts the optional
+      `path` kwarg.
+- [x] **App-level allow-list.** `K` added to the focused-catalog
+      key allow-list in `app.py:on_key` so the catalog binding gets
+      first dibs (the app-level keymap was intercepting otherwise).
+
+## Performance
+
+- [x] **OnCat browser filter snappiness.** 200 ms debounce on
+      `watch_filter_text` (cancels pending timer on each keystroke);
+      cap rendered ListView entries at `MAX_VISIBLE = 200` with an
+      overflow hint Static below; wrap the rebuild in
+      `app.batch_update()` for a single layout pass. Two pinned
+      tests in `test_phase4.py` so the budget can't silently
+      regress.
+
+## Tests
+
+- 500 passed, 1 skipped, ruff clean. Test count rose from 392 → 500
+  through Phase 9.6 + 9.7 (mask core / writers / CLI / GUI / GUI
+  perf / banktube / catalog `K` / `F5` refresh / debounce / cap).
+
+---
+
+# Phase 9.5 — Zenodo DOI minting from tagged files
+
+## Goal
+
+A `:createdoi` command in the sansdir TUI that takes the currently-tagged files,
+walks the user through Zenodo metadata, uploads them to Zenodo, mints a DOI, and
+appends a provenance entry to a `DOI_log.md` file in the active pane's cwd. A
+matching `sansdir doi` CLI subcommand exposes the same flow non-interactively.
+
+This phase makes sansdir a one-stop tool for the SANS publishing workflow:
+browse → triage → tag → mint citable DOI, all without leaving the terminal.
+
+## Design decisions (locked — do not relitigate during implementation)
+
+1. **Authentication: per-user personal access tokens only.** No shared
+   sansdir-bot token, no OAuth flow. Each user creates a token at
+   `https://zenodo.org/account/settings/applications/tokens/new/` with scopes
+   `deposit:write` and `deposit:actions`. This is structural to how Zenodo /
+   DataCite ownership works — the publishing user is forever recorded as the
+   record owner.
+2. **Per-user profile cached locally.** Name, affiliation, ORCID, email, default
+   license stored in `~/.config/sansdir/zenodo.toml`. Auto-prefilled into the
+   metadata form. Zenodo's API does *not* read these from the account profile.
+3. **First-run wizard inside `:createdoi`.** Missing token / missing profile
+   trigger inline setup screens before the metadata form. Standalone commands
+   (`:zenodo-login`, `:zenodo-profile`) also exposed for ahead-of-time setup.
+4. **Sandbox by default for first-time users.** Production opt-in via
+   `:zenodo-prod` or config flag. Sandbox prefix `10.5072`, production `10.5281`.
+5. **Two-stage commit.** Form → upload → confirmation modal → publish. Default
+   confirm action is "Publish"; "Save as Draft" and "Cancel & Discard" available.
+   Never auto-publish without an explicit user click.
+6. **New "bucket" file API only.** Streamed `PUT {bucket}/{name}`. No
+   multipart, no legacy `/files` POST. 50 GB per file / per record, 100 files
+   per record.
+7. **Operates on tagged files.** Empty tag set → status-bar error and abort.
+   No fallback to cursor selection (publishing is high-stakes).
+8. **`DOI_log.md` is per-folder, append-only.** Lives in active pane's cwd if
+   writable; falls back to inactive pane, then `~/sansdir-doi-logs/`. Each
+   `:createdoi` run appends one entry — earlier entries are never modified.
+9. **Pre-flight quota checks.** Total size ≤ 50 GB, file count ≤ 100, before
+   any network call. Clear error message if exceeded; suggest `z` (zip) or
+   splitting into multiple records.
+
+## Out of scope for 9.5 (defer to later phases)
+
+- OAuth flow / web auth handoff
+- New-version API (`/actions/newversion`) for updating published records
+- Metadata-only edits to already-published records
+- Communities submission
+- Auto-prefill of metadata from OnCat catalog (good candidate for 9.6)
+- OS keyring / secret-service integration (TOML file is enough for v1)
+- `:resumedoi <id>` for picking up an abandoned draft (reserve the command
+  name; implement later)
+
+---
+
+## 9.5.1 — ZenodoClient (pure HTTP layer, no Textual)
+
+Module: `src/sansdir/zenodo/client.py`
+
+- [ ] `ZenodoClient(token, base_url, *, session=None, timeout=30)` class
+- [ ] Class constants `BASE_URL_PROD = "https://zenodo.org/api"` and
+      `BASE_URL_SANDBOX = "https://sandbox.zenodo.org/api"`
+- [ ] `verify_token() -> dict` — `GET /deposit/depositions?size=1`; raises
+      `ZenodoAuthError` on 401, returns the response body otherwise
+- [ ] `create_deposition() -> Deposition` — POSTs `{}`; returns parsed
+      `Deposition` dataclass with `id`, `bucket_url`, `prereserved_doi`,
+      `links`, `state`
+- [ ] `upload_file(bucket_url, path, name=None, *, on_progress=None) -> FileResource`
+      — streamed `PUT`, optional `on_progress(bytes_sent, total_bytes)` callback
+      for the TUI progress bar
+- [ ] `set_metadata(deposition_id, metadata: DepositionMetadata) -> Deposition`
+      — `PUT /deposit/depositions/{id}` with `{"metadata": {...}}`
+- [ ] `publish(deposition_id) -> PublishedRecord` — `POST .../actions/publish`,
+      expects HTTP 202, returns dataclass with `doi`, `concept_doi`, `record_url`,
+      `published_at`
+- [ ] `discard(deposition_id) -> None` — `POST .../actions/discard` for
+      cancellation paths
+- [ ] `list_licenses() -> list[License]` — for the license picker; cache result
+      in module-level dict keyed by base_url
+- [ ] All methods retry transient failures (connection error, 5xx) via
+      `urllib3.Retry`: 3 attempts, exponential backoff, only idempotent verbs
+- [ ] All errors surface as typed exceptions in `src/sansdir/zenodo/errors.py`:
+      `ZenodoError` (base), `ZenodoAuthError`, `ZenodoValidationError(field, message)`,
+      `ZenodoQuotaError`, `ZenodoNetworkError`
+- [ ] Token must NEVER appear in any exception message, `__repr__`, or log line.
+      `__repr__` of `ZenodoClient` shows `Bearer ****` only.
+- [ ] Use a single `requests.Session` for connection reuse
+
+**Acceptance:** unit tests with `responses` library covering: success path,
+400 validation error (with field-level breakdown), 401 auth error, 413 oversize,
+5xx retry succeeds on 2nd attempt, 5xx retry exhausted raises `ZenodoNetworkError`,
+streamed PUT calls progress callback the expected number of times.
+
+---
+
+## 9.5.2 — Auth & profile config
+
+Modules: `src/sansdir/zenodo/auth.py`, `src/sansdir/zenodo/profile.py`
+
+- [ ] Config file path: `${SANSDIR_CONFIG:-~/.config/sansdir}/zenodo.toml`
+- [ ] Token resolution order (production):
+      `$SANSDIR_ZENODO_TOKEN` → `[zenodo].token` → none
+- [ ] Token resolution order (sandbox):
+      `$SANSDIR_ZENODO_SANDBOX_TOKEN` → `[zenodo.sandbox].token` → none
+- [ ] `save_token(token, *, sandbox=False)` writes file with mode `0600`;
+      creates parent dir if needed
+- [ ] On load, warn (status bar; do not fail) if file mode is wider than `0600`
+- [ ] `Profile` dataclass: `name`, `affiliation`, `orcid`, `email`,
+      `default_license`. All optional except name and affiliation.
+- [ ] `save_profile(profile)`, `load_profile() -> Profile | None`
+- [ ] Optional `coauthors` address book serialised as TOML
+      `[[profile.coauthors]]` array of tables; each entry has `name`,
+      `affiliation`, `orcid`
+- [ ] Validate name format `Family, Given` (allow Unicode, but require the comma)
+- [ ] Validate ORCID format `\d{4}-\d{4}-\d{4}-\d{3}[\dX]` when present
+- [ ] `clear_token(sandbox=False)`, `clear_profile()` for `:zenodo-logout`
+
+**Acceptance:** unit tests using `tmp_path`. Never write to the real
+`~/.config/`. Cover: write+read round trip, malformed file (bad TOML, missing
+section) raises clean error, 0644 file mode emits warning, env var overrides file.
+
+---
+
+## 9.5.3 — Metadata model & validation
+
+Module: `src/sansdir/zenodo/metadata.py`
+
+- [ ] `Creator` dataclass: `name`, `affiliation`, `orcid` (optional),
+      `gnd` (optional)
+- [ ] `RelatedIdentifier` dataclass: `relation`, `identifier`,
+      `resource_type` (optional)
+- [ ] `DepositionMetadata` dataclass with all required + commonly-used fields:
+      `title`, `upload_type`, `description`, `creators`, `publication_date`
+      (defaults to today), `access_right` (default `"open"`), `license`,
+      `keywords`, `related_identifiers`, `notes`
+- [ ] `to_zenodo_payload() -> dict` produces exactly the JSON the API expects
+      (under top-level `"metadata"` key)
+- [ ] `validate() -> list[ValidationError]` runs local checks before any
+      network call:
+  - `title` non-empty
+  - `description` non-empty
+  - At least one creator
+  - Each creator's `name` matches `Family, Given` regex
+  - `upload_type` ∈ controlled vocab (`publication`, `poster`, `presentation`,
+    `dataset`, `image`, `video`, `software`, `lesson`, `physicalobject`,
+    `other`)
+  - `access_right` ∈ `{open, embargoed, restricted, closed}`
+  - `license` required if `access_right` ∈ `{open, embargoed}`
+- [ ] HTML sanitisation for `description`: keep only Zenodo-allowed tags
+      (`a`, `b`, `code`, `em`, `i`, `li`, `ol`, `p`, `pre`, `span`, `strong`,
+      `sub`, `sup`, `ul`, `br`); plain text gets wrapped in `<p>`
+
+**Acceptance:** unit tests covering each validation rule and round-trip
+serialisation.
+
+---
+
+## 9.5.4 — First-run wizard
+
+In TUI command handler for `:createdoi`:
+
+- [ ] Pre-flight checks in this order:
+  1. Tag set non-empty → if empty, status bar
+     `"No files tagged. Tag files with Space/+ then run :createdoi."` and abort.
+  2. Token present (for currently-active prod/sandbox mode) → if missing,
+     push `ZenodoTokenSetupScreen`.
+  3. Profile present → if missing, push `ZenodoProfileSetupScreen`.
+- [ ] `ZenodoTokenSetupScreen`: instructions, link to token-creation URL with
+      pre-checked `deposit:write` + `deposit:actions` scopes, masked paste field,
+      "Validate" button calls `verify_token()` before saving
+- [ ] `ZenodoProfileSetupScreen`: name, affiliation (default
+      `"Oak Ridge National Laboratory"`), ORCID, email, default license
+- [ ] Both setup screens display banner: *"First-time setup — happens once."*
+- [ ] Cancel (`Esc`) at any step aborts the entire `:createdoi` flow with no
+      partial state saved
+- [ ] Standalone commands also wired:
+      `:zenodo-login`, `:zenodo-profile`, `:zenodo-logout`,
+      `:zenodo-prod`, `:zenodo-sandbox` (the last two flip the active mode in
+      the TOML file's top-level `[zenodo]` section)
+
+---
+
+## 9.5.5 — `:createdoi` command + metadata form
+
+- [ ] Register `:createdoi` in the existing TUI command registry alongside
+      `:extract`, `:zip`, etc. Match the existing command-class pattern.
+- [ ] `ZenodoMetadataScreen` — Textual `ModalScreen[DepositionMetadata | None]`
+      returning the metadata on submit, `None` on cancel
+  - Title input
+  - Description textarea (multiline, suggested initial content: brief auto-stub
+    listing file count and total size)
+  - Creators editor: vertical list, prefilled with self from profile,
+    "+ Add coauthor" button opens picker showing both the saved coauthors
+    address book and a "fresh entry" option
+  - Upload type dropdown (default `dataset`)
+  - License dropdown (populated from `client.list_licenses()`, default from
+    profile)
+  - Access right dropdown (default `open`)
+  - Keywords text input (comma-separated, prefilled with
+    `SANS, EQSANS, IPTS-NNNNN` derived from path if matchable)
+  - Related identifiers expandable section (advanced; can be left empty)
+  - Submit → validate locally → continue. Inline errors per field on
+    validation failure.
+
+---
+
+## 9.5.6 — File upload (bucket API)
+
+In the `:createdoi` flow, after metadata form submission:
+
+- [ ] Create deposition; capture `bucket_url`, `id`, `prereserved_doi`
+- [ ] Pre-flight checks on tagged file set:
+  - Total size ≤ 50 GB → else `ZenodoQuotaError` with file count + total size
+  - File count ≤ 100 → else suggest `z` (zip them first)
+  - All files exist and are readable
+- [ ] Compute MD5 for each file locally (streamed — do not load file into RAM).
+      Show this as a `"Hashing..."` step in the progress UI; it can be slow on
+      large files.
+- [ ] Streamed `PUT` per file with progress callback wired to a Textual
+      `ProgressBar`. Sequential uploads (do not parallelise — keeps the network
+      simple and is fast enough for SANS file sizes).
+- [ ] After each upload, verify the Zenodo-returned MD5 matches the locally
+      computed MD5; record both in the upload result (used in `DOI_log.md`)
+- [ ] On retry-exhausted upload failure, present
+      `[Retry remaining] [Abort & Discard]` modal.
+      Abort calls `client.discard()` to remove the orphan draft.
+
+---
+
+## 9.5.7 — Confirmation & publish
+
+- [ ] After all uploads complete, push `ZenodoConfirmScreen`:
+  - Title, prereserved DOI marked as
+    `"DOI preview — not yet active. Will activate on Publish."`
+  - File count, total size, list of uploaded filenames with checksums
+  - Three buttons: **[Publish]** (default, focus), **[Save as Draft]**,
+    **[Cancel & Discard]**
+- [ ] **Publish** → `client.publish()` (expect HTTP 202) → write `DOI_log.md`
+      entry → status bar shows live DOI URL
+- [ ] **Save as Draft** → leave deposition in `inprogress` state, append
+      `[[drafts]]` entry to `zenodo.toml` with `id`, `created_at`, `title` so
+      it can be found later
+- [ ] **Cancel & Discard** → `client.discard()` → status bar confirmation
+
+---
+
+## 9.5.8 — `DOI_log.md` writer (append-only)
+
+Module: `src/sansdir/zenodo/doi_log.py`
+
+- [ ] Locate target dir:
+      active pane cwd if writable → else inactive pane cwd if writable →
+      else `~/sansdir-doi-logs/<sanitised-path>.md`
+- [ ] If `DOI_log.md` does not exist, create with file header:
+      `# DOI Log — <absolute folder path>\n\nRecords published from this folder via sansdir.\n\n---\n`
+- [ ] If it exists, append a new entry block at end. **Existing content is never
+      modified.** Read-validate then write with `O_APPEND` semantics.
+- [ ] Each entry contains:
+  - `## <DOI> — <title>` heading
+  - **Published:** ISO8601 UTC, **Files:** N, **Size:** human-readable
+  - Zenodo record URL
+  - Files table with columns: Path, Size, MD5, Zenodo checksum (with `✓` if
+    matched)
+  - "How to cite" block with both BibTeX and APA
+  - Submitted metadata as a fenced JSON block (for reproducibility)
+  - Provenance footer: sansdir version, hostname, user, run timestamp
+  - Trailing `---` separator
+- [ ] Function: `append_entry(log_path: Path, entry: DOILogEntry) -> Path`,
+      returns the actual path written (which may differ from the requested one
+      due to fallback)
+- [ ] Status bar message indicates final log path
+
+**Acceptance:** unit tests for: new file creation, appending to existing file
+with N entries, parsing-then-re-emitting an existing log produces identical
+content (idempotency), fallback path used when target dir is read-only.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ---
 
@@ -191,5 +964,77 @@ Prerequisite: Phases 0–9 complete; command registry covers every user action.
 - [ ] Plugin system for instrument-specific commands
 - [ ] Bookmark system (`b` set, `'` jump) for frequent IPTS dirs
 - [ ] Local-model LLM backend (vLLM / Ollama) as alternative to Anthropic API
+
+
+---
+
+## 9.5.9 — CLI subcommand
+
+Wire `sansdir doi <files...> [options]` matching the existing CLI style of
+`sansdir extract`:
+
+- [ ] Required: positional file arguments
+- [ ] `--metadata <file.json>` — full metadata payload from a file (overrides
+      individual flags)
+- [ ] Individual metadata flags: `--title`, `--description`, `--creator`
+      (repeatable), `--license`, `--keyword` (repeatable),
+      `--upload-type`, `--access-right`
+- [ ] Mode flags: `--sandbox` / `--prod` (default reads from config; default of
+      default is sandbox)
+- [ ] Action flags: `--publish` (default: stop at draft), `--draft-only`
+      (explicit), `--log-dir <path>` (override DOI_log.md location)
+- [ ] Without `--publish`: stops at draft, prints the draft URL and id
+- [ ] With `--publish`: full pipeline, no interactive confirm — suitable for
+      scripts and CI
+- [ ] Reads same `~/.config/sansdir/zenodo.toml` as the TUI for token / profile
+
+---
+
+## 9.5.10 — Tests
+
+- [ ] Unit tests for `client.py` using `responses`: success, 400 with field
+      errors, 401, 413, 5xx retry, streamed PUT progress callbacks
+- [ ] Unit tests for metadata validation
+- [ ] Unit tests for profile / auth load / save (using `tmp_path`)
+- [ ] Unit tests for `doi_log.append_entry`: new file, append, idempotency,
+      fallback path
+- [ ] Snapshot test for generated `DOI_log.md` content given fixed inputs
+- [ ] CLI tests using `pytest`'s `capsys` and a mocked `ZenodoClient`
+- [ ] Integration test under `tests/zenodo/test_sandbox_integration.py` gated
+      on `ZENODO_SANDBOX_TOKEN` env var: full round-trip against sandbox, then
+      `discard` to clean up. Marked with `@pytest.mark.integration` and skipped
+      by default.
+- [ ] All tests `ruff` clean
+
+---
+
+## 9.5.11 — Documentation
+
+- [ ] Update `README.md`:
+  - New `:createdoi` and related commands in the keymap table
+  - "Zenodo integration" section under Configuration with TOML example
+  - Mention sandbox-first default and how to flip to production
+  - One-paragraph quickstart for first-time users
+- [ ] Update `PLANNING.md` with a "Zenodo integration" architecture subsection
+- [ ] Mark Phase 9.5 complete in `TASKS.md`
+- [ ] Add an example `DOI_log.md` snippet to the README
+
+---
+
+## Acceptance criteria for the phase
+
+- [ ] End-to-end sandbox round-trip from the TUI: tag → `:createdoi` → wizard
+      (if first time) → form → upload → confirm → publish → live DOI →
+      `DOI_log.md` written with full entry
+- [ ] End-to-end sandbox round-trip from the CLI with `--publish`
+- [ ] All unit tests green; integration test passes manually with
+      `ZENODO_SANDBOX_TOKEN` set
+- [ ] `ruff check` clean, `ruff format` applied
+- [ ] Manual code review confirms no token leak in any log / error / repr path
+- [ ] README and PLANNING.md updated
+- [ ] Verified to work on a host without `$DISPLAY` (cluster headless mode) —
+      progress bar renders in the TUI, no GUI dialog popups
+
+
 
 git: https://github.com/cw-do/sansdir.git

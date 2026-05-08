@@ -51,8 +51,10 @@ def _registry() -> CommandRegistry:
 def test_overrides_replace_existing_binding() -> None:
     base = default_keymap()
     reg = _registry()
+    # F5 is bound to the refresh command in the default keymap; users
+    # can override it like any other binding.
     f5_before = next(kb for kb in base if kb.key == "f5")
-    assert f5_before.command == "ui.copy_tagged"
+    assert f5_before.command == "ui.refresh"
     merged = _apply_keymap_overrides(base, {"f5": "ui.move_tagged"}, reg)
     f5_after = next(kb for kb in merged if kb.key == "f5")
     assert f5_after.command == "ui.move_tagged"
@@ -75,7 +77,7 @@ def test_overrides_drop_unknown_command_keep_default() -> None:
     )
     f5 = next(kb for kb in merged if kb.key == "f5")
     # Default kept; bogus override silently dropped.
-    assert f5.command == "ui.copy_tagged"
+    assert f5.command == "ui.refresh"
 
 
 def test_overrides_empty_returns_base_unchanged() -> None:

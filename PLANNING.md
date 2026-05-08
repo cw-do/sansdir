@@ -531,6 +531,62 @@ Even with no LLM yet, the registry pattern delivers immediate value:
 
 ---
 
+## 12.7 Mask architecture *(Phase 9.6)*
+
+Detector-mask creation lives in `src/sansdir/mask/`. Three strict
+boundaries:
+
+- **No Mantid runtime imports anywhere in `src/sansdir/`.** `grep -r
+  "import mantid" src/` returns nothing. The on-cluster Mantid env
+  is exercised only by an out-of-source verification script.
+- **No instrument-specific code in `src/`.** No `mask/instruments/`
+  subdirectory, no per-instrument pixel-to-detector formula. The
+  detector mapping comes from the source NeXus file itself.
+- **Pixel-ordering is one-place-only.** `mask.flatten()[k]` aligns
+  with `source_meta.pixel_ids[k]` by construction in
+  `mask/detector.py`; the writer is a thin function that reads that
+  invariant and writes detector-id-indexed output.
+
+Module breakdown:
+
+- `mask/core.py` — `Shape` (Rectangle / Ellipse / Circle / Polygon),
+  vectorised `rasterise(detector_shape) -> bool`, `MaskBuilder`
+  unions shapes and applies the optional `inverse` flag at the end.
+  **Convention**: `1 = masked` (excluded), `0 = kept`. Mirrors
+  Mantid's `SpecialWorkspace2D` so a Mantid `MaskDetectors` call on
+  our output excludes exactly the cells the user drew.
+- `mask/detector.py` — wraps the existing
+  `sansdir.plot.hdf5_detector.load_eqsans_raw` heatmap. Pairs the
+  `(256, 192)` image with a `pixel_ids` array such that
+  `image.flatten()[k]` == detector ID `pixel_ids[k]`. When the file
+  ships an explicit `bank1/pixel_id` dataset, that's used verbatim;
+  otherwise the canonical EQSANS event-mode mapping is derived
+  from the same `_reorder_tubes` permutation the heatmap loader
+  applies — so the writer's detector list always matches the
+  pixels the user drew on.
+- `mask/writers.py` — pure stdlib + h5py + numpy.
+  - `write_xml` emits Mantid SaveMask v1 (`<detector-masking>` with
+    range-compressed `<detids>`).
+  - `write_nxs` emits a Mantid Processed-NeXus MaskWorkspace (group
+    `mask_workspace` under `mantid_workspace_1`, `definition =
+    "Mantid Processed Workspace"`, the canonical 5-dataset
+    `instrument/detector` block). Mantid 6.13 reworked NeXus loading
+    so the older "workspace" group + lowercase definition no longer
+    load — the writer matches what Mantid 6.15's own
+    `SaveNexus(MaskWorkspace)` writes.
+  - `write_npy` is `np.save` plus a `.meta.json` sidecar.
+  - `write_log` writes `mask_log.json` next to every output for
+    round-trip via `MaskBuilder.from_log`.
+- `mask/api.py` — single `create_mask(source, shapes, output, fmt,
+  inverse) -> MaskResult` plus the `--rect`/etc. CLI parsers. Used
+  by both the CLI subcommand (`sansdir mask`) and the registry
+  command (`mask.create` / `K` keystroke).
+
+The interactive matplotlib editor is a separate iteration; the CLI
+form is the canonical entry point until then.
+
+---
+
 ## 13. Open Questions (to resolve as we build)
 
 - Should `Ctrl+O` (maximize active pane) be a true single-pane mode or just

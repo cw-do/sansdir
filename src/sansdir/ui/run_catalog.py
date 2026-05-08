@@ -40,6 +40,7 @@ class CatalogTable(DataTable):
         Binding("enter", "plot_current", "Plot raw NeXus", show=False),
         Binding("m", "show_keys_current", "HDF5 metadata tree", show=False),
         Binding("M", "batch_extract_selection", "Batch extract metadata", show=False),
+        Binding("K", "mask_current", "Mask editor", show=False),
         Binding("space", "toggle_tag", "Tag run", show=False),
         Binding("u", "clear_tags", "Clear all tags", show=False),
     ]
@@ -59,6 +60,9 @@ class CatalogTable(DataTable):
 
     def action_batch_extract_selection(self) -> None:
         self._delegate("action_batch_extract_selection")
+
+    def action_mask_current(self) -> None:
+        self._delegate("action_mask_current")
 
     def action_toggle_tag(self) -> None:
         self._delegate("action_toggle_tag")
@@ -144,7 +148,7 @@ class RunCatalogPanel(Vertical):
         )
         self._hint = Static(
             "[dim]Space tag · u clear tags · p plot · m keys · M extract · "
-            "/ filter · F2 list · Esc close[/dim]",
+            "K mask · / filter · F2 list · Esc close[/dim]",
             classes="hint",
         )
         self._ipts: str = ""
@@ -346,6 +350,25 @@ class RunCatalogPanel(Vertical):
         self.app.run_worker(  # type: ignore[attr-defined]
             self.app.registry.dispatch("hdf.show_keys", path=str(path)),  # type: ignore[attr-defined]
             name=f"keys:run{run}",
+            exclusive=False,
+        )
+
+    def action_mask_current(self) -> None:
+        """``K`` from the catalog: launch the mask editor on the cursor row's run."""
+        run = self.current_run_number
+        if run is None:
+            self.app.notify("no run under cursor", severity="warning")  # type: ignore[attr-defined]
+            return
+        path = self.raw_nexus_path(run)
+        if not path.exists():
+            self.app.notify(  # type: ignore[attr-defined]
+                f"raw file not found: {path}",
+                severity="warning",
+            )
+            return
+        self.app.run_worker(  # type: ignore[attr-defined]
+            self.app.registry.dispatch("ui.mask", path=str(path)),  # type: ignore[attr-defined]
+            name=f"mask:run{run}",
             exclusive=False,
         )
 

@@ -185,12 +185,16 @@ def default_keymap() -> list[KeyBinding]:
         # Archive / mail (Phase 3)
         KeyBinding("z", "ui.zip_tagged", "Zip tagged"),
         KeyBinding("e", "ui.mail_tagged", "Email tagged"),
-        # File ops (Phase 2)
-        KeyBinding("f5", "ui.copy_tagged", "Copy tagged → other pane"),
-        KeyBinding("f6", "ui.move_tagged", "Move tagged → other pane"),
-        KeyBinding("f7", "app.cmdline_prompt", "Make directory", _prompt_mkdir),
+        # File ops (Phase 2). F5 reloads both panes — useful after the
+        # mask GUI subprocess (or any external writer) drops a file
+        # into a pane's cwd. The classic mc/Norton Copy/Move/Delete
+        # bindings shifted up by one to make room: F6/F7/F8.
+        KeyBinding("f5", "ui.refresh", "Refresh both panes"),
+        KeyBinding("f6", "ui.copy_tagged", "Copy tagged → other pane"),
+        KeyBinding("f7", "ui.move_tagged", "Move tagged → other pane"),
         KeyBinding("f8", "ui.delete_tagged", "Delete tagged"),
         KeyBinding("delete", "ui.delete_tagged", "Delete tagged", show_in_help=False),
+        KeyBinding("f9", "app.cmdline_prompt", "Make directory", _prompt_mkdir),
         # Jump (Phase 2)
         KeyBinding("g", "app.cmdline_prompt", "Jump to path", _prompt_jump),
         KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
@@ -200,9 +204,10 @@ def default_keymap() -> list[KeyBinding]:
         # Plotting (Phase 5/6/7)
         KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans / 2D / NeXus)"),
         KeyBinding("l", "ui.plot_generic", "Plot selection (linear-linear, headered tables)"),
-        # NeXus tree (Phase 7) + batch extract (Phase 8)
+        # NeXus tree (Phase 7) + batch extract (Phase 8) + mask (Phase 9.6)
         KeyBinding("m", "hdf.show_keys", "HDF5 metadata tree", _hdf_under_cursor),
         KeyBinding("M", "ui.batch_extract", "Batch extract metadata → table"),
+        KeyBinding("K", "ui.mask", "Create detector mask from cursor's NeXus"),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(
@@ -218,5 +223,4 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("question_mark", "app.help", "Help overlay"),
         KeyBinding("?", "app.help", "Help overlay", show_in_help=False),
         KeyBinding("q", "app.quit", "Quit"),
-        KeyBinding("f10", "app.quit", "Quit", show_in_help=False),
     ]

@@ -221,12 +221,12 @@ files (or current row if none tagged); copy/move default destination is the
 | `+` / `*` | Tag by glob (`*.txt`, `*Iq*.dat`); `-` to untag by glob |
 | `F3` | View file (read-only pager) |
 | `F4` | Edit file (`$EDITOR`) |
-| `F5` | **Copy** tagged → other pane (with confirm) |
-| `F6` | **Move/rename** tagged → other pane (with confirm) |
-| `F7` | Make directory (in active pane) |
+| `F5` | **Refresh** both panes (re-read directory listings) |
+| `F6` | **Copy** tagged → other pane (with confirm) |
+| `F7` | **Move/rename** tagged → other pane (with confirm) |
 | `F8` / `Del` | Delete tagged (with confirm) |
-| `F9` | Menu / config |
-| `F10` / `q` | Quit |
+| `F9` | Make directory (in active pane) |
+| `q` | Quit |
 | `p` | Plot current/tagged |
 | `P` | Plot with options dialog (axes, colorbar mode) |
 | `m` | Show metadata (HDF5 keys for `*.nxs.h5`) |

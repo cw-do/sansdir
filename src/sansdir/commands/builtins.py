@@ -160,6 +160,43 @@ def _make_pane_toggle_max(app: AppProtocol) -> Command:
     )
 
 
+def _make_ui_refresh(app: AppProtocol) -> Command:
+    """``F5`` / ``:refresh`` — re-read both panes' directory listings.
+
+    External writes (the mask-editor subprocess, files arriving from
+    a separate shell, NFS metadata catching up, …) don't reach the
+    panes through any of the in-process command paths, so the pane
+    cursor would otherwise show a stale view until the user changed
+    directories. This handler is the manual escape hatch.
+    """
+
+    def handler() -> int:
+        n_before = len(app.active_panel._all_entries) + len(  # type: ignore[attr-defined]
+            app.inactive_panel._all_entries  # type: ignore[attr-defined]
+        )
+        app.active_panel.refresh_listing()
+        app.inactive_panel.refresh_listing()
+        n_after = len(app.active_panel._all_entries) + len(  # type: ignore[attr-defined]
+            app.inactive_panel._all_entries  # type: ignore[attr-defined]
+        )
+        delta = n_after - n_before
+        if delta > 0:
+            app.notify_user(f"refreshed (+{delta} entries)")
+        elif delta < 0:
+            app.notify_user(f"refreshed ({delta} entries)")
+        else:
+            app.notify_user("refreshed")
+        return n_after
+
+    return Command(
+        name="ui.refresh",
+        description="Re-read both panes' directory listings.",
+        params=(),
+        handler=handler,
+        aliases=("refresh",),
+    )
+
+
 def _make_view_toggle_hidden(app: AppProtocol) -> Command:
     def handler() -> bool:
         panel = app.active_panel
@@ -925,6 +962,102 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
     )
 
 
+def _make_ui_mask(app: AppProtocol) -> Command:
+    """``K`` keystroke / ``:mask`` — open the mask GUI for a NeXus file.
+
+    Two entry points (mirrors how ``ui.batch_extract`` is wired):
+
+    * From a file pane (``K`` with no args): we resolve the cursor to
+      a raw ``.nxs.h5`` / ``.nxs`` file.
+    * From the catalog pane (``K`` dispatches with explicit ``path=``):
+      we honour the supplied path verbatim — the catalog has already
+      mapped the run number to its on-disk NeXus file.
+
+    Same forking pattern as :mod:`sansdir.plot.window`: we spawn a
+    detached ``python -m sansdir.mask.gui <source>`` subprocess so the
+    matplotlib event loop runs independently of Textual's. Output
+    lands in the *inactive* pane's cwd by default (MDIR-style) so
+    you don't try to write into a read-only IPTS folder.
+    """
+
+    def handler(path: str | None = None) -> str | None:
+        import os
+        import subprocess
+        import sys
+
+        from sansdir.plot.backend import has_display
+
+        if path is not None:
+            cur = Path(path)
+            if not cur.is_file():
+                app.notify_user(f"not a file: {cur}", severity="warning")
+                return None
+        else:
+            cur = app.active_panel.cursor_path
+            if cur is None or not cur.is_file():
+                app.notify_user("no file under cursor", severity="warning")
+                return None
+        name = cur.name
+        if not (name.endswith(".nxs.h5") or name.endswith(".nxs")):
+            app.notify_user(
+                f"{name}: mask GUI works on raw NeXus (.nxs.h5 / .nxs)",
+                severity="warning",
+            )
+            return None
+        if not has_display():
+            app.notify_user(
+                "no $DISPLAY — use the CLI: "
+                f"sansdir mask {cur} --circle XC,YC,R --output mask.nxs",
+                severity="warning",
+            )
+            return None
+        # Default the output to the inactive pane's cwd so users don't
+        # accidentally try to write back into a read-only IPTS folder.
+        write_dir = app.inactive_panel.cwd
+        out = write_dir / f"{cur.stem}_mask.nxs"
+        cmd = [
+            sys.executable,
+            "-m",
+            "sansdir.mask.gui",
+            str(cur),
+            "--output",
+            str(out),
+            "--format",
+            "nxs",
+        ]
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env={**os.environ},
+            )
+        except OSError as exc:
+            app.notify_user(f"mask gui failed to launch: {exc}", severity="error")
+            return None
+        app.notify_user(f"mask editor opened on {cur.name} → {out}")
+        return str(out)
+
+    return Command(
+        name="ui.mask",
+        description="Open the interactive mask editor on a NeXus file.",
+        params=(
+            CommandParam(
+                name="path",
+                type="path",
+                description=(
+                    "Explicit *.nxs.h5 / *.nxs path (catalog pane uses this); "
+                    "blank → fall back to the active file pane's cursor."
+                ),
+                required=False,
+            ),
+        ),
+        handler=handler,
+        aliases=("mask",),
+    )
+
+
 def _make_hdf_show_keys(app: AppProtocol) -> Command:
     def handler(path: str) -> None:
         from sansdir.app import SansdirApp as _RealApp
@@ -1170,6 +1303,13 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
                 if not written_paths:
                     app.notify_user("no files written", severity="warning")
                     return None
+                # Refresh whichever panes show the directory the new
+                # files landed in — without this, the user sees a
+                # stale listing until they re-enter the directory.
+                target_dirs = {p.parent for p in written_paths}
+                for panel in (app.active_panel, app.inactive_panel):
+                    if panel.cwd in target_dirs:
+                        panel.refresh_listing()
                 app.notify_user(
                     f"wrote {len(written_paths)} per-file table(s) "
                     f"(first: {written_paths[0].name})"
@@ -1183,6 +1323,10 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
         except (OSError, ValueError) as exc:
             app.notify_user(f"extract failed: {exc}", severity="error")
             return None
+        # Same refresh logic for the summary-mode single-file write.
+        for panel in (app.active_panel, app.inactive_panel):
+            if panel.cwd == written.parent:
+                panel.refresh_listing()
         app.notify_user(f"wrote {len(nexus_files)} row(s) → {written}")
         return str(written)
 
@@ -1634,6 +1778,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_view_toggle_hidden(app),
         _make_view_set_sort(app),
         _make_view_set_filter(app),
+        _make_ui_refresh(app),
         _make_app_help(app),
         _make_app_cmdline_open(app),
         _make_app_cmdline_prompt(app),
@@ -1666,6 +1811,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_plot_detector_sum(app),
         _make_plot_generic(app),
         _make_hdf_show_keys(app),
+        _make_ui_mask(app),
         _make_hdf_batch_extract(app),
         _make_ui_batch_extract(app),
         _make_ui_plot_auto(app),

@@ -131,7 +131,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `g` / `G`      | `:cd <path>` prompt / fullscreen folder-tree picker                |
 | `:`            | Command line — every action is also a `:command` (see `?`)         |
 | `?`            | Help overlay (auto-generated from the registry)                    |
-| `q` / `F10`    | Quit                                                               |
+| `q`            | Quit                                                               |
 
 ### File operations (MDIR / Norton convention)
 
@@ -139,12 +139,19 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 |-----------|-------------------------------------------------------------|
 | `F3`      | View file in the *other* pane (Tab into it; `Esc` / `F3` close) |
 | `F4`      | Edit in `$EDITOR`                                            |
-| `F5`      | Copy tagged → other pane (with confirm)                      |
-| `F6`      | Move/rename tagged → other pane                              |
-| `F7`      | Make directory (active pane)                                 |
+| `F5`      | **Refresh** both panes (re-read directory listings)          |
+| `F6`      | Copy tagged → other pane (with confirm)                      |
+| `F7`      | Move/rename tagged → other pane                              |
 | `F8` / `Del` | Delete tagged (confirm; `send2trash` with cluster fallback)|
+| `F9`      | Make directory (active pane)                                 |
 | `z`       | Zip tagged → prompt for archive name                         |
 | `e`       | Email tagged (`mail` / `mutt` shell-out)                     |
+
+`F5` reloads both panes; useful when an external process (the mask
+editor subprocess, a separate shell, an NFS catch-up) drops files
+into a pane's cwd. The in-process flows (copy / move / mkdir / batch
+extract / mask save into the inactive pane / zip) refresh
+automatically.
 
 ### Plotting
 
@@ -169,6 +176,7 @@ On a host without `$DISPLAY` they fall back to PNGs under
 |-----|--------------------------------------------------------------------------|
 | `m` | Open the cursor's `.nxs(.h5)` in a tree browser (lazy expansion)         |
 | `M` | Batch metadata extract: tag NeXus files → `M` opens the picker dialog    |
+| `K` | Create a detector mask from the cursor's raw NeXus file (Phase 9.6)      |
 
 The **Batch metadata extract** dialog has two modes:
 
@@ -194,16 +202,113 @@ in the file, `Ctrl+S` returns to the form.
 | `Enter` / `p` *(in catalog)* | Plot the cursor's raw NeXus run                  |
 | `m` *(in catalog)* | HDF5 tree of the cursor's run                              |
 | `M` *(in catalog)* | Batch extract (tagged runs, or just the cursor row)       |
+| `K` *(in catalog)* | Mask editor on the cursor row's raw NeXus                  |
 
 The catalog always lives on the right pane regardless of where you press
 `i`, so the layout is predictable; `Ctrl+U` swaps file pane cwds without
 moving the catalog.
 
+The IPTS browser (the screen `i` opens) keeps input snappy on large
+catalogs by debouncing the filter input (200 ms quiet window, so a
+fast typist gets one rebuild instead of one per keystroke) and
+capping the rendered window at the first 200 matches — an overflow
+hint at the bottom (`+N more — narrow your filter`) tells you when
+to keep typing.
+
 ---
+
+### Mask creation
+
+`sansdir mask` builds a Mantid-loadable detector mask from a raw
+EQSANS `.nxs.h5` file in pure Python — no Mantid runtime required to
+*create* the file. The output `.nxs` (Mantid Processed NeXus
+`MaskWorkspace`) and `.xml` (Mantid `SaveMask` v1) loads back into
+Mantid via `LoadNexusProcessed` / `LoadMask`.
+
+Convention: **`1 = masked` (excluded), `0 = kept`** — same as
+Mantid's `SpecialWorkspace2D`. Inverting the final mask is a single
+flag (`--inverse`).
+
+CLI shapes (pixel coordinates, repeatable):
+
+- `--rect X0,Y0,X1,Y1`
+- `--ellipse XC,YC,RX,RY`
+- `--circle XC,YC,R`
+- `--polygon X1,Y1,X2,Y2,...` (≥3 vertices)
+
+Or replay an earlier mask via `--shapes-json mask.mask_log.json`
+(a sidecar `.mask_log.json` is written next to every output).
+
+```bash
+# Beam-stop circle plus four corner masks → MaskWorkspace .nxs.
+sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
+  --circle 96,128,12 \
+  --rect 0,0,15,15   --rect 176,0,191,15 \
+  --rect 0,240,15,255 --rect 176,240,191,255 \
+  --output beam_stop.nxs
+
+# Then in Mantid: LoadNexusProcessed("beam_stop.nxs") yields a
+# MaskWorkspace ready to feed into MaskDetectors.
+```
+
+**Interactive editor** (TUI `K` keystroke from a file pane *or* the
+catalog): opens a matplotlib window on the cursor's NeXus heatmap.
+Cell aspect is set to `1/1.3` to compensate for the EQSANS detector's
+~5.2 mm tube pitch / ~3.9 mm pixel pitch, so an Ellipse drawn to
+look round on screen is round on the actual detector. A faint dotted
+boundary marks the detector edge; the canvas extends a few cells
+past it on every side so you can drag rubber-band rectangles edge to
+edge without having to land the first click on column 0 / row 0.
+
+- **Draw modes:** `r` rectangle · `e` ellipse. Circle and Polygon
+  Shapes still exist (CLI: `--circle`, `--polygon`) but were dropped
+  from the GUI menu — Ellipse covers the same ground without the
+  cell-aspect rubber-band weirdness, and the bank/tube **Mask spec**
+  input below covers the strip-mask case better than freehand
+  polygons.
+- **Edit mode:** `v` (or click the **Edit (v)** button). Click a
+  drawn shape to **select** it (yellow outline), drag to **move**,
+  press `Delete` to **remove** that one shape. Outside edit mode
+  `Delete` falls back to plain undo so the keystroke is never a
+  no-op.
+- **Mask spec** (text input below the button bar): type
+  `b3` / `t50` / `b5-7 t10-15` and hit Enter to mask whole
+  banks / tubes by number. Bank → 4 tubes; ranges and mixed tokens
+  work; the resulting Rectangles round-trip through
+  `mask_log.json` like any other shape.
+- **Cursor readout:** matplotlib's status bar shows
+  `tube=N pixel=M counts=K · bank=B tube_in_bank=T` as you hover.
+- **Other action keys:** `z` undo · `i` invert · `s` save · `Esc`
+  quit. The bottom button row is `Rect (r) · Ellipse (e) · Edit (v)
+  · Undo (z) · Clear · Invert (i) · Save... (s) · Quit (Esc)`.
+- **Save dialog:** `Save... (s)` opens a Tk file chooser pre-filled
+  with the default path (the inactive pane's cwd /
+  `<source-stem>_mask.nxs`). Pick a different folder or filename if
+  you want; Cancel writes nothing. The GUI saves NeXus only; the
+  CLI still produces XML / npy when asked.
+
+The on-disk mask encoding mirrors a real EQSANS beamstop file
+(`tests/data/mask_4m2.nxs`): each *unmasked* detector carries one
+synthetic event, masked detectors carry zero. So when you press
+`p` (or load the file in any heatmap viewer), the masked region
+appears grey — same visual convention as a beamstop. The
+`MaskBuilder` still uses Mantid's `1 = masked` convention
+internally; only the on-disk encoding inverts.
+
+The detector mapping is recovered directly from the source file
+(event_id ↔ detector_id), so no Mantid IDF lookup, no
+instrument-specific code in `src/`, and no Mantid runtime imports
+anywhere in the package.
 
 ## CLI examples
 
 ```bash
+# Beam-stop circle + corner masks. Mantid-loadable .nxs MaskWorkspace.
+sansdir mask EQSANS_172749.nxs.h5 \
+  --circle 96,128,12 \
+  --rect 0,0,15,15 --rect 176,0,191,15 \
+  --output beam_stop.nxs
+
 # Summary table — one row per file, time-series reduced to means.
 sansdir extract \
   -k /entry/DASlogs/temperature/value \
@@ -273,8 +378,11 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ## What's in v0.8
 
-- Dual-pane MDIR-style TUI with the full F-key suite (F3 view, F5 copy,
-  F6 move, F7 mkdir, F8 delete, plus tag-by-glob, swap, sync).
+- Dual-pane MDIR-style TUI with the full F-key suite (F3 view, F5
+  refresh, F6 copy, F7 move, F8 delete, F9 mkdir, plus tag-by-glob,
+  swap, sync). Auto-refresh after every in-process write (copy / move
+  / mkdir / batch extract / zip); `F5` is the manual fallback for
+  files dropped in by external processes.
 - 1D plotting (Iq, transmission), 2D plotting (Iqxqy single + tile mode),
   raw EQSANS NeXus detector heatmap, **processed Mantid NeXus** detector
   heatmap (incl. drtsans wavelength-banded output and event-workspace
@@ -284,8 +392,16 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 - Generic linear-linear plotter for CSV/TSV (`l`) — picks up the column
   header as axis labels. Pairs naturally with the `M` extractor output.
 - Image viewer on `Enter` for `*.png` / `*.jpg` / `*.tiff` etc.
-- OnCat IPTS browser (`i`), per-IPTS catalog on the right pane, F2
-  toggle, runs taggable with `Space`, raw-file plot from the catalog.
+- OnCat IPTS browser (`i`) with debounced filter input + 200-row cap
+  for snappy typing on big catalogs; per-IPTS catalog on the right
+  pane (`F2` toggles), runs taggable with `Space`. From the catalog:
+  `p` plot, `m` HDF5 tree, `M` batch extract, `K` mask editor.
+- **Interactive mask editor (`K`):** matplotlib window with
+  cell-aspect-aware ellipses, edit-mode (click/drag/delete), a
+  bank/tube spec input (`b3`, `t50`, `b5-7 t10-15`), live cursor
+  readout (`tube=N pixel=M · bank=B tube_in_bank=T`), and a Tk file
+  chooser on save. Output mirrors the EQSANS beamstop visual
+  convention so masked regions plot grey.
 - Batch metadata extract with tree-based key picker (in-place search);
   per-file *and* summary modes; output goes to the **inactive** pane's
   cwd by default to avoid raw-data write-permission errors.
@@ -294,7 +410,7 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
   `/gpfs/neutronsfs/instruments` → `/SNS` rewrite), bottom status with
   catalog-loaded indicator.
 - Cold start: ~50 ms.
-- 392 tests, ruff-clean.
+- 500 tests, ruff-clean.
 
 ---
 
