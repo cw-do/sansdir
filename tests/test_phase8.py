@@ -395,6 +395,11 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
         def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
             captured.append(list(cmd))
 
+        def wait(self) -> int:
+            # Pretend the user cancelled — no refresh side-effect
+            # (this test only cares that K dispatched the right cmd).
+            return 1
+
     monkeypatch.setattr("subprocess.Popen", _FakePopen)
     # ``has_display`` is the gate inside the mask command; the headless
     # CI cluster would otherwise short-circuit with a "no $DISPLAY"
@@ -431,6 +436,122 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
     # Path.stem on ``EQSANS_100.nxs.h5`` strips only the last suffix,
     # so the default output basename keeps the inner ``.nxs``.
     assert cmd[out_idx].endswith("EQSANS_100.nxs_mask.nxs")
+
+
+async def test_mask_save_refreshes_panes_when_editor_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the mask GUI subprocess exits with code 0 (= save), both
+    panes refresh so the new ``*_mask.nxs`` file shows up in the
+    listing without the user having to press F5.
+
+    The mock subprocess returns exit code 0 from ``wait()``; the
+    handler awaits it via ``asyncio.to_thread``. We pre-create the
+    expected output file so the post-refresh listdir actually picks
+    something up — that's the only way to assert the refresh ran.
+    """
+    left = tmp_path / "L"
+    right = tmp_path / "R"
+    left.mkdir()
+    right.mkdir()
+    src_nxs = left / "EQSANS_172749.nxs.h5"
+    _write_nx(src_nxs, temperature=298.0, duration=600.0)
+    # Pretend the editor wrote its output (an external process from
+    # the TUI's perspective). The point is to verify the pane refresh
+    # picks it up.
+    expected_out = right / "EQSANS_172749.nxs_mask.nxs"
+
+    class _FakePopenZero:
+        """Exits cleanly (rc=0) → triggers the refresh code path."""
+
+        def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
+            self.cmd = list(cmd)
+            # Drop the file mid-flight, before .wait() is called, so the
+            # post-refresh listing actually picks it up.
+            expected_out.write_bytes(b"")
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", _FakePopenZero)
+    monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+
+    from sansdir.app import SansdirApp
+    app = SansdirApp(
+        start_path=left,
+        right_path=right,
+        history=CommandHistory(path=tmp_path / "hist", load=False),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Cursor onto the .nxs.h5 (row 1: ``..`` is row 0).
+        await pilot.press("down")
+        await pilot.pause()
+        # Sanity: refresh hasn't happened yet — file isn't in the
+        # right pane's cached listing.
+        right_names_before = {e.name for e in app.inactive_panel._all_entries}
+        assert "EQSANS_172749.nxs_mask.nxs" not in right_names_before
+        await pilot.press("K")
+        # Give the worker enough time to: spawn proc, await
+        # to_thread(proc.wait) → rc=0 → refresh both panes.
+        await pilot.pause(0.5)
+        right_names_after = {e.name for e in app.inactive_panel._all_entries}
+        assert "EQSANS_172749.nxs_mask.nxs" in right_names_after, (
+            "expected the right pane to refresh after the mask "
+            "subprocess exited with rc=0"
+        )
+        await pilot.press("q")
+
+
+async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the editor exits with rc=1 (cancel / quit-without-save),
+    no refresh fires — and crucially no notification claims a save."""
+    left = tmp_path / "L"
+    right = tmp_path / "R"
+    left.mkdir()
+    right.mkdir()
+    src_nxs = left / "EQSANS_172749.nxs.h5"
+    _write_nx(src_nxs, temperature=298.0, duration=600.0)
+    # We'll drop the rogue file *after* the app has cached its
+    # listing, so the only way it appears in the cache is via a
+    # refresh — which we want to verify does NOT happen on rc=1.
+    rogue = right / "rogue_appeared.txt"
+
+    class _FakePopenNonzero:
+        def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
+            self.cmd = list(cmd)
+
+        def wait(self) -> int:
+            return 1
+
+    monkeypatch.setattr("subprocess.Popen", _FakePopenNonzero)
+    monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+
+    from sansdir.app import SansdirApp
+    app = SansdirApp(
+        start_path=left,
+        right_path=right,
+        history=CommandHistory(path=tmp_path / "hist", load=False),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        # Drop the rogue file AFTER the initial listing so it's only
+        # in the cache if a refresh fires.
+        rogue.write_bytes(b"")
+        right_names_before = {e.name for e in app.inactive_panel._all_entries}
+        assert "rogue_appeared.txt" not in right_names_before
+        await pilot.press("K")
+        await pilot.pause(0.5)
+        # rc=1 → no refresh → rogue file still not in cached listing.
+        right_names_after = {e.name for e in app.inactive_panel._all_entries}
+        assert "rogue_appeared.txt" not in right_names_after, (
+            "rc=1 should NOT trigger a refresh"
+        )
+        await pilot.press("q")
 
 
 async def test_capital_m_with_no_nexus_selection_notifies(tmp_path: Path) -> None:

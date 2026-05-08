@@ -149,11 +149,13 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `z`       | Zip tagged → prompt for archive name                         |
 | `e`       | Email tagged (`mail` / `mutt` shell-out)                     |
 
-`F5` reloads both panes; useful when an external process (the mask
-editor subprocess, a separate shell, an NFS catch-up) drops files
-into a pane's cwd. The in-process flows (copy / move / mkdir / batch
-extract / mask save into the inactive pane / zip / rename) refresh
-automatically.
+`F5` reloads both panes; useful when an external process (a separate
+shell, an NFS catch-up) drops files into a pane's cwd. The in-process
+flows (copy / move / mkdir / batch extract / zip / rename) refresh
+automatically. The mask GUI runs as a detached subprocess but its
+launcher awaits the exit code in a Textual worker — when the editor
+exits with a save (rc=0) both panes refresh so the new
+`*_mask.nxs` shows up without the user having to press F5.
 
 After a delete, the cursor sticks to the entry just below the
 deleted file (or the new bottom row, if the deleted file was last)

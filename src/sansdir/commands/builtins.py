@@ -980,7 +980,7 @@ def _make_ui_mask(app: AppProtocol) -> Command:
     you don't try to write into a read-only IPTS folder.
     """
 
-    def handler(path: str | None = None) -> str | None:
+    async def handler(path: str | None = None) -> str | None:
         import os
         import subprocess
         import sys
@@ -1026,7 +1026,7 @@ def _make_ui_mask(app: AppProtocol) -> Command:
             "nxs",
         ]
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1037,6 +1037,28 @@ def _make_ui_mask(app: AppProtocol) -> Command:
             app.notify_user(f"mask gui failed to launch: {exc}", severity="error")
             return None
         app.notify_user(f"mask editor opened on {cur.name} → {out}")
+        # Wait for the editor to exit, then refresh panes if the user
+        # actually saved (rc=0). This handler is dispatched as a
+        # Textual worker (the registry's ``dispatch`` runs async
+        # handlers via ``run_worker``), so awaiting here doesn't
+        # block the TUI — the user can keep navigating while the
+        # editor is open. ``asyncio.to_thread`` keeps the blocking
+        # ``proc.wait()`` off the event loop. The mask GUI returns
+        # 0 on save and 1 on cancel/quit-without-save.
+        try:
+            rc = await asyncio.to_thread(proc.wait)
+        except Exception as exc:
+            # Mock subprocess in tests may not implement ``wait``;
+            # treat that as "we don't know, don't refresh".
+            app.notify_user(f"mask wait failed: {exc}", severity="warning")
+            return str(out)
+        if rc == 0:
+            # Refresh both panes — the user might have redirected the
+            # save to a non-default folder via the Tk dialog, and a
+            # listdir call is cheap regardless.
+            app.active_panel.refresh_listing()
+            app.inactive_panel.refresh_listing()
+            app.notify_user(f"mask saved (panes refreshed) — {cur.name}")
         return str(out)
 
     return Command(
