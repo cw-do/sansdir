@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sansdir"
-version = "0.8.0"
+version = "0.9.0"
 description = "MDIR-style terminal file manager for SANS data on the ORNL analysis cluster"
 readme = "README.md"
 requires-python = ">=3.10"

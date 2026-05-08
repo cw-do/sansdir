@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.8** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.9** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -465,7 +465,16 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
 
-## What's in v0.8
+## What's in v0.9
+
+The v0.8 → v0.9 jump bundles **Phase 9.6** (interactive mask
+creation from raw NeXus) and **Phase 9.7** (a polish pass driven
+by direct feedback from the first scientist using the mask
+editor on real EQSANS data — cell aspect, drawing-area margin,
+on-disk encoding inversion to match `mask_4m2.nxs`'s visual,
+TextBox → Tk dialog and blit-based moves for responsiveness,
+F-key reshuffle, OnCat browser debounce + cap, mask-save auto
+refresh).
 
 - Dual-pane MDIR-style TUI with the full F-key suite (F2 rename,
   F3 view, F5 refresh, F6 copy, F7 move, F8 delete, F9 mkdir;
