@@ -145,7 +145,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `F7`      | Move tagged → other pane                                     |
 | `F8` / `Del` | Delete tagged (confirm; `send2trash` with cluster fallback)|
 | `F9`      | Make directory (active pane)                                 |
-| `F10`     | Toggle catalog / list (other pane) — Phase 4                 |
+| `c`       | Toggle catalog / list (other pane) — Phase 4                 |
 | `z`       | Zip tagged → prompt for archive name                         |
 | `e`       | Email tagged (`mail` / `mutt` shell-out)                     |
 
@@ -206,7 +206,7 @@ in the file, `Ctrl+S` returns to the form.
 |-----|-----------------------------------------------------------------------------|
 | `i` | Search OnCat by IPTS / experiment keyword. Pick one → cds the active pane    |
 |     | into `<IPTS>/shared/` and loads the run catalog on the **right** pane.      |
-| `F10`| Show / hide the right-pane catalog                                           |
+| `c` | Show / hide the right-pane catalog                                            |
 | `Space` *(in catalog)* | Tag a run                                            |
 | `Enter` / `p` *(in catalog)* | Plot the cursor's raw NeXus run                  |
 | `m` *(in catalog)* | HDF5 tree of the cursor's run                              |
@@ -399,8 +399,9 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 ## What's in v0.8
 
 - Dual-pane MDIR-style TUI with the full F-key suite (F2 rename,
-  F3 view, F5 refresh, F6 copy, F7 move, F8 delete, F9 mkdir,
-  F10 catalog toggle, plus tag-by-glob, swap, sync). Auto-refresh
+  F3 view, F5 refresh, F6 copy, F7 move, F8 delete, F9 mkdir;
+  `c` for the catalog toggle since most terminals reserve F10
+  for the menu bar; tag-by-glob, swap, sync). Auto-refresh
   after every in-process write (copy / move / rename / mkdir / batch
   extract / zip); `F5` is the manual fallback for files dropped in
   by external processes. After a delete the cursor sticks near the
@@ -416,7 +417,7 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 - Image viewer on `Enter` for `*.png` / `*.jpg` / `*.tiff` etc.
 - OnCat IPTS browser (`i`) with debounced filter input + 200-row cap
   for snappy typing on big catalogs; per-IPTS catalog on the right
-  pane (`F10` toggles), runs taggable with `Space`. From the catalog:
+  pane (`c` toggles), runs taggable with `Space`. From the catalog:
   `p` plot, `m` HDF5 tree, `M` batch extract, `K` mask editor.
 - **Interactive mask editor (`K`):** matplotlib window with
   cell-aspect-aware ellipses, edit-mode (click/drag/delete), a

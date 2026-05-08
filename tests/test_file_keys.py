@@ -1,4 +1,4 @@
-"""End-to-end tests for the F2..F10 file-op keys.
+"""End-to-end tests for the F2..F9 file-op keys.
 
 Layout (post-2026 reshuffle):
 
@@ -8,7 +8,9 @@ Layout (post-2026 reshuffle):
 * F7  = Move tagged → other pane
 * F8  = Delete tagged
 * F9  = Make directory
-* F10 = Toggle catalog (Phase 4 feature; tested in test_phase4.py)
+* `c` = Toggle catalog (Phase 4 feature; tested in test_phase4.py).
+        Was on F2 originally, briefly on F10 — but most terminals
+        reserve F10 for the menu bar, so it landed on a letter key.
 """
 
 from __future__ import annotations

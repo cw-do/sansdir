@@ -41,7 +41,7 @@ as you complete tasks. Each phase produces a runnable milestone.
 - [x] `=` syncs inactive panel's cwd to match active panel
 - [x] `Ctrl+O` toggles active-panel maximize (full-width); restores on 2nd press
 - [x] `ui/statusbar.py` shows active panel's path, file count, free disk
-- [x] `q` quits cleanly (dispatches `app.quit`) — *(F10 was bound to quit too originally; rebound to ``pane.toggle_catalog`` in the 9.7 follow-up since the catalog toggle was crowded out of F2 by ``ui.rename``)*
+- [x] `q` quits cleanly (dispatches `app.quit`) — *(F10 was bound to quit too originally; the 9.7 follow-up rebound F2 to ``ui.rename`` and parked the catalog toggle on ``c`` since most terminals capture F10 for the menu bar)*
 - [x] `?` opens help overlay — generated from `registry.all()` metadata
 - [x] Hidden file toggle (`H`) — affects active panel only — *(bound to lowercase `h`; help overlay reflects this)*
 - [x] Sort menu (`s` cycles name/mtime/size/ext; `S` toggles reverse) — active panel only — *(simplified: keys 1/2/3/4 set name/mtime/size/ext directly; `s` aliased to "name". Reverse-toggle deferred — handler accepts `reverse` kwarg, no key bound yet.)*
@@ -666,13 +666,15 @@ Driven by mc / Norton muscle memory.
       the same row index (= the file just below the deleted one)
       or clamps to the new last row. Without this the cursor
       jumped to row 0 every time, forcing the user to scroll back.
-- [x] **F2 = Rename, F10 = Catalog toggle.** New ``ui.rename``
+- [x] **F2 = Rename, ``c`` = Catalog toggle.** New ``ui.rename``
       Command opens a ``TextPromptDialog`` pre-filled with the
       cursor's basename, dispatches via the single-file form of
       ``fileops.move_paths``, refreshes the panel, and re-anchors
       the cursor on the renamed file. The catalog toggle moved
-      from F2 to F10 (consulted less often than rename;
-      `q` already covers quit so F10 was free).
+      from F2 → F10 → ``c`` after a tester reported F10 opened
+      the terminal's menu bar instead of reaching the TUI; ``c``
+      (mnemonic: catalog) was unbound on both the file pane and
+      the catalog table, so it falls through cleanly from either.
 
 ## Mask save auto-refresh (follow-up)
 

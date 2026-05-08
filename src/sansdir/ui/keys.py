@@ -200,10 +200,12 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
         # OnCat IPTS search (Phase 4)
         KeyBinding("i", "oncat.search", "OnCat IPTS search"),
-        # F2 = Rename (mc convention); the catalog toggle moved to F10
-        # since the catalog is consulted less often than rename.
+        # F2 = Rename (mc convention). The catalog toggle moved off F2
+        # since rename is the more common operation, and off F10 since
+        # most terminals reserve F10 for the menu bar — landing on
+        # ``c`` (mnemonic: catalog) which is otherwise unbound.
         KeyBinding("f2", "ui.rename", "Rename file under cursor"),
-        KeyBinding("f10", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
+        KeyBinding("c", "pane.toggle_catalog", "Toggle catalog/list (other pane)"),
         # Plotting (Phase 5/6/7)
         KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans / 2D / NeXus)"),
         KeyBinding("l", "ui.plot_generic", "Plot selection (linear-linear, headered tables)"),

@@ -172,26 +172,26 @@ async def test_phase4_dod_i_browse_filter_select_catalog(
         assert slot.catalog_visible
         assert slot.has_catalog
         assert [f.run_number for f in slot.catalog.files] == [12001, 12002]
-        # F10 toggles back to the filelist.
-        await pilot.press("f10")
+        # ``c`` toggles back to the filelist.
+        await pilot.press("c")
         await pilot.pause()
         assert not slot.catalog_visible
-        # F10 again brings the catalog back without another OnCat round-trip.
-        await pilot.press("f10")
+        # ``c`` again brings the catalog back without another OnCat round-trip.
+        await pilot.press("c")
         await pilot.pause()
         assert slot.catalog_visible
-        # Tab into the catalog pane; F10 from there should also return
-        # that slot to its filelist (the catalog is the *active* slot
-        # now).
+        # Tab into the catalog pane; ``c`` from there should also
+        # return that slot to its filelist (the catalog is the
+        # *active* slot now).
         await pilot.press("tab")
         await pilot.pause()
         assert app._active_slot is slot
-        await pilot.press("f10")
+        await pilot.press("c")
         await pilot.pause()
         assert not slot.catalog_visible
-        # F10 again from the same active slot should restore the catalog
-        # *focused* — Up/Down must work without the user pressing Tab.
-        await pilot.press("f10")
+        # ``c`` again from the same active slot should restore the
+        # catalog *focused* — Up/Down must work without Tab.
+        await pilot.press("c")
         await pilot.pause()
         assert slot.catalog_visible
         assert app.focused is slot.catalog.table
@@ -265,12 +265,12 @@ async def test_oncat_auth_error_surfaces_clean_message(
         await pilot.press("q")
 
 
-async def test_f10_without_loaded_catalog_notifies(tmp_path: Path, fake_oncat_config: Path) -> None:
-    """``F10`` (catalog toggle) with no catalog loaded notifies, doesn't crash."""
+async def test_c_without_loaded_catalog_notifies(tmp_path: Path, fake_oncat_config: Path) -> None:
+    """``c`` (catalog toggle) with no catalog loaded notifies, doesn't crash."""
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("f10")
+        await pilot.press("c")
         await pilot.pause()
         # No catalog loaded → notification, no mode switch.
         assert not app._inactive_slot.catalog_visible

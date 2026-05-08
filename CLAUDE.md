@@ -227,7 +227,7 @@ files (or current row if none tagged); copy/move default destination is the
 | `F7` | **Move** tagged → other pane (with confirm) |
 | `F8` / `Del` | Delete tagged (with confirm; cursor sticks near the deleted file) |
 | `F9` | Make directory (in active pane) |
-| `F10` | Toggle the run catalog (right pane) |
+| `c` | Toggle the run catalog (right pane) — most terminals capture F10 |
 | `q` | Quit |
 | `p` | Plot current/tagged |
 | `P` | Plot with options dialog (axes, colorbar mode) |
