@@ -26,6 +26,38 @@ matplotlib plots in their own windows when one *is* available.
 
 ---
 
+## Demo
+
+A minute-long terminal recording walks through the workflow this
+README describes — opening an IPTS via OnCat, toggling the run
+catalog, plotting reduced 1D and 2D files plus a processed NeXus,
+zipping a selection, mailing the zip, viewing a README, and
+swapping panes. The keystroke script lives in
+[`demo.tape`](./demo.tape); regenerate the gif with
+[charmbracelet/vhs](https://github.com/charmbracelet/vhs):
+
+```bash
+# install vhs once (Go binary; or `brew install vhs`)
+go install github.com/charmbracelet/vhs@latest
+
+# run sansdir's recipe — produces demo.gif in the repo root
+vhs demo.tape
+```
+
+The recording requires real cluster data (IPTS-35270 plus the
+`porsil_*` files in its `shared/output1/` tree) and OnCat
+credentials in `~/.config/sansdir/config.toml`. If the data
+layout drifts, edit the `Type "..."` strings in `demo.tape`.
+
+> **Note on plot windows.** vhs records the terminal only.
+> When the demo presses `p` the matplotlib plot opens in a
+> separate window outside vhs's view, so the gif shows the TUI's
+> "plot opened" status line but not the plot canvas itself. To
+> capture plots and TUI together you need a screen recorder
+> (e.g. `peek`, `obs-studio`).
+
+---
+
 ## Install
 
 ### Option A — Zero-install on the ORNL analysis cluster *(recommended)*
