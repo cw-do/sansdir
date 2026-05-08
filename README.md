@@ -28,33 +28,70 @@ matplotlib plots in their own windows when one *is* available.
 
 ## Demo
 
-A minute-long terminal recording walks through the workflow this
-README describes — opening an IPTS via OnCat, toggling the run
-catalog, plotting reduced 1D and 2D files plus a processed NeXus,
-zipping a selection, mailing the zip, viewing a README, and
-swapping panes. The keystroke script lives in
-[`demo.tape`](./demo.tape); regenerate the gif with
-[charmbracelet/vhs](https://github.com/charmbracelet/vhs):
+<!-- After uploading the .cast to asciinema.org, replace 123456
+     with the real recording ID. -->
+<!-- [![sansdir demo](https://asciinema.org/a/123456.svg)](https://asciinema.org/a/123456) -->
+
+The repo includes an [asciinema](https://asciinema.org) recording
+of a representative session — opening an IPTS via OnCat,
+toggling the run catalog, plotting reduced 1D / 2D / processed
+NeXus, zipping + mailing a selection, viewing a README, and
+swapping panes. To regenerate it on the cluster:
 
 ```bash
-# install vhs once (Go binary; or `brew install vhs`)
-go install github.com/charmbracelet/vhs@latest
-
-# run sansdir's recipe — produces demo.gif in the repo root
-vhs demo.tape
+pip install --user asciinema
+cd /SNS/EQSANS/shared/script/sansdir
+asciinema rec demo.cast
+# ...walk through the demo script below...
+# Ctrl+D when done
+asciinema upload demo.cast    # prints the URL to embed
 ```
 
-The recording requires real cluster data (IPTS-35270 plus the
-`porsil_*` files in its `shared/output1/` tree) and OnCat
-credentials in `~/.config/sansdir/config.toml`. If the data
-layout drifts, edit the `Type "..."` strings in `demo.tape`.
+### Demo script — the keystroke sequence to follow
 
-> **Note on plot windows.** vhs records the terminal only.
-> When the demo presses `p` the matplotlib plot opens in a
-> separate window outside vhs's view, so the gif shows the TUI's
-> "plot opened" status line but not the plot canvas itself. To
-> capture plots and TUI together you need a screen recorder
-> (e.g. `peek`, `obs-studio`).
+1. Launch `sansdir`.
+2. `i` (OnCat browser) → `/` to focus filter → type `35270` →
+   Enter to move focus to the list → Enter to pick → `y` to
+   confirm cd + load catalog.
+3. Press `c` 2-3 times to toggle catalog ↔ filelist on the
+   right pane. End on catalog visible.
+4. Tab into the catalog, scroll a few rows, `p` to plot the
+   raw detector heatmap. Pause ~3s. Close the plot window.
+5. Tab back to the file (left) pane.
+6. Enter `output1/` (use `/` filter then Enter if useful).
+7. Tag the two `porsil_20C_*Iq.dat` files (`+` glob input
+   `porsil_20C_*Iq.dat` Enter), then `p` to plot the log-log
+   overlay. Pause ~3s. Close.
+8. `u` to drop tags.
+9. Tag `porsil_20C_2o5m*trans.txt` files (`+ porsil_20C_2o5m*trans.txt`
+   Enter), `p` to plot transmission. Pause ~3s. Close. `u`.
+10. Cursor onto `porsil_30C_4m_processed.nxs`, `p` to plot the
+    processed-Workspace2D detector heatmap. Pause ~3s. Close.
+11. (Visual check — you're still in `output1/`.)
+12. `/merged` Enter to filter, `+` `*` Enter to tag all visible.
+13. `z`, clear the default name (`Ctrl+u` in Textual's input),
+    type `demo.zip` Enter.
+14. `/demo.zip` to navigate, Space to tag, `e` to open email,
+    Pause ~2s, Esc to close.
+15. Backspace to step up to `shared/`.
+16. `/README` Enter to land on the README row.
+17. F3 to view, Pause ~3s, F3 to close.
+18. `Ctrl+u` to swap left/right pane cwds. Pause ~2s.
+19. `q` to quit.
+
+### Embedding the recording in the README
+
+After `asciinema upload`, paste the URL into the badge line at
+the top of this section. GitHub renders the asciinema SVG as a
+clickable thumbnail; the player on asciinema.org supports pause,
+scrub, and text selection.
+
+> **Note on plot windows.** asciinema records the terminal
+> only. When you press `p` the matplotlib plot opens in a
+> separate window outside the recording, so the cast shows
+> the TUI's "plot opened" status line but not the plot
+> canvas itself. To capture plots and TUI together you need a
+> screen recorder (e.g. `peek`, `obs-studio`).
 
 ---
 
