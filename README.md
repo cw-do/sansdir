@@ -494,9 +494,12 @@ refresh).
   header as axis labels. Pairs naturally with the `M` extractor output.
 - Image viewer on `Enter` for `*.png` / `*.jpg` / `*.tiff` etc.
 - OnCat IPTS browser (`i`) with debounced filter input + 200-row cap
-  for snappy typing on big catalogs; per-IPTS catalog on the right
-  pane (`c` toggles), runs taggable with `Space`. From the catalog:
-  `p` plot, `m` HDF5 tree, `M` batch extract, `K` mask editor.
+  for snappy typing on big catalogs; `r` (or `Ctrl+R`) forces a
+  cache-bypassing re-fetch when a just-allocated IPTS is missing
+  (the 24h disk cache occasionally serves stale data otherwise);
+  per-IPTS catalog on the right pane (`c` toggles), runs taggable
+  with `Space`. From the catalog: `p` plot, `m` HDF5 tree, `M` batch
+  extract, `K` mask editor.
 - **Interactive mask editor (`K`):** matplotlib window with
   cell-aspect-aware ellipses, edit-mode (click/drag/delete), a
   bank/tube spec input (`b3`, `t50`, `b5-7 t10-15`), live cursor

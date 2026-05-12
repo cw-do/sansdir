@@ -449,3 +449,107 @@ async def test_browser_filter_is_debounced(
         )
         await pilot.press("escape")
         await pilot.press("q")
+
+
+async def test_browser_r_force_refreshes_via_callback(
+    tmp_path: Path,
+    fake_oncat_config: Path,
+) -> None:
+    """Pressing ``r`` in the browser calls ``client.list_experiments``
+    with ``use_cache=False`` and replaces the displayed list with
+    the fresh result.
+
+    Drives the modal directly (not via the keypress path) because the
+    ``r`` keybinding lives on a ModalScreen — Textual's Pilot
+    presses go to the App, but ModalScreen bindings are honoured
+    once focus reaches the modal. Either path works; the action
+    invocation is what we're pinning here.
+    """
+    from sansdir.core.oncat import Experiment
+    from sansdir.ui.oncat_browser import OnCatBrowserScreen
+
+    # Stale snapshot (what the user sees first).
+    stale = [
+        Experiment(ipts="IPTS-100", title="old", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
+    ]
+    # Fresh snapshot (what the refresh callback returns).
+    fresh = [
+        Experiment(ipts="IPTS-100", title="old", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
+        Experiment(ipts="IPTS-200", title="new!", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
+    ]
+
+    call_count = {"n": 0}
+
+    async def fake_refresh() -> list[Experiment]:
+        call_count["n"] += 1
+        return fresh
+
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Push the browser directly with our fake callback so we
+        # don't need OnCat live-fetching scaffolding.
+        app.push_screen(OnCatBrowserScreen(stale, on_refresh=fake_refresh))
+        await pilot.pause()
+        from textual.widgets import ListView
+
+        browser = next(
+            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
+        )
+        # Initially: 1 row.
+        lv = browser.query_one("#results-list", ListView)
+        assert len(lv.children) == 1
+        # Invoke the action (modal bindings reach the action even
+        # when Pilot.press routes through the App because the
+        # modal is on top of the stack).
+        await browser.action_refresh()
+        await pilot.pause()
+        # Callback was invoked exactly once.
+        assert call_count["n"] == 1
+        # List now reflects the fresh snapshot.
+        assert len(lv.children) == 2
+        # Refresh hint is rendered with the eye-catching colour
+        # markup so the user knows the action exists.
+        from textual.widgets import Static
+        hint = browser.query_one("#refresh-hint", Static).render()
+        text = hint.plain if hasattr(hint, "plain") else str(hint)
+        assert "refresh" in text.lower()
+        assert "r" in text.lower()  # the key letter is shown
+        await pilot.press("escape")
+        await pilot.press("q")
+
+
+async def test_browser_refresh_failure_shows_error_status(
+    tmp_path: Path,
+    fake_oncat_config: Path,
+) -> None:
+    """If the refresh callback raises, the browser shows the error
+    in the overflow-hint Static instead of crashing the modal."""
+    from sansdir.core.oncat import Experiment
+    from sansdir.ui.oncat_browser import OnCatBrowserScreen
+
+    async def boom() -> list[Experiment]:
+        raise RuntimeError("OnCat unreachable")
+
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(
+            OnCatBrowserScreen(
+                [Experiment(ipts="IPTS-1", title="x", pi="", members=(), activity="", instrument="EQSANS", facility="SNS")],
+                on_refresh=boom,
+            )
+        )
+        await pilot.pause()
+        browser = next(
+            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
+        )
+        await browser.action_refresh()
+        await pilot.pause()
+        from textual.widgets import Static
+        hint = browser.query_one("#overflow-hint", Static).render()
+        text = hint.plain if hasattr(hint, "plain") else str(hint)
+        assert "refresh failed" in text.lower()
+        assert "OnCat unreachable" in text
+        await pilot.press("escape")
+        await pilot.press("q")

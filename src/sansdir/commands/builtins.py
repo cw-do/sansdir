@@ -623,7 +623,25 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                         severity="warning",
                     )
                     return None
-                chosen = await _push_modal(OnCatBrowserScreen(experiments, keyword=initial_keyword))
+                # Closure that re-fetches bypassing the 24h cache.
+                # The browser binds this to ``r`` / ``ctrl+r`` so the
+                # user can force a refresh when an experiment is
+                # missing — the cache-staleness scenario that
+                # prompted this hookup (IPTS-36811 was registered in
+                # OnCat 23.9 hours after the on-disk cache, which
+                # served the stale 976-entry version).
+                async def _refresh_experiments() -> list:  # type: ignore[type-arg]
+                    return await client.list_experiments(
+                        instrument=instr, use_cache=False
+                    )
+
+                chosen = await _push_modal(
+                    OnCatBrowserScreen(
+                        experiments,
+                        keyword=initial_keyword,
+                        on_refresh=_refresh_experiments,
+                    )
+                )
                 if chosen is None:
                     return None
                 # `chosen` is a sansdir.core.oncat.Experiment.

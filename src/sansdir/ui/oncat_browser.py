@@ -15,6 +15,7 @@ lines — bold cyan ``IPTS-NNNNN`` + title on top, then a dimmed line with
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
@@ -104,6 +105,12 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         Binding("slash", "focus_filter", "Filter", show=False),
         Binding("/", "focus_filter", "Filter", show=False),
         Binding("s", "cycle_sort", "Cycle sort", show=False),
+        # ``r`` and ``ctrl+r`` both force an OnCat re-fetch bypassing
+        # the 24h disk cache — the user-facing escape hatch when an
+        # experiment was just added (cache-staleness was the source
+        # of the "IPTS-36811 missing" report that prompted this).
+        Binding("r", "refresh", "Force OnCat refresh", show=False),
+        Binding("ctrl+r", "refresh", "Force OnCat refresh", show=False),
     ]
 
     SORT_MODES: ClassVar[tuple[tuple[str, str], ...]] = (
@@ -128,7 +135,18 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         experiments: list[Experiment],
         *,
         keyword: str = "",
+        on_refresh: Callable[[], Awaitable[list[Experiment]]] | None = None,
     ) -> None:
+        """Build the modal.
+
+        ``on_refresh`` is an async callback that returns a freshly
+        fetched ``list[Experiment]``. The ``r`` / ``ctrl+r``
+        keybindings call it and replace ``self._all`` with the
+        result. When ``None``, the refresh keystrokes notify
+        "refresh not available" and do nothing — that's the path
+        the existing tests take, since they construct the modal
+        with pre-fetched fixture data.
+        """
         super().__init__()
         self._all = experiments
         # Initial filter — set as reactive after compose so the watcher fires.
@@ -136,6 +154,8 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         # Pending debounced refresh (cancelled if another keystroke
         # arrives before it fires).
         self._refresh_timer: object | None = None
+        self._on_refresh = on_refresh
+        self._refresh_in_progress = False
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -149,8 +169,19 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
             )
             yield ListView(id="results-list")
             yield Static("", id="overflow-hint", classes="hint")
+            # Dedicated, eye-catching line for the refresh action.
+            # The OnCat cache is 24h by default — anyone whose
+            # just-allocated IPTS is missing will look here first.
             yield Static(
-                "[dim]↑/↓ navigate · Enter select · / filter · s sort · Esc cancel[/dim]",
+                "[b yellow]r[/] or [b yellow]Ctrl+R[/] = "
+                "[b]force refresh from OnCat[/]  "
+                "[dim](bypasses the 24h cache)[/dim]",
+                id="refresh-hint",
+                classes="hint",
+            )
+            yield Static(
+                "[dim]↑/↓ navigate · Enter select · / filter · "
+                "s sort · Esc cancel[/dim]",
                 classes="hint",
             )
 
@@ -282,3 +313,52 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    async def action_refresh(self) -> None:
+        """Re-fetch from OnCat, bypassing the disk cache.
+
+        Owners of brand-new IPTS allocations hit this when their
+        experiment is missing from the listing — the 24h cache is
+        the source of "I added an experiment yesterday and don't
+        see it" reports. Status flashes through the
+        ``#overflow-hint`` Static.
+        """
+        if self._on_refresh is None:
+            with contextlib.suppress(Exception):
+                self.app.notify(  # type: ignore[attr-defined]
+                    "refresh not available (no client attached)",
+                    severity="warning",
+                )
+            return
+        if self._refresh_in_progress:
+            return  # debounce double-press
+        self._refresh_in_progress = True
+        try:
+            with contextlib.suppress(Exception):
+                hint = self.query_one("#overflow-hint", Static)
+                hint.update("[dim]refreshing from OnCat…[/dim]")
+            try:
+                new_experiments = await self._on_refresh()
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    hint = self.query_one("#overflow-hint", Static)
+                    hint.update(f"[red]refresh failed: {exc}[/red]")
+                return
+            self._all = new_experiments
+            # Title bar shows the experiment count, so it has to
+            # re-render too — the rebuild below only touches the list.
+            with contextlib.suppress(Exception):
+                self.query_one("#browser-title", Static).update(self._title_text())
+            self._refresh_list()
+            # ``_refresh_list`` clears the overflow-hint as part of
+            # its own status reporting; overwrite it after the
+            # rebuild with the success message so the user actually
+            # sees the count delta.
+            with contextlib.suppress(Exception):
+                hint = self.query_one("#overflow-hint", Static)
+                hint.update(
+                    f"[green]refreshed — "
+                    f"{len(new_experiments)} experiments[/green]"
+                )
+        finally:
+            self._refresh_in_progress = False
