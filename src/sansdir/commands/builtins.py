@@ -1018,7 +1018,8 @@ def _make_ui_mask(app: AppProtocol) -> Command:
         name = cur.name
         if not (name.endswith(".nxs.h5") or name.endswith(".nxs")):
             app.notify_user(
-                f"{name}: mask GUI works on raw NeXus (.nxs.h5 / .nxs)",
+                f"{name}: mask GUI accepts NeXus (.nxs.h5 / .nxs) — "
+                "raw event-mode or Mantid processed",
                 severity="warning",
             )
             return None
@@ -1043,15 +1044,29 @@ def _make_ui_mask(app: AppProtocol) -> Command:
             "--format",
             "nxs",
         ]
+        # Capture the subprocess's stderr to a temp file so a crash
+        # inside the matplotlib editor surfaces to the user as a TUI
+        # notification on non-zero exit. Without this, a silent
+        # ``DEVNULL`` swallows tracebacks — exactly what made
+        # processed-NeXus failures invisible in the past.
+        import tempfile
+        stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115
+            mode="w+", delete=False, prefix="sansdir-mask-", suffix=".log"
+        )
+        # ^ SIM115: a ``with`` here would close the file when Popen
+        # is still using it. We close explicitly after proc.wait()
+        # and unlink the temp file ourselves.
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=stderr_log,
                 start_new_session=True,
                 env={**os.environ},
             )
         except OSError as exc:
+            stderr_log.close()
+            Path(stderr_log.name).unlink(missing_ok=True)
             app.notify_user(f"mask gui failed to launch: {exc}", severity="error")
             return None
         app.notify_user(f"mask editor opened on {cur.name} → {out}")
@@ -1068,8 +1083,20 @@ def _make_ui_mask(app: AppProtocol) -> Command:
         except Exception as exc:
             # Mock subprocess in tests may not implement ``wait``;
             # treat that as "we don't know, don't refresh".
+            stderr_log.close()
+            Path(stderr_log.name).unlink(missing_ok=True)
             app.notify_user(f"mask wait failed: {exc}", severity="warning")
             return str(out)
+        # Flush + read the stderr log before deciding how to report.
+        stderr_log.close()
+        log_path = Path(stderr_log.name)
+        stderr_text = ""
+        try:
+            stderr_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+        finally:
+            log_path.unlink(missing_ok=True)
         if rc == 0:
             # Refresh both panes — the user might have redirected the
             # save to a non-default folder via the Tk dialog, and a
@@ -1077,6 +1104,28 @@ def _make_ui_mask(app: AppProtocol) -> Command:
             app.active_panel.refresh_listing()
             app.inactive_panel.refresh_listing()
             app.notify_user(f"mask saved (panes refreshed) — {cur.name}")
+        elif rc != 1:
+            # rc == 1 is "user quit without saving" — silent is fine.
+            # Anything else means the editor crashed (HdfError on a
+            # non-EQSANS file, missing $DISPLAY mid-flight, segfault,
+            # etc.); surface the tail of stderr so the user has a
+            # clue. Most useful line is usually the last non-empty
+            # one (the exception class + message).
+            tail = ""
+            for line in reversed(stderr_text.splitlines()):
+                if line.strip():
+                    tail = line.strip()[:200]
+                    break
+            if tail:
+                app.notify_user(
+                    f"mask editor failed (rc={rc}): {tail}",
+                    severity="error",
+                )
+            else:
+                app.notify_user(
+                    f"mask editor failed (rc={rc}, no stderr captured)",
+                    severity="error",
+                )
         return str(out)
 
     return Command(

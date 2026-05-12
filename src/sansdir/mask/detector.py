@@ -39,7 +39,9 @@ from sansdir.plot.hdf5_detector import (
     EQSANS_NPIXELS_PER_TUBE,
     EQSANS_NPIXELS_TOTAL,
     EQSANS_NTUBES,
-    load_eqsans_raw,
+)
+from sansdir.plot.hdf5_detector import (
+    load_detector_image as _load_any_eqsans_image,
 )
 
 
@@ -66,13 +68,30 @@ class SourceMeta:
 
 
 def load_detector_image(path: Path | str) -> tuple[np.ndarray, SourceMeta]:
-    """Load the heatmap + the matching ``pixel_ids`` for ``path``."""
+    """Load the heatmap + the matching ``pixel_ids`` for ``path``.
+
+    Accepts both raw event-mode files (``entry/bank<N>_events/``
+    groups) and Mantid / drtsans processed files
+    (``mantid_workspace_1/workspace`` or ``event_workspace``). The
+    plot-side ``load_detector_image`` already tries raw first and
+    falls back to processed; we delegate to it so users can mask
+    either kind of file. Both paths run the same
+    ``_reorder_tubes`` step, so the resulting heatmap lands in the
+    same coordinate system either way and the pixel-id mapping
+    (which describes that coordinate system) is identical.
+    """
     path = Path(path)
-    image = load_eqsans_raw(path).image  # (256, 192)
+    image = _load_any_eqsans_image(path).image  # (256, 192) for either kind
     detector_shape = image.shape  # (n_rows, n_cols)
     pixel_ids = _resolve_pixel_ids(path, detector_shape)
     instrument_name = _read_str(path, "/entry/instrument/name") or "EQSANS"
-    run_number = _read_str(path, "/entry/run_number")
+    # Raw files store run_number at /entry/run_number; processed files
+    # tuck it under mantid_workspace_1/. Try both paths in turn.
+    run_number = (
+        _read_str(path, "/entry/run_number")
+        or _read_str(path, "/mantid_workspace_1/run_number")
+        or ""
+    )
     meta = SourceMeta(
         source_path=path.resolve(),
         instrument_name=instrument_name,

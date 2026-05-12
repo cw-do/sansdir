@@ -254,7 +254,7 @@ On a host without `$DISPLAY` they fall back to PNGs under
 |-----|--------------------------------------------------------------------------|
 | `m` | Open the cursor's `.nxs(.h5)` in a tree browser (lazy expansion)         |
 | `M` | Batch metadata extract: tag NeXus files → `M` opens the picker dialog    |
-| `K` | Create a detector mask from the cursor's raw NeXus file (Phase 9.6)      |
+| `K` | Create a detector mask from the cursor's NeXus file (raw or processed)  |
 
 The **Batch metadata extract** dialog has two modes:
 

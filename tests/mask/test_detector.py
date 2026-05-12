@@ -133,19 +133,77 @@ def test_source_meta_carries_instrument_and_run(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_load_rejects_non_event_mode_file(tmp_path: Path) -> None:
-    """A processed Mantid file (no bank<N>_events) raises the existing HdfError.
+def test_load_rejects_bogus_nexus_file(tmp_path: Path) -> None:
+    """A NeXus file that's neither raw event-mode nor processed Mantid
+    workspace raises a clear error.
 
-    We let ``load_eqsans_raw``'s own error bubble up; the mask loader
-    is only meant for raw event-mode input.
+    The mask loader delegates to ``plot.hdf5_detector.load_detector_image``
+    which tries raw first, then processed. When both fail it raises
+    HdfError with a "not a recognised EQSANS NeXus shape" message.
     """
     from sansdir.hdf.reader import HdfError
 
     p = tmp_path / "wrong.nxs.h5"
     with h5py.File(p, "w") as fh:
+        # Neither bank<N>_events (raw signature) nor mantid_workspace_1
+        # (processed signature) — just an empty group.
         fh.create_group("entry/instrument/bank1")
-    with pytest.raises(HdfError, match="bank"):
+    with pytest.raises(HdfError, match="not a recognised"):
         load_detector_image(p)
+
+
+def test_load_accepts_processed_workspace2d_file(tmp_path: Path) -> None:
+    """Mantid processed files (``mantid_workspace_1/workspace/values``)
+    now load through the mask detector loader.
+
+    This is the path EQSANS users hit when they want to mask a
+    drtsans-reduced or Mantid-processed run — same detector
+    geometry, different storage. Before this commit the loader
+    raised because ``load_eqsans_raw`` looks for ``bank<N>_events``
+    and processed files don't have them. Now we delegate to the
+    plot-side ``load_detector_image`` which tries raw, then
+    processed, and the same ``_reorder_tubes`` step normalises the
+    output so the pixel-id mapping stays correct.
+    """
+    p = tmp_path / "proc_workspace2d.nxs"
+    n = EQSANS_NPIXELS_TOTAL
+    counts = np.arange(n, dtype=np.float64) % 7
+    with h5py.File(p, "w") as fh:
+        ws = fh.create_group("mantid_workspace_1")
+        ws.create_dataset("title", data=np.bytes_("synthetic processed"))
+        wsg = ws.create_group("workspace")
+        wsg.create_dataset("values", data=counts.reshape(-1))
+    image, meta = load_detector_image(p)
+    # Same shape + pixel-id contract as the raw path.
+    assert image.shape == (EQSANS_NPIXELS_PER_TUBE, EQSANS_NTUBES)
+    assert meta.detector_shape == image.shape
+    assert meta.pixel_ids.shape == (EQSANS_NPIXELS_TOTAL,)
+    # Total counts conserve through the tube-reorder.
+    assert int(image.sum()) == int(counts.sum())
+
+
+def test_load_accepts_processed_event_workspace_file(tmp_path: Path) -> None:
+    """Processed files in ``mantid_workspace_1/event_workspace`` form
+    (the layout our own mask writer emits — see ``writers.write_nxs``)
+    load through the mask detector loader too.
+
+    Round-trip implication: a saved mask can be loaded back as the
+    "source" for a follow-up mask edit, which is occasionally
+    useful when iterating.
+    """
+    p = tmp_path / "proc_eventws.nxs"
+    n = EQSANS_NPIXELS_TOTAL
+    # One event per pixel — diff(indices) sums to n.
+    indices = np.arange(n + 1, dtype=np.int64)
+    with h5py.File(p, "w") as fh:
+        ws = fh.create_group("mantid_workspace_1")
+        ws.create_dataset("title", data=np.bytes_("event workspace"))
+        ew = ws.create_group("event_workspace")
+        ew.create_dataset("indices", data=indices)
+    image, meta = load_detector_image(p)
+    assert image.shape == (EQSANS_NPIXELS_PER_TUBE, EQSANS_NTUBES)
+    assert int(image.sum()) == n  # exactly one count per pixel
+    assert meta.pixel_ids.shape == (EQSANS_NPIXELS_TOTAL,)
 
 
 def test_pixel_id_size_mismatch_raises(tmp_path: Path) -> None:
