@@ -504,8 +504,13 @@ refresh).
   cell-aspect-aware ellipses, edit-mode (click/drag/delete), a
   bank/tube spec input (`b3`, `t50`, `b5-7 t10-15`), live cursor
   readout (`tube=N pixel=M · bank=B tube_in_bank=T`), and a Tk file
-  chooser on save. Output mirrors the EQSANS beamstop visual
-  convention so masked regions plot grey.
+  chooser on save. Output is **drtsans-compatible**: the save step
+  shells out to the cluster's ``drtsans --classic`` (Mantid wrapper)
+  to run ``Load → MaskDetectors → SaveNexus`` against the source
+  NeXus, producing a file whose ``instrument_parameter_map`` carries
+  the per-detector mask flags drtsans's reduction pipeline reads.
+  Falls back to a legacy pure-numpy writer (visualisation-only, no
+  reduction effect) when Mantid is unavailable.
 - Batch metadata extract with tree-based key picker (in-place search);
   per-file *and* summary modes; output goes to the **inactive** pane's
   cwd by default to avoid raw-data write-permission errors.

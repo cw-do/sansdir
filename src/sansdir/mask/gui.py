@@ -627,6 +627,19 @@ def run_editor(
             ax.set_title("save cancelled")
             fig.canvas.draw_idle()
             return
+        # The Mantid-backed writer shells out to ``drtsans --classic``
+        # and takes ~8-15s for a typical EQSANS file (Mantid startup
+        # + Load + SaveNexus dominate). Show a "saving via Mantid…"
+        # title while the subprocess runs so the user doesn't think
+        # the editor froze. We force a synchronous draw before the
+        # blocking call.
+        from sansdir.mask.mantid_writer import is_drtsans_available
+
+        if is_drtsans_available():
+            ax.set_title(f"saving via Mantid → {chosen.name} …")
+        else:
+            ax.set_title(f"saving (legacy — no Mantid found) → {chosen.name} …")
+        fig.canvas.draw()
         try:
             controller.save(meta, chosen, "nxs")
         except Exception as exc:

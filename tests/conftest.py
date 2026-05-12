@@ -10,12 +10,23 @@ since ``tests/data/*.nxs.h5`` is gitignored).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 DATA_DIR: Path = Path(__file__).parent / "data"
+
+
+# The mask writer's default path shells out to ``drtsans --classic``
+# to produce a real Mantid-saved mask file. That requires a real
+# EQSANS source NeXus the synthetic test fixtures don't provide,
+# and the cluster's drtsans wrapper isn't available on CI hosts
+# anyway. Force the legacy pure-numpy writer for the whole suite —
+# tests that specifically want to exercise the Mantid path can
+# unset this env var via monkeypatch.
+os.environ.setdefault("SANSDIR_NO_MANTID", "1")
 
 
 @pytest.fixture

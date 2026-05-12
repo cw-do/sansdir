@@ -14,6 +14,7 @@ that round-trips through :meth:`MaskBuilder.from_log`.
 from __future__ import annotations
 
 import json
+import logging
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -105,8 +106,75 @@ def write_nxs(
     output_path: Path | str,
     mask: np.ndarray,
     source_meta: SourceMeta,
+    *,
+    prefer_mantid: bool = True,
 ) -> Path:
-    """Write a Mantid event-workspace NeXus mirror of ``mask_4m2.nxs``.
+    """Write a Mantid-saved mask NeXus file.
+
+    Two backends, selected automatically:
+
+    * **Mantid (preferred when available)** —
+      :func:`sansdir.mask.mantid_writer.write_nxs_via_mantid` spawns
+      ``drtsans --classic`` as a subprocess and runs
+      ``Load → MaskDetectors → SaveNexus`` against the original
+      source NeXus. The resulting file carries per-detector mask
+      flags in ``instrument_parameter_map`` — what drtsans's
+      reduction pipeline reads via ``MaskDetectors(MaskedWorkspace=...)``.
+      This is the format users *actually* need for reduction.
+    * **Legacy pure-numpy fallback** — used when ``drtsans`` isn't on
+      PATH (the function below). Produces an event-workspace skeleton
+      that round-trips through sansdir's ``p`` plot loader, but
+      drtsans's reduction pipeline silently ignores it because the
+      detector-mask-flag metadata isn't present. Useful for
+      visualisation, not for reduction.
+
+    Set ``prefer_mantid=False`` to force the legacy path (e.g. for
+    diagnostics, or when you need the tiny event-workspace file for
+    a ``--shapes-json`` round-trip).
+    """
+    import os
+
+    # Test-suite escape hatch: when SANSDIR_NO_MANTID is set we
+    # always use the legacy writer. The unit tests build synthetic
+    # source files that Mantid can't ``Load``, so without this they'd
+    # all error out before they could exercise the legacy structure
+    # they're written to validate. Production users never set this.
+    if prefer_mantid and not os.environ.get("SANSDIR_NO_MANTID"):
+        try:
+            from sansdir.mask.mantid_writer import (
+                MantidUnavailableError,
+                write_nxs_via_mantid,
+            )
+        except ImportError:
+            pass  # shouldn't happen; means we shipped broken
+        else:
+            try:
+                return write_nxs_via_mantid(output_path, mask, source_meta)
+            except MantidUnavailableError as exc:
+                # No Mantid → silently use legacy. The CLI / GUI
+                # reports the fallback in user-facing channels.
+                logger = logging.getLogger(__name__)
+                logger.info("Mantid writer unavailable (%s); using legacy", exc)
+            # MantidWriterError intentionally propagates — Mantid was
+            # found but failed; surfacing the error beats silently
+            # writing an unusable legacy file.
+    return _write_nxs_legacy(output_path, mask, source_meta)
+
+
+def _write_nxs_legacy(
+    output_path: Path | str,
+    mask: np.ndarray,
+    source_meta: SourceMeta,
+) -> Path:
+    """Legacy pure-numpy NeXus writer (event-workspace skeleton).
+
+    Mirrors ``tests/data/mask_4m2.nxs`` dataset-for-dataset. Use
+    this when (a) ``drtsans`` isn't available on the host, or
+    (b) you need the tiny round-trip file for sansdir's own plot
+    loader / ``--shapes-json`` flow. drtsans's reduction will
+    silently ignore this file's mask information — see
+    :func:`write_nxs` for the production path that produces a
+    file drtsans actually consumes.
 
     The reference file ``tests/data/mask_4m2.nxs`` (which sansdir's
     ``p`` keystroke loads correctly) is a ``SaveNexus(EventWorkspace)``
