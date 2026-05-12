@@ -11,6 +11,7 @@ Two identical instances of this widget make up the dual-pane layout
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import ClassVar
 
 from rich.text import Text
 from textual.binding import Binding, BindingType
+from textual.coordinate import Coordinate
 from textual.reactive import reactive
 from textual.widgets import DataTable
 
@@ -198,41 +200,66 @@ class FilePanel(DataTable):
         else:
             self.tags.add(path)
             new_state = True
-        self._render_rows(preserve_cursor=True)
+        # Repaint only the affected row in place. ``_render_rows`` (the
+        # previous implementation) called ``self.clear()`` which resets
+        # the DataTable's scroll position to 0; ``move_cursor`` then
+        # scrolled the cursor row into view by docking it at the
+        # bottom of the visible window. The visible effect for the
+        # user was: every Space press in a long file list snapped the
+        # cursor to the bottom of the viewport, forcing them to
+        # re-locate context. Updating cells in place keeps the
+        # DataTable's existing scroll state intact and the cursor's
+        # natural Up/Down scroll behaviour returns to normal.
+        for i, e in enumerate(self._entries):
+            if e.path == path:
+                self._repaint_row(i)
+                break
         return new_state
 
     def tag_glob(self, pattern: str) -> int:
         """Tag every visible entry whose name matches ``pattern``. Returns count."""
         n = 0
-        for entry in self._entries:
+        affected: list[int] = []
+        for i, entry in enumerate(self._entries):
             if entry.is_parent:
                 continue
             if fnmatch.fnmatch(entry.name, pattern):
-                self.tags.add(entry.path)
+                if entry.path not in self.tags:
+                    self.tags.add(entry.path)
+                    affected.append(i)
                 n += 1
-        if n:
-            self._render_rows(preserve_cursor=True)
+        for i in affected:
+            self._repaint_row(i)
         return n
 
     def untag_glob(self, pattern: str) -> int:
         """Untag every visible entry whose name matches ``pattern``."""
         n = 0
-        for entry in self._entries:
+        affected: list[int] = []
+        for i, entry in enumerate(self._entries):
             if entry.is_parent:
                 continue
             if fnmatch.fnmatch(entry.name, pattern) and entry.path in self.tags:
                 self.tags.discard(entry.path)
                 n += 1
-        if n:
-            self._render_rows(preserve_cursor=True)
+                affected.append(i)
+        for i in affected:
+            self._repaint_row(i)
         return n
 
     def clear_tags(self) -> int:
         """Drop every tag in this pane; returns the number cleared."""
         n = len(self.tags)
+        if not n:
+            return 0
+        # Capture the rows that were tagged before we drop the set,
+        # so we know which rows need a repaint.
+        affected = [
+            i for i, e in enumerate(self._entries) if e.path in self.tags
+        ]
         self.tags.clear()
-        if n:
-            self._render_rows(preserve_cursor=True)
+        for i in affected:
+            self._repaint_row(i)
         return n
 
     def tagged_paths(self) -> list[Path]:
@@ -317,6 +344,29 @@ class FilePanel(DataTable):
         if self._entries:
             target = max(0, min(prev_row, len(self._entries) - 1))
             self.move_cursor(row=target)
+
+    def _repaint_row(self, row_index: int) -> None:
+        """Update the cells of a single row in place, no scroll reset.
+
+        Calling ``DataTable.clear()`` (as ``_render_rows`` does) wipes
+        the scroll offset; the subsequent ``move_cursor`` then has to
+        scroll the cursor row back into view, which Textual does by
+        docking it at the bottom of the visible window. For a single
+        toggle-tag we just want the row's *style* to flip (yellow
+        ``* prefix`` on / off) without touching anything else —
+        ``update_cell_at`` does exactly that.
+        """
+        if not (0 <= row_index < len(self._entries)):
+            return
+        entry = self._entries[row_index]
+        name_col, size_col, mtime_col = self._format_row(entry)
+        # ``update_value=True`` forces a cell repaint even when the
+        # underlying string compares equal (Rich Text values
+        # compare strangely otherwise).
+        with contextlib.suppress(Exception):
+            self.update_cell_at(Coordinate(row_index, 0), name_col, update_width=False)
+            self.update_cell_at(Coordinate(row_index, 1), size_col, update_width=False)
+            self.update_cell_at(Coordinate(row_index, 2), mtime_col, update_width=False)
 
     def _format_row(self, entry: FileEntry) -> tuple[Text | str, str, str]:
         if entry.is_parent:

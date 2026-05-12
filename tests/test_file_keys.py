@@ -330,6 +330,66 @@ async def test_f3_on_directory_notifies(tmp_path: Path) -> None:
         await pilot.press("q")
 
 
+async def test_space_tag_preserves_scroll_position(tmp_path: Path) -> None:
+    """Tagging a file deep in a scrolled list must not snap scroll to top.
+
+    Reported bug: pressing Space on a row that's mid-list moved the
+    cursor to the next row correctly, but the file pane re-rendered
+    the whole DataTable (``clear()`` + re-add) — which resets scroll
+    to 0, and Textual's ``move_cursor`` then re-anchors the cursor
+    row at the *bottom* of the visible window. Every Space press
+    dragged the user's focus down to the bottom of the viewport.
+
+    Pin: after Space, the panel's ``scroll_y`` is non-zero (we were
+    mid-list before pressing Space; we should still be mid-list
+    after).
+    """
+    # Lay down 200 dummy files so the list is unambiguously
+    # scrollable.
+    left = tmp_path / "L"
+    right = tmp_path / "R"
+    left.mkdir()
+    right.mkdir()
+    for i in range(200):
+        (left / f"file_{i:03d}.dat").write_text("x", encoding="utf-8")
+
+    from sansdir.app import SansdirApp
+
+    history = CommandHistory(path=tmp_path / "hist", load=False)
+    app = SansdirApp(start_path=left, right_path=right, history=history)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        panel = app.active_panel
+        # Step cursor far enough that we have to scroll. PageDown
+        # is faster than 80 Down keystrokes.
+        for _ in range(4):
+            await pilot.press("pagedown")
+            await pilot.pause()
+        scroll_before = float(panel.scroll_y)
+        cursor_before = panel.cursor_row
+        # Sanity: we're actually scrolled.
+        assert scroll_before > 0, (
+            f"test fixture wasn't scrolled; cursor={cursor_before}, "
+            f"scroll_y={scroll_before}"
+        )
+        # Press Space — should tag-and-advance, but scroll should
+        # only move if the new cursor row is off-screen, NOT snap
+        # the view back to top.
+        await pilot.press("space")
+        await pilot.pause()
+        scroll_after = float(panel.scroll_y)
+        cursor_after = panel.cursor_row
+        # Cursor advanced by one (tag-and-advance semantic).
+        assert cursor_after == cursor_before + 1
+        # Scroll didn't reset to top. Allow a small increment if the
+        # new cursor row needed to scroll into view, but it should
+        # NOT be near zero.
+        assert scroll_after >= scroll_before - 1, (
+            f"scroll snapped backwards on Space: {scroll_before} -> {scroll_after}"
+        )
+        await pilot.press("q")
+
+
 async def test_f8_delete_keeps_cursor_near_deleted_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
