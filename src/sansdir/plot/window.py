@@ -74,10 +74,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--title", default=None)
     parser.add_argument("--cmap", default="viridis", help="matplotlib colormap (2D only)")
+    # SANS intensity spans many decades, so log is the right default.
+    # ``BooleanOptionalAction`` exposes both ``--log-intensity`` and
+    # ``--no-log-intensity`` so power users can flip back to linear
+    # when needed.
     parser.add_argument(
         "--log-intensity",
-        action="store_true",
-        help="log-scale the colormap (2D only)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="log-scale the colormap (2D only); pass --no-log-intensity for linear",
     )
     parser.add_argument(
         "--colorbar-mode",

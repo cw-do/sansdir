@@ -379,6 +379,42 @@ def test_spawn_plot_window_builds_correct_argv(
     assert "--title" in argv and "my-plot" in argv
     # Detach flags so closing the TUI doesn't kill the figure window.
     assert captured["kwargs"].get("start_new_session") is True
+    # Log-intensity is the SANS-natural default; the spawn helper
+    # always passes an explicit flag in either direction so the
+    # subprocess CLI default never silently overrides the function
+    # default. Without this assertion a future refactor could
+    # quietly send 2D plots back to linear color scale (which is
+    # what shipped in v0.9 before this commit).
+    assert "--log-intensity" in argv
+    assert "--no-log-intensity" not in argv
+
+
+def test_spawn_plot_window_can_opt_out_of_log_intensity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``log_intensity=False`` reaches the subprocess as
+    ``--no-log-intensity`` — power users who want linear can opt out
+    via the kwarg.
+    """
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(
+        backend.subprocess,
+        "Popen",
+        lambda argv, **kw: (captured.setdefault("argv", list(argv)), _FakeProc())[1],
+    )
+    backend.spawn_plot_window(
+        "iqxqy",
+        [Path("/tmp/a.dat")],
+        log_intensity=False,
+        log_dir=tmp_path,
+    )
+    argv = captured["argv"]
+    assert "--no-log-intensity" in argv
+    assert "--log-intensity" not in argv
 
 
 def test_plot_iq_with_display_uses_subprocess(

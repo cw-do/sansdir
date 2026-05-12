@@ -86,7 +86,7 @@ def spawn_plot_window(
     errorbars: bool = True,
     title: str | None = None,
     cmap: str | None = None,
-    log_intensity: bool = False,
+    log_intensity: bool = True,
     colorbar_mode: str | None = None,
     log_dir: Path | None = None,
 ) -> BackendInfo:
@@ -116,8 +116,9 @@ def spawn_plot_window(
         argv.extend(["--title", title])
     if cmap:
         argv.extend(["--cmap", cmap])
-    if log_intensity:
-        argv.append("--log-intensity")
+    # Log-intensity is the SANS default; pass an explicit flag in
+    # either direction so the subprocess doesn't have to assume.
+    argv.append("--log-intensity" if log_intensity else "--no-log-intensity")
     if colorbar_mode:
         argv.extend(["--colorbar-mode", colorbar_mode])
 
