@@ -1,0 +1,56 @@
+% Plot dispatch: file kind detection then backend selection.
+% Requires: \usepackage{tikz} with positioning, arrows.meta, shapes.geometric.
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    node distance=6mm,
+    box/.style={draw, rounded corners=2pt, align=center, inner sep=4pt,
+                minimum height=8mm},
+    start/.style={box, fill=blue!8, minimum width=30mm},
+    dec/.style={draw, diamond, aspect=2.2, align=center, inner sep=1pt,
+                fill=orange!18, font=\scriptsize\sffamily},
+    kind/.style={box, fill=green!8, minimum width=32mm, font=\scriptsize\sffamily},
+    res/.style={box, fill=gray!12, minimum width=34mm, font=\scriptsize\sffamily},
+    flow/.style={-{Latex[length=2mm]}, thick},
+    elbl/.style={font=\scriptsize\sffamily, inner sep=1.5pt, fill=white},
+  ]
+
+  % --- Detection column ---------------------------------------------------
+  \node[start] (sel) at (0, 6.6) {Active selection\\\scriptsize (tags, else cursor row)};
+  \node[box, fill=orange!12, minimum width=34mm] (detect) at (0, 5.0)
+    {\texttt{plot/detect.py}\\\scriptsize filename $\rightarrow$ header $\rightarrow$ column count};
+
+  \node[kind] (iq)    at (-5.1, 3.1) {\textbf{iq}\\2\,/\,3\,/\,4 columns};
+  \node[kind] (trans) at (-1.7, 3.1) {\textbf{transmission}\\name or header match};
+  \node[kind] (iqxqy) at ( 1.7, 3.1) {\textbf{iqxqy}\\4\,/\,6 col., repeating $q_x$};
+  \node[kind] (nexus) at ( 5.1, 3.1) {\textbf{nexus}\\HDF5 magic or \texttt{.nxs}};
+
+  \node[res] (fiq)    at (-5.1, 1.5) {log--log overlay\\\scriptsize errorbars if $\sigma_I$ present};
+  \node[res] (ftrans) at (-1.7, 1.5) {linear $T(\lambda)$\\\scriptsize $\lambda$ in \AA};
+  \node[res] (fiqxqy) at ( 1.7, 1.5) {\texttt{pcolormesh}\\\scriptsize single or $\lceil\sqrt{n}\,\rceil$ tile grid};
+  \node[res] (fnexus) at ( 5.1, 1.5) {detector heatmap\\\scriptsize $256\times192$, pure \texttt{numpy}};
+
+  % --- Backend decision ---------------------------------------------------
+  \node[dec, minimum width=30mm] (disp) at (0, -0.5)
+    {\texttt{\$DISPLAY} or \texttt{\$WAYLAND\_DISPLAY}?\\(and \texttt{\$SANSDIR\_HEADLESS} unset)};
+
+  \node[res, fill=green!10, minimum width=52mm] (win) at (-3.4, -2.6)
+    {\textbf{Interactive}\\\scriptsize \texttt{python -m sansdir.plot.window} subprocess;\\
+     \scriptsize QtAgg $\rightarrow$ TkAgg $\rightarrow$ GTK4Agg; TUI never imports matplotlib};
+  \node[res, fill=red!8, minimum width=42mm] (png) at ( 3.9, -2.6)
+    {\textbf{Headless}\\\scriptsize \texttt{Agg} backend $\rightarrow$ PNG under\\
+     \scriptsize \texttt{\raisebox{0.4ex}{\texttildelow}/.cache/sansdir/plots/}};
+
+  % --- Arrows -------------------------------------------------------------
+  \draw[flow] (sel) -- (detect);
+  \foreach \n in {iq, trans, iqxqy, nexus}
+    \draw[flow] (detect.south) -- (\n.north);
+  \draw[flow] (iq)    -- (fiq);
+  \draw[flow] (trans) -- (ftrans);
+  \draw[flow] (iqxqy) -- (fiqxqy);
+  \draw[flow] (nexus) -- (fnexus);
+  \foreach \n in {fiq, ftrans, fiqxqy, fnexus}
+    \draw[flow] (\n.south) -- (disp.north);
+  \draw[flow] (disp) -- (win) node[elbl, pos=0.55] {yes};
+  \draw[flow] (disp) -- (png) node[elbl, pos=0.55] {no};
+
+\end{tikzpicture}
