@@ -5,8 +5,8 @@ for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
 > **Status**: beta. Daily-driven for EQSANS workflows. See
-> [`TASKS.md`](./TASKS.md) for the phase plan, [`PLANNING.md`](./PLANNING.md)
-> for architecture.
+> [`docs/sansdir-report.pdf`](./docs/sansdir-report.pdf) for the full
+> technical report, including the architecture.
 
 ---
 
@@ -466,9 +466,9 @@ refresh).
 
 ## Project documents
 
-- [`CLAUDE.md`](./CLAUDE.md) — instructions for the AI coding agent.
-- [`PLANNING.md`](./PLANNING.md) — architecture & data-format reference.
-- [`TASKS.md`](./TASKS.md) — phased implementation checklist.
+- [`docs/sansdir-report.pdf`](./docs/sansdir-report.pdf) — ORNL technical
+  memorandum: architecture, data formats, full command and keybinding
+  reference. Built from `docs/sansdir-report.tex`; see `docs/README.md`.
 
 ---
 

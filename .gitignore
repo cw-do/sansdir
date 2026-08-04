@@ -68,3 +68,8 @@ kikoffprompt.md
 
 # Screenshot SVGs are intermediates of `make figures`; LaTeX consumes the PDFs.
 docs/figures/*.svg
+
+# Working documents for the AI coding agent — kept locally, not published.
+CLAUDE.md
+PLANNING.md
+TASKS.md

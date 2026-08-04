@@ -41,7 +41,7 @@ Examples:
 Config: ~/.config/sansdir/config.toml (sections: [ui], [keys], [oncat], [mail]).
 Override the path with $SANSDIR_CONFIG.
 
-Docs / issues: see PLANNING.md and TASKS.md in the repo.
+Docs: docs/sansdir-report.pdf in the repo. Issues: github.com/cw-do/sansdir
 """
 
 
