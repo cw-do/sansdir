@@ -1,0 +1,645 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% File: ornl-template-example.tex
+% Authors: Seth R Johnson, *Sam Crawford, and John Batson
+% *Corresponding author, crawfordst@ornl.gov
+% Date: Tuesday, February 10, 2026 @ 16:06
+%
+% Example of ORNL report template
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Select the appropriate option for a TM [tm], SPR [spr], or LTR [ltr] report.
+\documentclass[tm]{ornltm} % Use for TM report.
+%\documentclass[spr]{ornltm} % Use for SPR report.
+%\documentclass[ltr]{ornltm} % Use for LTR report.
+
+%% Optional packages that are simply part of this example document
+\usepackage{threeparttable} % Table with captions and tablenotes
+\usepackage{booktabs} % Toprule, midrule, bottomrule
+\usepackage{multirow} % Extend table entries over multiple rows
+\usepackage{pdflscape} % Allows landscape pages for wide figures and tables
+
+%% Bibliography styling. WARNING: the biblatex-chicago package removes the
+%% footnote rule.
+\usepackage[authordate,autocite=inline,backend=biber,natbib]{biblatex-chicago} % Author-date style
+%\usepackage{biblatex} % Numerical style
+
+\bibliography{example.bib} % Replace with your bib filename.
+
+%% Use inline small italic blue for comments rather than placing them in the
+%% margin.
+\definecolor{note}{RGB}{48,96,192}
+\renewcommand{\marginpar}[1]{{\small\em\color{note}[#1]}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% AUTHORSHIP & PUBLISHING
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% AUTHOR'S LIST
+%% Note: multiple authors are separated with the \and command. 
+%% Per ORNL guidance, please keep the number of authors at six or fewer.
+
+\author{First Author \and Second Author \and Third Author \and Fourth Author \and Fifth Author \and Sixth Author}
+
+%%% AUTHOR's LIST WITH AFFILIATIONS (SPR ONLY)
+%% Define authors with affiliations. Does not apply to TM or LTR. Comment out if not using.
+%% Note: multiple authors are separated with the \and command. 
+%% Per ORNL guidance, please keep the number of authors at six or fewer.
+
+%\author{First Author\affilnum{1} \and Second Author\affilnum{2} \and Third Author\affilnum{2} \and Fourth Author\affilnum{1} \and Fifth Author\affilnum{1} \and Sixth Author\affilnum{1}} 
+
+%%% AFFILIATIONS (SPR ONLY)
+%% Note: Does not apply to TM or LTR.
+
+%\affiliation{\affilnum{1}Oak Ridge National Laboratory \\ \affilnum{2}University of Tennessee, Knoxville \\ }
+
+%%% DOCUMENT TITLE
+\title{Oak Ridge National Laboratory\\ Official Report Template:\\ Title Must Match RESolution Title}
+
+%%% PUBLICATION DATE
+%% Specify date or use current month and year with \today command.
+
+%\date{April 2024}
+\date{\today}
+
+%%% REPORT NUMBER
+%% Note: This number must match number provided by RESolution.
+
+\reportnum{ORNL/XX-XXXX/XXX} % Replace first XX with TM, SPR, or LTR.
+
+%%% DIVISION NAME
+%% Define division/directorate name. Replace ``Division Name'' with your
+%% division/directorate.
+
+\division{Division Name}
+
+%%% SPONSOR OPTIONS FOR SPR
+%% Leave commented out or remove for TM and LTR.
+
+%%% SPONSOR NUMBER
+%% SPR only. Comment out if not using.
+
+%\sponsornum{Sponsor No. (if needed)}
+
+%%% SPONSOR LOGO(s)
+%% SPR only. Add sponsor logos by listing file names below. The cover can accommodate two sponsor logos.
+
+%\SponsorLogoOne{luggage/logo-placeholder.jpg} % Sponsor logo one. Comment out if not using.
+%\SponsorLogoTwo{luggage/logo-placeholder.jpg} % Sponsor logo two. Comment out if not using.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% DOCUMENT RESTRICTIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% DRAFT
+%% Mark the report as a draft with the \reportdraft command. Comment out for public release 
+%% and unlimited distribution.
+
+\reportdraft
+
+%%% CUI
+%% Adds CUI notice to the header and footer. Use % to toggle on or off. 
+%% Update category, Authority Name, and Phone Number
+%% For CRADA protected, use option on line 147.
+
+%\cui{CUI//CATEGORY//DISSEM}{Authority Name, ORG}{(XXX)~XXX-XXXX} % Use for CUI basic/unspecified.
+%\cui{CUI//SP-CATEGORY/SUBCATEGORY//DISSEM}{Authority Name, ORG}{(XXX)~XXX-XXXX} % Use for CUI specified.
+
+%%% EXPORT CONTROL - Requires CUI (above)
+%% Enable if your document is export controlled. Add contact info for export control authority.
+%% Update Reviewer name, email, phone, date, and regulation name.
+
+%\export{Firstname Lastname}{EmailAddress@ornl.gov}{(XXX)~XXX-XXXX}{\today}{Regulation Name}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% CRADA INSTRUCTIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% CRADA - General Info
+%%
+%% This command adds the CRADA notice to front cover and ORNL-851 form as the third page.
+%%
+%% Draft or public release is determined by toggling \reportdraft (line 99, above).
+%%
+%% If this report contains CRADA protected information, then toggle 
+%% the \cradaprotected command (line 159, below) by uncommenting it.
+%% Note that this replaces the DRAFT notice. Only use for final document.
+%%
+
+%% CRADA form ORNL-851
+%%
+%% Once your CRADA document is final, please fill out and sign the ORNL-851.pdf
+%% form that resides in this repository. You can also download ORNL-851.pdf from
+%% https://ornl.sharepoint.com/sites/forms/ornl/Forms/Forms%20View.aspx.
+%%
+
+%% Instructions for Overleaf/ShareLaTeX:
+%% Download ORNL-851.pdf and open in Adobe Acrobat, fill it out, and
+%% use the "Export to..." option to save the file as ORNL-851-complete.jpg.
+%% Upload ORNL-851-complete.jpg to Overleaf/ShareLaTeX and replace the
+%% old ORNL-851-complete.jpg file. DO NOT CHANGE THE FILE NAME. 
+%% Your completed form should appear on the third page.
+
+%% Instructions for local/repository:
+%% Open ORNL-851.pdf in Adobe Acrobat, fill it out, and
+%% use the "Export to..." option to save the file as ORNL-851-complete.jpg.
+%% Replace old file. DO NOT CHANGE THE FILE NAME.
+%% Your completed form should appear on the third page.
+
+%\cui{CUI//SP-PROPIN/SUBCATEGORY//DISSEM}{Authority Name, ORG}{(XXX)~XXX-XXXX} % Use for CRADA protected.
+%\crada{CRADA no. NFE-XX-XXXXX} % Include CRADA report number.
+%\cradaprotected{ten (10) years} % If protected, include nondisclosure period in years.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ABBREVIATIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Uses the Acro package called in the CLS (line 61) and styled in the STY (lines
+%% 135--144). Note that acronyms that aren't used in the document won't be printed
+%% in the list. Declare your abbreviations in abbreviations.tex.
+
+\input{abbreviations.tex}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% FRONT MATTER
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+\frontmatter
+
+% Prints TABLE OF CONTENTS
+\tableofcontents % Comment out for LTR
+
+% Prints LIST OF FIGURES
+\listoffigures % Comment out for LTR
+
+% Prints LIST OF TABLES
+\listoftables % Comment out for LTR
+
+%% Prints LIST OF ABBREVIATIONS
+\printacronyms % Comment out for LTR. Requires acro package.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% ADDITIONAL FRONT MATTER (OPTIONAL)
+\begin{foreword} % Remove foreword environment if not using (lines 217--291).
+
+Material after the Table of Contents, List of Figures, List of Tables, and List of
+Abbreviations may include any or all of the following sections and should begin
+on an odd-numbered page in the order listed below:
+
+\begin{itemize}
+  \item Foreword \marginpar{Note: spelling is not ``Forward.''}
+  \item Preface
+  \item Acknowledgments
+  \item Executive summary, or Summary
+  \item Abstract
+\end{itemize}
+
+Each section of the front material begins on an odd-numbered page (the
+\verb|\section| command inserts a \verb|\cleardoublepage| before each one). The
+abstract, if very brief, may begin on page 1 inserted above the introduction
+section.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{TM, SPR, or LTR?}
+
+\textbf{Technical Memos (TMs)} are the primary report type produced at the lab,
+and TM is the default option for this document's class. The TM template has been
+approved by DOE for ORNL's use. The picture on the front cover is the only
+design or branding element that may be changed. Use the RESolution Publications
+system to generate an ORNL/TM report number by entering the report in the system
+and selecting the TM category.
+
+\textbf{Letter reports (LTRs)} are for externally published letter reports, not
+letters or sponsor reports. Use the RESolution Publications system to generate
+an ORNL/LTR report number by entering the report in the system and selecting the
+LTR category. Notably, LTR reports should be limited to 10 pages of narrative
+text. Longer documents should use the TM option.
+
+\textbf{Sponsor reports (SPRs)} are for reports funded by outside sponsors that
+have not provided their own guidelines and/or templates. If the sponsor (e.g.,
+Nuclear Regulatory Commission) has provided a template, then use it. Otherwise,
+use the ORNL SPR option in this example. Notably, even if you are using a
+sponsor's template, you must still use the RESolution Publications system to
+generate an ORNL/SPR report number by entering the report in the system and
+selecting the SPR category.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{General Information}
+
+Document margins are 1 in.~all around. Generally, the \ac{tm} styling reflects
+the defaults of Microsoft Word because that is the publishing application of
+choice for the \ac{doe}. \Acp{tm} are more fun to write in \LaTeX.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{Footnotes}
+
+Text footnotes are 9 pt. \ac{tnr} with no space between notes.\footnote{Footnotes
+are 9 pt. \ac{tnr} with no space between notes.} Footnote indicators in text can be
+superscript Arabic numerals as shown above or as superscript symbols
+(using markup changes) as shown below.
+
+%% Use symbols for footnotes
+\renewcommand*{\thefootnote}{\fnsymbol{footnote}}
+
+If symbols, then they will appear in the following order: \footnote{First},
+\footnote{Second}, \footnote{Third}, \footnote{Fourth}, \footnote{Fifth}, and
+\footnote{etc}. Symbols \emph{are not} used as table footnote indicators (see
+Section~\ref{sec:tables}).
+
+%% Use Arabic numbers for footnotes
+\renewcommand*{\thefootnote}{\arabic{footnote}}
+% Restore footnote count
+\setcounter{footnote}{0}
+
+Footnotes may be used in addition to the author-date citation method, in which
+case, the footnotes provide additional information to the text---not
+bibliographic citations.
+\end{foreword}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ABSTRACT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\mainmatter
+\begin{abstract}
+
+The abstract, if short, is inserted here (after \verb|\mainmatter|) before the
+introduction section. If the abstract is long, then it should be inserted
+\emph{before} \verb|\mainmatter|, and the introduction below will be the first
+entry on the page. This \acl{tm} class is used for reports at \acl{ornl}.
+
+\end{abstract}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% DOCUMENT CONTENT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\acresetall % Reset abbreviations for narrative.
+\section{FIRST-ORDER HEADING}
+\label{sec:firstsec}
+\marginpar{Sections and subsections must be manually capitalized to render
+properly in the table of contents.}
+
+Begin text here. You can reference abbreviations such as \ac{ornl}, and, because
+we are using the \verb|Acro| package, they will be defined on first instance and
+automatically shortened on subsequent appearances---e.g., \ac{ornl}---unless you
+reset the counter by using \verb|\acresetall|. They will also appear in the List
+of Abbreviations. Note that any abbreviations used prior to the narrative are
+reset! They are reset again for the appendix because these elements stand alone.
+
+The body of the document is paginated consecutively (i.e., 1, 2, 3) or by
+section (i.e., 1-1, 2-1, 3-1) using Arabic numbers centered at the bottom of
+each page. Blank backup pages are not numbered.
+
+When typing your document in LaTeX, it might be useful to break the line at the
+right-hand side by hitting the return key so that any version control system you
+might be using can recognize changes with better granularity. These version
+control systems (e.g., SVN, Git, Mercurial) track changes by line number, so the
+more frequent line breaks that a document has, the better control over changes
+and merges the author(s) will have. These breaks are treated as spaces in the
+final output. We recommend breaking lines at 80 characters. Some text editors
+have a hotkey and/or extensions for this procedure (e.g., Rewrap for VS Code).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{SECOND-ORDER HEADING}
+
+Begin text here.
+
+Another paragraph is here.
+
+\subsubsection{Third-Order Heading}
+
+Begin text.
+
+\paragraph{Fourth-Order Heading}
+
+Begin text here.
+
+\subparagraph{Fifth-Order Heading}
+
+Ask yourself, ``Do I \emph{really} need five or more hierarchical levels in my
+document?''
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\marginpar{A \texttt{\textbackslash cleardoublepage} should be inserted here if the preceding
+section is not too short.}
+
+\section{FIGURE PLACEMENT}
+\label{sec:figures}
+
+\subsection{FIGURES}
+
+Insert figures after the text callout but as close to the callout as possible.
+They always have a caption describing them, and they are always numbered. LaTeX
+automatically floats tables and figures depending on how much space is left on
+the page where they are processed. If there is not enough room on
+the current page, then the float is moved to the top of the next page. Figures are
+numbered consecutively (i.e., Figure~1, Figure~2) except in large reports, in
+which they may be numbered consecutively by section (i.e., Figure~1.1,
+Figure~1.2).
+
+All figures are pulled in from source files that should be placed in a directory
+that the author can link to from the LaTeX file.  In this template, the image
+files for the figures are in a subfolder named ``figures,'' which is
+standard practice for LaTeX documents.
+
+\begin{figure}[ht]
+  \centering
+	\includegraphics[width=5.5in, height=2.5in]{figures/fig1.png}
+  \longcaption{All figure captions are 10 pt, bold, \ac{tnr}.}{Only the first sentence of
+  a figure caption is bold.}
+\end{figure}
+
+Text can go in between figures. LaTeX will pretty much place the figures
+wherever it sees fit based on the parameters described above---unless you
+explicitly command it to do otherwise.
+
+\begin{figure}[ht]
+  \centering
+	\includegraphics[width=6.2in, height=2.75in, keepaspectratio=true]{figures/fig1.png}
+	\caption{One-line figure captions are bold.}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{TABLE PLACEMENT}
+\label{sec:tables}
+
+\subsection{TABLES}
+
+As with figures, tables are numbered consecutively or consecutively by section
+and should follow their callout (see Table \ref{tab:1}) in the text as closely
+as possible. LaTeX automatically floats tables and figures depending on how
+much space is left on the page where they are processed. If there is
+not enough room on the current page, then the float is moved to the top of the next
+page. Tables are formatted using small \ac{tnr}. To accommodate large tables, the
+font size can be decreased and, if necessary, landscaped (Table~\ref{tab:2}).
+
+\begin{table}[ht]
+  \centering
+  \begin{threeparttable}
+  \caption{Table caption is bold, centered, and initial cap with no period at
+  end of title}\label{tab:1}
+  \newcommand\tworow[1]{\multirow{2}{*}{#1}}
+  \begin{tabular}{c c c c c c}
+    \toprule
+    \tworow{EM project\tnote{a}} & \tworow{Recycling method} & \tworow{Amount
+    recycled (lb)} & \multicolumn{3}{c}{Cost (\$)} \\ \cline{4-6}
+    &  &  & Recycling & Disposal &  Storage \\ \midrule
+    Metals recycle & Smelting & 1,072,000 & 1,565,763 & 1,338,447 & 1,608,000 \\
+    Cooling tower\tnote{b} & Decontamination & 459,000 & 605,880 & 573,120 &
+    688,500  \\
+    \em{Total} &   & 1,601,150 & 2,266,491 & 2,004,973 & 2,401,725 \\
+    \bottomrule
+  \end{tabular}
+  \begin{tablenotes}
+    \item \emph{Note:} A general note to the table as a whole is not linked to
+    a superscript letter. It is formatted like this note. Table footnotes are
+    9~pt, or, as with larger tables, 1~pt smaller than the table body text.
+  \item[a] Footnote callouts are lowercase, italic, superscript letters in
+    sequence from left to right.
+  \item[b] For multipage tables, the footnote appears only on the last page of
+    the table.
+  \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\begin{landscape} % Creates a page break and orients the new page(s) in landscape mode, including the header and footer.
+\begin{table}
+  \caption{This table is too wide for a portrait orientation and uses the pdflscape package for landscape}\label{tab:2}
+  \centering
+  \begin{tabular}{llllllllllll}
+  \toprule
+  Key  & Def.     & Definition           & Key  & Def. & Definition            & Key  & Def. & Definition           \\
+  \midrule
+  RND= & given    & random number        & PNU= & NO   & use delayed neutron   & SMU= & NO   & self-multiplication  \\
+  TME= & no limit & execution time (min) & AMX= & NO   & all mixture xsecs     & NUB= & YES  & neutrons per fission \\
+  TBA= & 10 min   & batch time (min)     & XAP= & NO   & xsec angles \& probs. & PAX= & NO   & albedo-xsec array    \\
+  WTA= & 0.5      & average weight       & XS1= & NO   & 1D xsecs             & TFM= & NO   & coordinate transform \\
+  WTH= & 3.0      & wt. for splitting    & XS2= & NO   & 2D xsecs             & PMF= & NO   & print angular fluxes \\
+  WTL= & 1/WTH    & Russian Roulette wt. & XSL= & NO   & 2D Pl xsecs          & MFX= & NO   & compute mesh fluxes  \\
+  SIG= & 0.0      & deviation limit      & PKI= & NO   & fission spectrum      & PMS= & NO   & print mesh fluxes    \\
+  \bottomrule
+  \end{tabular}
+\end{table}
+\end{landscape}
+
+\section{FIGURE WRAPPING}
+\label{sec:figwrap}
+
+The template uses the \verb|wrapfig| package to enable text to wrap neatly
+around figures. You can adjust the padding and placement by using the
+\verb|trim| and \verb|width| variables.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam elementum euismod
+rutrum. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur
+ridiculus mus. Suspendisse gravida nunc est, at viverra augue rhoncus et. In
+varius luctus enim, venenatis ullamcorper ipsum volutpat at. Pellentesque
+habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.
+Aliquam vel blandit sem. Etiam vel erat nibh. Vestibulum vulputate, neque vel
+aliquet consequat, tortor magna sagittis magna, nec bibendum nulla ligula ut
+nunc. Curabitur sed lorem in orci vestibulum imperdiet.
+
+\begin{wrapfigure}{r}{7cm} % Set box alignment {r} and size {7cm}
+  \centering % Center figure within box
+    \includegraphics[trim=2cm 0cm 2cm 0.5cm,width=4.5cm]{example-image-a} %Set image dimension smaller than box
+  \caption{Wrapped figure.} % Add caption
+  \vspace{-0.5cm} % Adjust white space under caption.
+\end{wrapfigure}
+
+Curabitur eleifend vel leo eu malesuada. Donec ultricies cursus ante, sit amet
+tincidunt enim ultrices id. Sed vel odio vel risus gravida aliquam vel eu neque.
+Donec in ipsum ac risus varius aliquam facilisis sed neque. Nunc suscipit neque
+at augue volutpat viverra. Proin sit amet nunc a lectus condimentum elementum.
+Nullam porttitor felis ipsum, sit amet facilisis felis volutpat et.
+
+Quisque bibendum ligula ut sapien placerat, vitae faucibus neque luctus.
+Maecenas semper elementum tortor id laoreet. Aenean condimentum tellus ante, et
+condimentum magna sodales quis. Morbi interdum lobortis massa at pulvinar. Proin
+et suscipit mauris. Maecenas aliquam lorem ipsum, nec dapibus nibh aliquam
+vitae. Sed et molestie sapien. Nullam commodo id mauris quis mollis.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{CITATIONS}
+\label{sec:citations}
+
+\subsection{USING IN-TEXT CITATIONS}
+For the \ac{ornl} \ac{tm} reports, \textit{Chicago Manual of Style} references and
+citations are preferred. Of these, you can choose between author-date +
+references cited or footnote + references cited.
+
+Author-date style is set by default and is preferred. Use
+the \verb|\autocite| command to defer to the default citation style, which will give
+you the following: \autocite{knuthwebsite}.
+
+If for some reason you don't want the citation to be surrounded by parentheses,
+you can use the \verb|\cite| command like this: \cite{einstein}. Or you can place
+parentheses around the year by using the \verb|\citet| command like this:
+\citet{einstein}.
+
+You can also push abbreviated citations into the footnotes using a \verb|\footcite|
+command, like this. \footcite{latexcompanion}
+
+For all of the examples above, you do not have to change anything other than the
+actual citation command. However, you (advanced users) can change the
+bibliography further by changing the bibliography styles on line 23.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{LISTS}
+\label{sec:lists}
+
+Flanges used in ultra-high vacuum service are commonly closed with metallic
+gaskets or seals. The geometry of the seal interface is critical for proper
+function. Experience has shown that flanges subjected to conventional welding
+techniques distort beyond a point that they can be sealed.
+\vspace{12pt}
+
+\begin{itemize}
+  \item \textbf{Apply itemize to format an unordered list with bullets.}
+    \emph{Add extra space between items if preferred.} Flanges used in
+    ultra-high vacuum service are commonly closed with metallic gaskets or
+    seals. The geometry of the seal interface is critical for proper function.
+    Experience has shown that flanges subjected to conventional welding
+    techniques distort beyond a point that they can be sealed.
+	\begin{itemize}
+    \item \textbf{Apply second itemize to format a sublist.} Flanges
+      used in ultra-high vacuum service are commonly closed with metallic
+      gaskets or seals. The geometry of the seal interface is critical for
+      proper function. Experience has shown that flanges subjected to
+      conventional welding techniques distort beyond a point that they can be
+      sealed.
+	\end{itemize}
+  \item \textbf{Apply itemize for format ``Bullet (last item)'' to format the
+    ending item.} Flanges used in ultra-high vacuum service are commonly closed
+    with metallic gaskets or seals. The geometry of the seal interface is
+    critical for proper function. Experience has shown that flanges subjected to
+    conventional welding techniques distort beyond a point that they can be
+    sealed.
+\end{itemize}
+
+\subsection{SECOND-ORDER HEADING}
+
+Flanges used in ultra-high vacuum service are commonly closed with metallic
+gaskets or seals. The geometry of the seal interface is critical for proper
+function. Experience has shown that flanges subjected to conventional welding
+techniques distort beyond a point that they can be sealed.
+
+You can also create an ordered/numbered list with \verb|enumerate|.
+
+\begin{enumerate}
+  \item Flanges used in ultra-high vacuum service are commonly closed with
+    metallic gaskets or seals. The geometry of the seal interface is critical
+    for proper function. Experience has shown that flanges subjected to
+    conventional welding techniques distort beyond a point that they can be
+    sealed.
+  \item Flanges used in ultra-high vacuum service are commonly closed with
+    metallic gaskets or seals. The geometry of the seal interface is critical
+    for proper function. Experience has shown that flanges subjected to
+    conventional welding techniques distort beyond a point that they can be
+    sealed.
+\end{enumerate}
+
+\subsubsection{Third-Order Heading}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+
+\paragraph{Fourth-order heading}
+
+Cras elementum pellentesque lacinia. Pellentesque habitant morbi tristique
+senectus et netus et malesuada fames ac turpis egestas. Curabitur ornare libero
+ipsum, quis volutpat diam sagittis porta. Aenean rhoncus dignissim leo, sed
+lobortis lectus tempus venenatis. Proin pulvinar lectus a tellus finibus, quis
+sodales nisl ullamcorper. Aliquam vel ornare ex, tristique faucibus velit. Fusce
+scelerisque, lacus eget tincidunt varius, quam diam bibendum nulla, eu molestie
+urna neque ac eros. Vestibulum dolor lectus, bibendum a mi nec, rhoncus
+imperdiet ante. Cum sociis natoque penatibus et magnis dis parturient montes,
+nascetur ridiculus mus. Duis gravida orci nec bibendum lobortis. Morbi leo
+magna, ultricies eu interdum id, volutpat ac justo. Quisque mattis, turpis eu
+interdum congue, augue odio ultricies ipsum, quis venenatis magna diam a nisl.
+Vivamus finibus, mi vitae rhoncus pretium, mauris turpis fermentum dolor, id
+volutpat nunc mauris sed urna.
+
+\paragraph{Fourth-order heading}
+
+Aliquam volutpat maximus orci nec dignissim. Sed varius, tellus non auctor
+convallis, lorem enim convallis dolor, at ultrices libero tortor rutrum arcu.
+Cras imperdiet sit amet nisl quis iaculis. Sed et tempus libero. Aenean a nisl
+metus. Etiam ut orci id libero pretium pretium. Nam mauris est, pretium lobortis
+leo ut, scelerisque posuere sapien. Vivamus posuere venenatis sem at
+pellentesque.
+
+\paragraph{Fourth-order heading}
+
+Aenean imperdiet vestibulum faucibus. Aliquam id nulla elementum ipsum
+scelerisque viverra. Pellentesque fringilla ultricies libero interdum dictum.
+Quisque id pellentesque nisl, posuere convallis urna. Aliquam urna neque,
+molestie efficitur congue nec, ornare vitae erat. Duis a sagittis ante. Aliquam
+lacinia placerat dapibus. In in finibus dolor. Morbi id aliquet ante, et mattis
+quam. Nunc rutrum viverra leo, et eleifend nulla interdum vitae. Donec nec
+finibus nibh. Integer interdum nibh enim, id porta libero vestibulum vel. Sed
+efficitur justo sed diam suscipit varius.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% REFERENCES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Bibliography support via biblatex
+\section{REFERENCES}% Create heading for references to include in ToC.
+\printbibliography[heading=none]% Print references without biblatex's heading.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDICES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\appendix
+\acresetall % Reset abbreviations for Appendices.
+\section{FIRST APPENDIX}
+\label{sec:firstapp}
+
+If each appendix contains similarly formatted text as the body of the document
+(i.e., first-order headings), then flysheets are not necessary. If first-order
+headings cannot be used (e.g., with computer data or forms), then a flysheet should
+be used.
+
+\begin{equation}\label{eq:appeq}
+  2 + 2 = 4
+\end{equation}
+
+\begin{figure}[htb]
+  \centering
+	\includegraphics[width=5.5in, height=2.5in]{example-image-a}
+  \caption{Figure caption.}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{SECOND APPENDIX}
+\label{sec:secondapp}
+If each appendix contains similarly formatted text as the body of the document
+(i.e., first-order headings), then flysheets are not necessary. If first-order
+headings cannot be used (e.g., with computer data or forms), then a flysheet should
+be used.
+
+\begin{table}[h]
+  \centering
+  \caption{A regular table in the appendix}
+  \label{tab:app-table}
+  \begin{tabular}{ccccc}
+  \toprule
+  Class & Precision & Recall & F1-Score & Support \\
+  \midrule
+  0 & 1.00 & 1.00 & 1.00 & 476075 \\ 
+  1 & 1.00 & 0.99 & 0.99 & 81294 \\ \midrule
+  Accuracy & - & - & 1.00 & 557369 \\ 
+  Macro Avg. & 1.00 & 0.99 & 1.00 & 557369 \\ 
+  Weighted Avg. & 1.00 & 1.00 & 1.00 & 557369 \\ \bottomrule
+  \end{tabular}
+  \end{table}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Back cover page
+\backmatter
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\end{document}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% end of ornltm/ornl-template-example.tex
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
