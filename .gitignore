@@ -51,3 +51,20 @@ tests/data/*.nxs.h5
 
 # Local-only kickoff brief
 kikoffprompt.md
+
+# LaTeX build intermediates (docs/). The built PDF is committed; these are not.
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.run.xml
+*.toc
+*.lof
+*.lot
+*.out
+*.acr
+*.acn
+*.synctex.gz
+
+# Screenshot SVGs are intermediates of `make figures`; LaTeX consumes the PDFs.
+docs/figures/*.svg
