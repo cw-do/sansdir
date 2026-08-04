@@ -256,6 +256,14 @@ On a host without `$DISPLAY` they fall back to PNGs under
 | `M` | Batch metadata extract: tag NeXus files → `M` opens the picker dialog    |
 | `K` | Create a detector mask from the cursor's NeXus file (raw or processed)  |
 
+Inside the `m` tree browser, `/` switches to **keyword search** — the same
+substring filter the `M` picker offers, so you don't have to expand your way
+down to `/entry/DASlogs/…`. Type a fragment (case-insensitive), then `↑`/`↓`
+to scan the hits without leaving the search box; the detail pane shows the
+highlighted key's dtype, shape, units and value preview. `Esc` returns to the
+tree, a second `Esc` (or `q`) closes the modal. Hits are capped at 500 — the
+hint line tells you when a query was truncated.
+
 The **Batch metadata extract** dialog has two modes:
 
 - **Per-file** *(default)* — one CSV per input with the *full* DASlogs
@@ -511,6 +519,8 @@ refresh).
   the per-detector mask flags drtsans's reduction pipeline reads.
   Falls back to a legacy pure-numpy writer (visualisation-only, no
   reduction effect) when Mantid is unavailable.
+- HDF5 tree browser (`m`) with lazy expansion and `/` keyword search
+  over the whole key list.
 - Batch metadata extract with tree-based key picker (in-place search);
   per-file *and* summary modes; output goes to the **inactive** pane's
   cwd by default to avoid raw-data write-permission errors.

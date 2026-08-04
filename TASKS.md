@@ -695,6 +695,30 @@ Driven by mc / Norton muscle memory.
 
 ---
 
+## `m` tree keyword search (follow-up)
+
+- [x] **`HdfTreeScreen` gained the `/` search the `M` picker already had.**
+      Same shape as `HdfKeyPickerScreen`: an `Input` above the tree, a
+      `DataTable` of hits that swaps in via a `-searching` class, and a
+      one-shot `walk_tree` cached on the screen and run through
+      `asyncio.to_thread` so the ~50 k-key walk of a raw NeXus file
+      never blocks the UI. Differences from the picker, all because
+      this screen is read-only: no `[*]` selection markers, the
+      highlighted row feeds the existing detail pane
+      (`on_data_table_row_highlighted`), and `↑`/`↓` are forwarded from
+      the input to the table cursor so users can scan hits without
+      tabbing away. `Esc` backs out of search before it closes the
+      modal. Hits capped at `MAX_SEARCH_RESULTS = 500`, with the
+      truncation stated in the hint line rather than silently dropped.
+- [x] **`reader.preview_value` no longer materialises whole datasets.**
+      The `size > 8` branch did `ds[()].ravel()[:5]`, pulling an entire
+      event-index array off NFS to show five values — tolerable when
+      only lazily-listed children hit it, but the new full-file walk
+      calls it for every dataset. Now slices first (`ds[:5]`, or the
+      first row for n-d). Same output, bounded I/O.
+
+---
+
 # Phase 9.5 — Zenodo DOI minting from tagged files
 
 ## Goal

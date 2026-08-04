@@ -157,7 +157,9 @@ def preview_value(ds: h5py.Dataset, *, max_chars: int = 80) -> str:
             return "(empty)"
         if ds.size <= 8:
             return _truncate(str(list(ds[()].ravel())), max_chars)
-        head = list(ds[()].ravel()[:5])
+        # Slice before materialising — ``ds[()]`` on an event-index array
+        # pulls tens of millions of values off NFS just to show five.
+        head = list(ds[:5].ravel() if ds.ndim == 1 else ds[0:1].ravel()[:5])
         return _truncate(f"{head}... shape={ds.shape}", max_chars)
     except (OSError, ValueError, TypeError) as exc:
         return f"<error reading: {type(exc).__name__}>"
