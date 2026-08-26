@@ -3,7 +3,7 @@
 Two lines above the ``:``-prompt, in the style of mc/Norton:
 
 * **Row 1** — F-keys + pane controls (Tab, ^U)
-* **Row 2** — selection / navigation / actions (Space, +, U, p, z, e, /, g, i, :, ?)
+* **Row 2** — selection / navigation / actions (Space, +, U, p/l, z, e, /, g, i, :, ?)
 
 Cell labels are derived from the keymap (``default_keymap()``) so a new
 binding shows up in the hint bar automatically — but the canonical
@@ -90,7 +90,10 @@ KEY_DISPLAY: dict[str, str] = {
     "space": "Spc",
     "+": "+",
     "u": "u",
-    "p": "p",
+    # ``p`` (smart plot) and ``l`` (linear-linear) share one cell: they are
+    # both "plot the selection", so a single ``p,l:Plot`` hint is clearer than
+    # two cells. The two keys stay distinct in the ``?`` overlay.
+    "p": "p,l",
     "m": "m",
     "z": "z",
     "e": "e",
