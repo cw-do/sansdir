@@ -12,7 +12,9 @@ which is the reference 2D plot for EQSANS users:
   a dedicated last column. Per-subplot colorbars available via
   ``colorbar_mode="independent"``.
 * **Filename overlay** in each tile (small white-on-black tag at the
-  top), and axis labels only on the bottom-left subplot.
+  top) when the names fit the tile width; otherwise each tile shows a
+  running index and a legend below the grid maps index → full name, so
+  names are never truncated. Axis labels only on the bottom-left subplot.
 * **Natural file ordering** by basename so ``run10`` comes after
   ``run2``, not before.
 """
@@ -139,6 +141,7 @@ def make_tile_figure(
 
     cm = _cmap_with_bad(cmap)
     mappable_for_cbar = None
+    tile_axes: list[tuple[object, Iq2D]] = []  # (ax, dataset) in draw order
 
     for i in range(nrows * ncols):
         ax = axes_flat[i]
@@ -173,19 +176,7 @@ def make_tile_figure(
         ax.xaxis.set_major_locator(MaxNLocator(3))
         ax.yaxis.set_major_locator(MaxNLocator(3))
         ax.tick_params(which="both", length=2, labelsize=7)
-        # Filename overlay in the panel — keeps the tiles compact.
-        ax.text(
-            0.5,
-            0.98,
-            ds.path.name,
-            ha="center",
-            va="top",
-            fontsize=7,
-            color="white",
-            weight="bold",
-            transform=ax.transAxes,
-            bbox={"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"},
-        )
+        tile_axes.append((ax, ds))
         if colorbar_mode == "independent":
             fig.colorbar(pcm, ax=ax)
         elif mappable_for_cbar is None:
@@ -214,6 +205,8 @@ def make_tile_figure(
         cb.set_label(r"$I(q_x, q_y)$")
     if title:
         fig.suptitle(title)
+
+    _label_tiles(fig, tile_axes)
     return fig
 
 
@@ -286,6 +279,188 @@ def _hide_ticks(ax) -> None:  # type: ignore[no-untyped-def]
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
+
+
+# Small enough that typical EQSANS filenames fit inside a tile (so they stay
+# in-panel rather than falling back to the numbered legend); the fit check
+# below measures at this same size, so lowering it widens what qualifies.
+TAG_FONTSIZE: int = 7
+TAG_BBOX: dict = {"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"}
+
+# Temporarily disabled while evaluating whether the smaller overlay font lets
+# long names fit in-tile. With this False, every tile shows its full filename
+# (un-clipped, so nothing is hidden) and the numbered legend is never used.
+# Flip back to True to restore the "index + name key" fallback for overflow.
+NUMBERED_FALLBACK: bool = False
+
+# When the longest filename exceeds this many characters, drop the suffix that
+# every name shares (e.g. ``_Iqxqy.dat``) from the in-tile labels and print it
+# once under the grid — the shared tail is redundant in every panel.
+SUFFIX_HOIST_OVER: int = 54
+
+
+def _label_tiles(fig, tile_axes: list) -> None:  # type: ignore[no-untyped-def]
+    """Overlay each tile with its filename, or number it and key the names below.
+
+    Filenames are drawn inside the tiles (compact, no wasted margin) when
+    they *fit* the tile width. When any name is wider than a tile, all
+    tiles switch to a running index (1, 2, 3, …) and a legend under the
+    grid maps each index to its full filename — so names are never cut.
+
+    Every overlay is excluded from the layout (``set_in_layout(False)``):
+    otherwise constrained_layout counts a long centred label when sizing
+    the square tiles and collapses them.
+    """
+    if not tile_axes:
+        return
+
+    # Positions and text metrics are only final after a draw.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    probe_ax = tile_axes[0][0]
+
+    def _text_width_px(s: str, size: int) -> float:
+        t = probe_ax.text(0, 0, s, fontsize=size, weight="bold")
+        w = float(t.get_window_extent(renderer).width)
+        t.remove()
+        return w
+
+    tile_w = min(float(ax.get_window_extent(renderer).width) for ax, _ in tile_axes)
+    names = [ds.path.name for _, ds in tile_axes]
+    # 0.92 leaves room for the label's background padding inside the tile.
+    names_fit = all(_text_width_px(nm, TAG_FONTSIZE) <= tile_w * 0.92 for nm in names)
+
+    if names_fit or not NUMBERED_FALLBACK:
+        # Long names carry a redundant shared tail (``_Iqxqy.dat`` and often
+        # more): drop it from every tile and note it once under the grid.
+        labels = list(names)
+        hoisted = ""
+        if max((len(nm) for nm in names), default=0) > SUFFIX_HOIST_OVER:
+            hoisted = _clean_common_suffix(names)
+            if hoisted:
+                labels = [nm[: -len(hoisted)] for nm in names]
+
+        # When names genuinely fit, clip is a harmless safety net. When we are
+        # forcing names in (fallback disabled), leave clipping off so an
+        # overflowing name stays fully visible for inspection.
+        for (ax, _ds), label in zip(tile_axes, labels, strict=True):
+            tag = ax.text(
+                0.5,
+                0.98,
+                label,
+                ha="center",
+                va="top",
+                fontsize=TAG_FONTSIZE,
+                color="white",
+                weight="bold",
+                transform=ax.transAxes,
+                clip_on=names_fit,
+                bbox=TAG_BBOX,
+            )
+            tag.set_in_layout(False)
+        if hoisted:
+            _add_suffix_footer(fig, hoisted)
+        return
+
+    # Numbered mode: index in each tile, full names in a legend below.
+    for idx, (ax, _) in enumerate(tile_axes, start=1):
+        tag = ax.text(
+            0.5,
+            0.98,
+            str(idx),
+            ha="center",
+            va="top",
+            fontsize=TAG_FONTSIZE + 2,
+            color="white",
+            weight="bold",
+            transform=ax.transAxes,
+            clip_on=True,
+            bbox=TAG_BBOX,
+        )
+        tag.set_in_layout(False)
+
+    _add_name_key(fig, [ds.path.name for _, ds in tile_axes], renderer)
+
+
+def _clean_common_suffix(names: list[str]) -> str:
+    """Longest tail shared by every name, trimmed to a separator boundary.
+
+    The raw common suffix can start mid-token (``run000``/``run001`` share
+    ``0_Iqxqy.dat``); we advance to the first ``_``, ``-``, or ``.`` so only
+    whole trailing tokens are hoisted — ``_Iqxqy.dat``, not ``0_Iqxqy.dat``.
+    Returns ``""`` when the shared tail has no separator worth hoisting.
+    """
+    if len(names) < 2:
+        return ""
+    suffix = names[0]
+    for name in names[1:]:
+        k = 0
+        limit = min(len(suffix), len(name))
+        while k < limit and suffix[-1 - k] == name[-1 - k]:
+            k += 1
+        suffix = suffix[len(suffix) - k :]
+        if not suffix:
+            return ""
+    for i, ch in enumerate(suffix):
+        if ch in "._-":
+            clean = suffix[i:]
+            return clean if len(clean) >= 4 else ""
+    return ""
+
+
+def _add_suffix_footer(fig, suffix: str) -> None:  # type: ignore[no-untyped-def]
+    """Note the hoisted shared suffix once, centred under the grid.
+
+    Uses ``loc="outside lower center"`` so constrained_layout reserves the
+    strip below the tiles rather than letting the note overlap them.
+    """
+    from matplotlib.lines import Line2D
+
+    handle = Line2D([], [], linestyle="none", marker="none")
+    fig.legend(
+        [handle],
+        [f"shared suffix:  {suffix}"],
+        loc="outside lower center",
+        fontsize=TAG_FONTSIZE,
+        frameon=False,
+        handlelength=0,
+        handletextpad=0,
+    )
+
+
+def _add_name_key(fig, names: list[str], renderer) -> None:  # type: ignore[no-untyped-def]
+    """Figure legend mapping ``index: filename`` for numbered-tile mode.
+
+    Placed with ``loc="outside lower center"`` so constrained_layout
+    reserves space for it below the grid rather than overlapping tiles.
+    Handles are zero-width (``handlelength=0``) so the entries are just
+    the numbered filenames, no colour swatch.
+    """
+    from matplotlib.lines import Line2D
+
+    labels = [f"{i}: {name}" for i, name in enumerate(names, start=1)]
+    handles = [Line2D([], [], linestyle="none", marker="none") for _ in labels]
+
+    # Choose column count so the widest entry fits the figure width.
+    probe = fig.text(0, 0, max(labels, key=len), fontsize=TAG_FONTSIZE)
+    label_w = float(probe.get_window_extent(renderer).width)
+    probe.remove()
+    fig_w = float(fig.bbox.width)
+    ncol = max(1, min(len(labels), int(fig_w / (label_w * 1.15)))) if label_w else 1
+
+    fig.legend(
+        handles,
+        labels,
+        loc="outside lower center",
+        ncol=ncol,
+        fontsize=TAG_FONTSIZE,
+        frameon=False,
+        handlelength=0,
+        handletextpad=0,
+        columnspacing=1.5,
+        labelspacing=0.3,
+    )
 
 
 def _natural_key(path: Path) -> list:  # type: ignore[type-arg]

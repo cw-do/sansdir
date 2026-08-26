@@ -230,6 +230,132 @@ def test_tile_rejects_empty_paths() -> None:
         tile.make_tile_figure([])
 
 
+def _min_tile_size(fig) -> tuple[float, float]:  # type: ignore[no-untyped-def]
+    """Smallest square-tile width/height as a fraction of the figure."""
+    fig.canvas.draw()
+    squares = [ax for ax in fig.axes if ax.get_box_aspect() == 1]
+    w = min(ax.get_position().width for ax in squares)
+    h = min(ax.get_position().height for ax in squares)
+    return w, h
+
+
+def _tile_overlay_texts(fig) -> list[str]:  # type: ignore[no-untyped-def]
+    """Text drawn inside the square data tiles (filenames or indices)."""
+    return [t.get_text() for ax in fig.axes if ax.get_box_aspect() == 1 for t in ax.texts]
+
+
+def test_short_names_are_shown_in_tiles_without_a_legend(tmp_path: Path) -> None:
+    """Names that fit the tile are drawn inside it; no name-key legend."""
+    import matplotlib.pyplot as plt
+
+    files = []
+    for i in range(6):
+        f = tmp_path / f"run{i}_Iqxqy.dat"
+        _write_iqxqy(f)
+        files.append(f)
+    fig = tile.make_tile_figure(files)
+    overlays = _tile_overlay_texts(fig)
+    assert "run0_Iqxqy.dat" in overlays  # full filename, in-tile
+    assert fig.legends == []  # no legend needed
+    plt.close(fig)
+
+
+def test_clean_common_suffix_trims_to_separator() -> None:
+    """The hoisted suffix is a whole-token tail, never a mid-token cut."""
+    names = [f"EQSANS_scan_run{i:03d}_Iqxqy.dat" for i in range(6)]
+    assert tile._clean_common_suffix(names) == "_Iqxqy.dat"
+    # No separator in the shared tail → nothing worth hoisting.
+    assert tile._clean_common_suffix(["aabc", "zzbc"]) == ""
+    # Single file has no "shared" suffix.
+    assert tile._clean_common_suffix(["only_Iqxqy.dat"]) == ""
+
+
+def test_long_names_hoist_shared_suffix_to_footer(tmp_path: Path) -> None:
+    """Names past the length cap drop their shared suffix; it moves to a footer."""
+    import matplotlib.pyplot as plt
+
+    files = []
+    for i in range(6):
+        # >60 chars so the suffix hoist triggers.
+        name = f"EQSANS_2024B_experiment_porasil_temperature_scan_run{i:03d}_Iqxqy.dat"
+        assert len(name) > tile.SUFFIX_HOIST_OVER
+        f = tmp_path / name
+        _write_iqxqy(f)
+        files.append(f)
+
+    fig = tile.make_tile_figure(files)
+    overlays = _tile_overlay_texts(fig)
+    # In-tile labels have the shared tail stripped ...
+    assert all(t.endswith("run000") or "_run" in t for t in overlays[:1])
+    assert not any(t.endswith("_Iqxqy.dat") for t in overlays)
+    # ... and it appears once in a footer note.
+    assert len(fig.legends) == 1
+    footer = [t.get_text() for t in fig.legends[0].get_texts()]
+    assert footer == ["shared suffix:  _Iqxqy.dat"]
+    plt.close(fig)
+
+
+@pytest.mark.skipif(
+    not tile.NUMBERED_FALLBACK,
+    reason="numbered-tile fallback is temporarily disabled (NUMBERED_FALLBACK=False)",
+)
+def test_long_names_switch_to_numbered_tiles_with_a_name_key(tmp_path: Path) -> None:
+    """When names overflow the tile, tiles are numbered and a legend maps them.
+
+    The full filenames must appear verbatim in the legend — never
+    truncated — and the in-tile overlays become the running indices.
+    """
+    import matplotlib.pyplot as plt
+
+    files = []
+    long_names = []
+    for i in range(6):
+        name = f"EQSANS_2024B_experiment_porasil_temperature_scan_run{i:03d}_Iqxqy.dat"
+        f = tmp_path / name
+        _write_iqxqy(f)
+        files.append(f)
+        long_names.append(name)
+
+    fig = tile.make_tile_figure(files)
+    overlays = _tile_overlay_texts(fig)
+    assert overlays == ["1", "2", "3", "4", "5", "6"]
+
+    assert len(fig.legends) == 1
+    legend_texts = [t.get_text() for t in fig.legends[0].get_texts()]
+    for idx, name in enumerate(long_names, start=1):
+        assert f"{idx}: {name}" in legend_texts  # full name, not truncated
+    plt.close(fig)
+
+
+def test_tile_size_is_independent_of_filename_length(tmp_path: Path) -> None:
+    """A long filename must not shrink the tiles (regression).
+
+    Panel labels are excluded from constrained_layout; otherwise a long
+    centred name overflows the square tile and the layout engine
+    collapses every panel. Tiles must come out the same size whether
+    names are short (shown in-tile) or long (numbered + legend).
+    """
+    import matplotlib.pyplot as plt
+
+    short, long = [], []
+    for i in range(6):
+        s = tmp_path / f"r{i}.dat"
+        _write_iqxqy(s)
+        short.append(s)
+        long_f = tmp_path / f"EQSANS_2024B_experiment_porasil_scan_run{i:03d}_Iqxqy.dat"
+        _write_iqxqy(long_f)
+        long.append(long_f)
+
+    fig_s = tile.make_tile_figure(short)
+    fig_l = tile.make_tile_figure(long)
+    sw, sh = _min_tile_size(fig_s)
+    lw, lh = _min_tile_size(fig_l)
+    plt.close(fig_s)
+    plt.close(fig_l)
+    assert lw == pytest.approx(sw, rel=0.02)
+    assert lh == pytest.approx(sh, rel=0.02)
+
+
 # ---------------------------------------------------------------------------
 # Detector kind (Phase 5 detect.py — the iqxqy branch)
 # ---------------------------------------------------------------------------
