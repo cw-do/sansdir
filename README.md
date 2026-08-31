@@ -130,6 +130,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `/`            | Filter active pane (or catalog) by substring; `Esc` clears         |
 | `g` / `G`      | `:cd <path>` prompt / fullscreen folder-tree picker                |
 | `:`            | Command line — every action is also a `:command` (see `?`)         |
+| `:instrument`  | Switch SANS ⇄ USANS mode (`:instrument usans`); see below           |
 | `?`            | Help overlay (auto-generated from the registry)                    |
 | `q`            | Quit                                                               |
 
@@ -243,18 +244,61 @@ to keep typing.
 
 ---
 
+### Instrument mode — switching between SANS and USANS
+
+sansdir runs in one of two **instrument modes**, and one TUI serves both.
+Switch from the `:` command line — there is no dedicated key:
+
+```
+:instrument usans      switch to USANS mode
+:instrument eqsans     switch back to SANS mode
+:instrument            report the current one, change nothing
+```
+
+`biosans` and `gpsans` work too. An unrecognised name is accepted but
+treated as SANS, with a warning — a new beamline needs no code change.
+
+**Most of the time you won't need this.** The mode auto-detects from the
+launch path: anything containing `usans` (so `/SNS/USANS/IPTS-…`, and your
+own `usans-work` scratch folders) starts in USANS mode, everything else in
+SANS. Use `:instrument` for the cases detection can't cover — a USANS IPTS
+you're browsing from `/home`, or wanting SANS behaviour while sitting under
+`/SNS/USANS`.
+
+**How to tell which mode you're in**, at a glance, without asking:
+
+- the **title-bar chip** — `▣ SansDIR v0.10 · USANS` in green;
+- the **hint bar**'s second row ends with `r:Reduce` only in USANS mode.
+
+Switching takes effect immediately: the keymap rebuilds (`r` appears or
+disappears), the hint bar repaints, and a loaded run catalog re-renders
+with the right columns. What the mode changes:
+
+| | SANS | USANS |
+|---|---|---|
+| `i` / catalog instrument | `[oncat].default_instrument` | `USANS` |
+| Catalog columns | Run# · Title · Dist · λ · Count · Time | Run# · Title · Count · Time |
+| `Enter` in the catalog | plot the raw NeXus run | build the setup CSV |
+| Extra keys | — | `r` |
+
+**SANS behaviour and keys are completely unchanged by this.** The USANS
+commands stay registered in *both* modes, so `:usans-reduce` still works if
+you forgot to switch — only the `r` key is mode-scoped.
+
+To pin the mode regardless of where you launch:
+
+```toml
+[instrument]
+default     = "USANS"
+auto_detect = false      # stop the launch path from overriding `default`
+```
+
+---
+
 ### USANS reduction
 
-sansdir runs in one of two **instrument modes**. SANS is the default;
-launching under `/SNS/USANS/...` (or any path containing `usans`)
-switches to USANS automatically, and `:instrument usans` /
-`:instrument eqsans` flips it at runtime. The mode shows as a chip in the
-title bar and decides what `i` searches, which columns the run catalog
-shows, and whether the USANS key is live. **SANS behaviour and keys are
-completely unchanged by this.**
-
-USANS adds exactly two operations. Everything else — browsing, `F4`
-editing, `p` plotting, `/` filtering — is the sansdir you already know.
+Everything below assumes USANS mode (above). Browsing, `F4` editing, `p`
+plotting and `/` filtering are the sansdir you already know.
 
 USANS adds **one key**: `r`. It reduces the setup table under the cursor —
 and when there isn't one, it offers to build it from the IPTS in the

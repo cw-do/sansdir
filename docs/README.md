@@ -19,7 +19,8 @@ ORNL Technical Memorandum describing sansdir, built on the ORNL report template
 ## Building
 
 `sansdir-report.pdf` (49 pp.) is checked in, so you only need to build after
-editing.
+editing. It currently lags `sansdir-report.tex`, which gained the USANS
+reduction section in v0.10 — see the regression note below.
 
 On Overleaf or any `texlive-full` host:
 
@@ -54,6 +55,15 @@ One caveat, documented in the script: do **not** add `l3kernel`, `l3packages`,
 or `l3backend` to it. Current versions need a newer LaTeX format than the 2020
 one installed here and abort with "Mismatched LaTeX support files detected."
 The system's own `expl3` works with the `acro` release the script fetches.
+
+**Known regression (2026-08).** The script pulls from the *current* tlnet
+archive, so it now fetches a `tocloft` that requires LaTeX 2023-11-01. On this
+host's 2020 format it throws `Undefined control sequence`
+(`\IfDocumentMetadataTF`, `\DeclareInstance`) and mangles the table of
+contents — `make` still emits a PDF, but a shorter, wrong one. Until the script
+pins versions, **build the report on Overleaf or a `texlive-full` host** and
+treat a PDF produced here as untrustworthy. The `.tex` remains the source of
+truth; the checked-in PDF is only refreshed from a good toolchain.
 
 ## Figures
 
