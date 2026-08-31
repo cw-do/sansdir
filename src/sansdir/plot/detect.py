@@ -31,6 +31,12 @@ VALID_KINDS: frozenset[str] = frozenset(
 )
 
 _TRANS_NAME_RE = re.compile(r"trans", re.IGNORECASE)
+# ``reduceUSANS`` output: UN_<name>_det_1.txt, _det_1_lb.txt,
+# _det_1_unscaled.txt, _det_1_background_subtracted.txt — all comma-separated
+# ``q,I,E`` 1D curves. Matched by name because the sample name is arbitrary
+# and could contain "trans", which would otherwise mis-route the file to the
+# transmission plotter.
+_USANS_REDUCED_RE = re.compile(r"^UN_.+_det_\d+.*\.txt$", re.IGNORECASE)
 _TRANS_HEADER_RE = re.compile(r"\b(lambda|wavelength|T\s*\(|transmission)\b", re.IGNORECASE)
 _IQXQY_HEADER_RE = re.compile(r"\b(iqxqy|qx\s*qy|qx,\s*qy|2d)\b", re.IGNORECASE)
 
@@ -64,6 +70,10 @@ def detect_kind(path: Path) -> Detected:
     header = _read_header(path)
     cols = _peek_columns(path)
 
+    # USANS reduced curves are unambiguous from their filename — decide
+    # before the transmission / column-count heuristics get a say.
+    if _USANS_REDUCED_RE.match(path.name):
+        return Detected(kind=KIND_IQ, columns=cols)
     if name_says_trans or _TRANS_HEADER_RE.search(header):
         return Detected(kind=KIND_TRANSMISSION, columns=cols)
     if cols == 0:

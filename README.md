@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.9** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.10** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -118,7 +118,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | Key            | What it does                                                      |
 |----------------|-------------------------------------------------------------------|
 | `Tab`          | Switch active pane (left ↔ right)                                  |
-| `Enter`        | Smart open: cd into folder · view image · *(catalog)* plot run     |
+| `Enter`        | Smart open: cd into folder · view image · preview any text file in the other pane · *(catalog)* plot run |
 | `↑ ↓ j k`      | Move cursor in the active pane                                     |
 | `Backspace`    | Up one directory                                                   |
 | `Space`        | Tag/untag the cursor row                                           |
@@ -138,9 +138,9 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | Key       | Op                                                          |
 |-----------|-------------------------------------------------------------|
 | `F2`      | **Rename** the file under the cursor (in-place dialog)       |
-| `F3`      | View file in the *other* pane (Tab into it; `Esc` / `F3` close) |
+| `F3`      | View file in the *other* pane (Tab into it; `Esc` / `F3` close). `Enter` does the same for text files, but only ever opens |
 | `F4`      | Edit in `$EDITOR`                                            |
-| `F5`      | **Refresh** both panes (re-read directory listings)          |
+| `F5`      | **Refresh** both panes — also repairs stale panes (see below) |
 | `F6`      | Copy tagged → other pane (with confirm)                      |
 | `F7`      | Move tagged → other pane                                     |
 | `F8` / `Del` | Delete tagged (confirm; `send2trash` with cluster fallback)|
@@ -148,6 +148,14 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `c`       | Toggle catalog / list (other pane) — Phase 4                 |
 | `z`       | Zip tagged → prompt for archive name                         |
 | `e`       | Email tagged (`mail` / `mutt` shell-out)                     |
+
+**Deleted out from under you.** If a pane is sitting *inside* a directory
+that gets deleted — from the other pane, a `:!rm`, or another user on a
+shared filesystem — it re-anchors to the nearest surviving ancestor and
+says so, rather than showing zero rows at a dead path (which is
+indistinguishable from an empty directory). An inline viewer whose file is
+deleted closes instead of continuing to render content that no longer
+exists. Both happen automatically on delete/move and on `F5`.
 
 `F5` reloads both panes; useful when an external process (a separate
 shell, an NFS catch-up) drops files into a pane's cwd. The in-process
@@ -216,7 +224,8 @@ in the file, `Ctrl+S` returns to the form.
 |     | into `<IPTS>/shared/` and loads the run catalog on the **right** pane.      |
 | `c` | Show / hide the right-pane catalog                                            |
 | `Space` *(in catalog)* | Tag a run                                            |
-| `Enter` / `p` *(in catalog)* | Plot the cursor's raw NeXus run                  |
+| `p` *(in catalog)* | Plot the cursor's raw NeXus run                            |
+| `Enter` *(in catalog)* | Plot the raw run — or, in USANS mode, build the setup CSV |
 | `m` *(in catalog)* | HDF5 tree of the cursor's run                              |
 | `M` *(in catalog)* | Batch extract (tagged runs, or just the cursor row)       |
 | `K` *(in catalog)* | Mask editor on the cursor row's raw NeXus                  |
@@ -233,6 +242,109 @@ hint at the bottom (`+N more — narrow your filter`) tells you when
 to keep typing.
 
 ---
+
+### USANS reduction
+
+sansdir runs in one of two **instrument modes**. SANS is the default;
+launching under `/SNS/USANS/...` (or any path containing `usans`)
+switches to USANS automatically, and `:instrument usans` /
+`:instrument eqsans` flips it at runtime. The mode shows as a chip in the
+title bar and decides what `i` searches, which columns the run catalog
+shows, and whether the USANS key is live. **SANS behaviour and keys are
+completely unchanged by this.**
+
+USANS adds exactly two operations. Everything else — browsing, `F4`
+editing, `p` plotting, `/` filtering — is the sansdir you already know.
+
+USANS adds **one key**: `r`. It reduces the setup table under the cursor —
+and when there isn't one, it offers to build it from the IPTS in the
+current path. So the whole workflow from an empty folder is `r`, `F4`, `r`:
+
+```
+cd /SNS/USANS/IPTS-37679/shared
+
+r    → "No setup table selected. Build a preliminary reduction table
+        for IPTS-37679?"        → fetches the run list, shows the catalog
+                                  on the right pane, writes the CSV + NOTE,
+                                  and opens the CSV for review
+F4   → correct anything the NOTE flagged
+r    → reduce (prompts for the output directory)
+p    → plot UN_*_det_1_lb.txt / _background_subtracted.txt
+```
+
+| Key | What it does                                                                |
+|-----|-----------------------------------------------------------------------------|
+| `r`  | **Reduce** the setup CSV under the cursor — or offer to build one          |
+| `F4` | Review / correct the CSV in `$EDITOR`                                      |
+| `p`  | Plot the reduced `UN_*_det_1_lb.txt` / `_background_subtracted.txt` curves |
+| `i` | Browse USANS experiments — only needed for an IPTS you're *not* sitting in  |
+| `Enter` *(in catalog)* | Build the setup CSV from the loaded catalog             |
+
+The IPTS is read from the pane's path first, then a loaded catalog, then a
+prompt — so `i` is optional, not a prerequisite. Command-line equivalents:
+`:usans-init [start_run]`, `:usans-reduce [path]`.
+
+`r` deliberately **stops after generating**: it never reduces a table you
+haven't seen. A table that exists but fails validation (two `b` rows, say)
+is reported for you to fix with `F4` — it is never silently regenerated
+over your edits.
+
+**The generated CSV is preliminary by design.** Generating groups the OnCat
+run list into same-title blocks, auto-detects the empty-cell background,
+and — critically — sets `num_of_scans` from the ARN-scan files actually on
+disk rather than the OnCat title count. A titled block of *N* runs is
+really *(N−1)* ARN rocking scans **plus one transmission run**; feeding the
+engine the full *N* makes it die on the transmission run's missing ASCII.
+*N* varies between experiments (5→4, 6→5, …), so it is derived, never
+assumed. Anything the generator had to guess — restarts, odd block sizes,
+blocks with no ARN files, dropped transmission runs — is written to
+`<IPTS>_NOTE.md` for you to check before pressing `r`.
+
+Every generated `NOTE.md` ends with a legend for the reduced-output
+filenames, because they are the engine's and are easy to misread — most of
+all `_lb.txt`, which is log-binned but is the subtraction's *input*:
+
+| file | scaled | log-binned | background subtracted |
+|---|---|---|---|
+| `UN_<name>_det_1_unscaled.txt` | no | no | no |
+| `UN_<name>_det_1.txt` | yes | no | no |
+| `UN_<name>_det_1_lb.txt` | yes | yes | **no** |
+| `UN_<name>_det_1_background_subtracted.txt` | yes | yes | **yes** ← plot this |
+
+The last one is the final curve; the older loose `usans-reduction` script
+called it `_lbs.txt`, and `usansred` renamed it. The background sample gets
+no `_background_subtracted.txt` — nothing is subtracted from itself.
+
+Reduction itself is **not** implemented in sansdir: `r` shells out to the
+instrument team's installed `reduceUSANS` (`neutrons/usansred`) with `-l`
+(log-binning) on by default. Two deployment details are handled for you:
+
+- The pixi console script otherwise inherits your `~/.local`
+  site-packages and can crash on a stale `pandas`/`pytz`, so sansdir
+  always invokes it with `PYTHONNOUSERSITE=1` and an empty `PYTHONPATH`.
+- The engine reads its per-run ASCII from *the directory holding the setup
+  CSV*. Rather than writing your CSV into the instrument's `autoreduce`
+  folder, sansdir stages a throwaway directory of symlinks and runs there.
+  **Nothing under `/SNS` is ever written to.**
+
+```bash
+# Headless equivalents of the two TUI operations.
+sansdir usans init 37679 --start-run 49434     # → IPTS-37679_setup.csv + _NOTE.md
+$EDITOR IPTS-37679_setup.csv                   # review; this is the point
+sansdir usans reduce IPTS-37679_setup.csv -o ./output
+```
+
+The setup CSV is the format `reduceUSANS` documents, so it stays readable
+and hand-editable:
+
+```
+# USANS reduction table for IPTS-37679
+# columns: flag,name,start_scan,num_of_scans,thickness_cm[,exclude]
+#   flag: b=background(empty)  s=sample
+b,emptyBanjo-restart,49434,4,0.1
+s,S0-20C,49439,4,0.1
+s,S0-40C,49444,4,0.1,49446
+```
 
 ### Mask creation
 
@@ -331,6 +443,10 @@ anywhere in the package.
 ## CLI examples
 
 ```bash
+# USANS: build a preliminary reduction table, then reduce it.
+sansdir usans init 37679 --start-run 49434
+sansdir usans reduce IPTS-37679_setup.csv -o ./output
+
 # Beam-stop circle + corner masks. Mantid-loadable .nxs MaskWorkspace.
 sansdir mask EQSANS_172749.nxs.h5 \
   --circle 96,128,12 \
@@ -395,12 +511,61 @@ f5 = "ui.move_tagged"             # are silently dropped at startup
 default_instrument = "EQSANS"
 cache_ttl_seconds  = 86400
 
+[instrument]
+default     = "EQSANS"   # "" → fall back to [oncat].default_instrument
+auto_detect = true       # a /SNS/USANS/... launch path overrides `default`
+
+[usans]
+pixi_manifest     = "/usr/local/pixi/usansred"   # where reduceUSANS lives
+reduce_command    = ""                            # explicit argv override
+data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
+logbin            = true                          # pass -l by default
+thickness_cm      = 0.1                           # default in new setup CSVs
+
 [mail]
 command = "mail"        # or "mutt"
 default_subject = "[sansdir] data"
 ```
 
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
+
+---
+
+## What's in v0.10
+
+The v0.9 → v0.10 jump adds **USANS reduction** (Phase 9.8) and a
+workflow-polish pass driven by using it on real IPTS-37679 data
+(Phase 9.9).
+
+- **Instrument mode** — one TUI for both families. SANS is the
+  default; a `/SNS/USANS/...` launch path auto-switches, and
+  `:instrument usans` / `:instrument eqsans` flips at runtime. The
+  mode shows as a chip in the title bar and decides the OnCat
+  instrument, the catalog's columns, and whether `r` is live.
+  **No SANS key or behaviour changed.**
+- **USANS reduction in two steps, on one key.** `r` reduces the setup
+  table under the cursor — and when there isn't one, offers to build
+  it from the IPTS in the current path (fetching the run list and
+  showing the catalog on the right pane). So the whole flow from an
+  empty folder is `r`, `F4`, `r`.
+- **`num_of_scans` derived from disk, not guessed.** A titled block of
+  *N* runs is *(N−1)* ARN scans plus one transmission run, and *N*
+  varies per experiment. Feeding the engine the OnCat title count is
+  what makes `reduceUSANS` die with `FileNotFoundError`.
+- **The setup CSV is a first draft.** Restarts, odd block sizes and
+  the background pick are all flagged in a companion `NOTE.md`, which
+  also carries a legend for the reduced-output postfixes (`_lb.txt`
+  is log-binned but *not* subtracted; the final curve is
+  `_background_subtracted.txt`, once called `_lbs.txt`).
+- **Reduction is delegated**, never reimplemented: sansdir shells out
+  to the instrument team's `reduceUSANS` in a clean environment, via
+  a staging directory of symlinks. **Nothing under `/SNS` is written.**
+- `sansdir usans init` / `sansdir usans reduce` for headless use.
+- Polish that applies to SANS too: `Enter` previews any text file in
+  the other pane; the inline viewer frees its buffer when closed; a
+  pane whose directory is deleted re-anchors to the nearest surviving
+  ancestor instead of showing a dead path; a viewer whose file is
+  deleted closes instead of rendering a ghost.
 
 ---
 

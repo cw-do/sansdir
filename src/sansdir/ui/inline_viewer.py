@@ -17,6 +17,8 @@ from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
+from sansdir.core.filesystem import is_text_file
+
 MAX_BYTES: int = 1_000_000
 
 
@@ -67,7 +69,7 @@ class InlineFileViewer(VerticalScroll):
         except OSError as exc:
             self._body.update(f"<error: {exc}>")
             return False
-        if b"\x00" in data[:8192]:
+        if not is_text_file(path):
             self._body.update("<binary file — refusing to render>")
             return False
         try:
@@ -83,6 +85,17 @@ class InlineFileViewer(VerticalScroll):
     @property
     def path(self) -> Path | None:
         return self._path
+
+    def clear(self) -> None:
+        """Drop the rendered text so a closed viewer holds no file in memory.
+
+        :meth:`set_path` always re-reads from disk, so nothing here is
+        ever reused — without this, up to ``MAX_BYTES`` of the last file
+        viewed in each slot stayed resident for the life of the process.
+        """
+        self._path = None
+        self._header.update("")
+        self._body.update("")
 
     def action_close(self) -> None:
         # The App owns the panel/viewer swap; tell it to do the swap.

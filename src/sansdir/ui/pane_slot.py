@@ -101,6 +101,27 @@ class PaneSlot(Container):
         self._viewer.display = False
         self._catalog.display = False
         self._mode = "list"
+        # Hiding the viewer is not enough — its Static still holds the
+        # decoded file. Free it; re-showing always re-reads from disk.
+        # (The catalog is deliberately *not* cleared: `c` re-opens it
+        # without another OnCat round trip, which is the whole point.)
+        self._viewer.clear()
+
+    def revalidate(self) -> bool:
+        """Drop the inline viewer if the file it shows has disappeared.
+
+        A viewer holds a snapshot taken at open time, so after the file is
+        deleted (from the other pane, a ``:!rm``, or another user) it keeps
+        rendering content that no longer exists — a ghost you can scroll
+        and, worse, hit ``F4`` on. Returns True when the viewer was closed.
+        """
+        if self._mode != "viewer":
+            return False
+        path = self._viewer.path
+        if path is not None and path.exists():
+            return False
+        self.show_panel()
+        return True
 
     def show_viewer(self, path: Path) -> bool:
         ok = self._viewer.set_path(path)

@@ -37,7 +37,9 @@ class CatalogTable(DataTable):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("p", "plot_current", "Plot raw NeXus", show=False),
-        Binding("enter", "plot_current", "Plot raw NeXus", show=False),
+        # Enter is mode-dependent: plot the raw run on SANS, build the
+        # USANS setup table on USANS. See ``RunCatalogPanel.action_activate_row``.
+        Binding("enter", "activate_row", "Activate row", show=False),
         Binding("m", "show_keys_current", "HDF5 metadata tree", show=False),
         Binding("M", "batch_extract_selection", "Batch extract metadata", show=False),
         Binding("K", "mask_current", "Mask editor", show=False),
@@ -54,6 +56,9 @@ class CatalogTable(DataTable):
 
     def action_plot_current(self) -> None:
         self._delegate("action_plot_current")
+
+    def action_activate_row(self) -> None:
+        self._delegate("action_activate_row")
 
     def action_show_keys_current(self) -> None:
         self._delegate("action_show_keys_current")
@@ -97,6 +102,34 @@ def _format_counts(n: int) -> str:
     if n < 1_000_000_000:
         return f"{n / 1_000_000:.1f}M"
     return f"{n / 1_000_000_000:.1f}B"
+
+
+# Column headers per instrument mode. USANS has no moveable detector and a
+# fixed incident wavelength, so Dist / λ would be two columns of constants —
+# dropping them leaves more room for the titles the grouping keys off.
+COLUMNS_SANS: tuple[str, ...] = ("Run #", "Title", "Dist (m)", "λ (Å)", "Count", "Time(s)")
+COLUMNS_USANS: tuple[str, ...] = ("Run #", "Title", "Count", "Time(s)")
+
+# Columns rendered right-justified (everything except the title).
+_RIGHT_ALIGNED: frozenset[str] = frozenset(COLUMNS_SANS) - {"Title"}
+
+
+# Footer hints. USANS swaps the Enter/plot wording for the reduction flow.
+_HINT_SANS: str = (
+    "[dim]Space tag · u clear tags · p plot · m keys · M extract · "
+    "K mask · / filter · c list · Esc close[/dim]"
+)
+_HINT_USANS: str = (
+    "[dim]Enter build setup CSV · Space tag · p plot raw · m keys · "
+    "/ filter · c list · Esc close[/dim]"
+)
+
+
+def columns_for(instrument: str) -> tuple[str, ...]:
+    """Header labels for ``instrument``'s catalog table."""
+    from sansdir.core.instrument import MODE_USANS, mode_for_instrument
+
+    return COLUMNS_USANS if mode_for_instrument(instrument) == MODE_USANS else COLUMNS_SANS
 
 
 class RunCatalogPanel(Vertical):
@@ -146,11 +179,7 @@ class RunCatalogPanel(Vertical):
             zebra_stripes=False,
             show_header=True,
         )
-        self._hint = Static(
-            "[dim]Space tag · u clear tags · p plot · m keys · M extract · "
-            "K mask · / filter · F2 list · Esc close[/dim]",
-            classes="hint",
-        )
+        self._hint = Static(_HINT_SANS, classes="hint")
         self._ipts: str = ""
         # Two lists so filtering doesn't mutate the underlying catalog —
         # ``_all_files`` is the authoritative OnCat result, ``_files`` is
@@ -163,6 +192,8 @@ class RunCatalogPanel(Vertical):
         self._tagged_runs: set[int] = set()
         self._instrument: str = "EQSANS"
         self._facility: str = "SNS"
+        # Header labels currently installed on the table; empty until mount.
+        self._columns: tuple[str, ...] = ()
         # The container itself isn't focusable — focus belongs to the
         # CatalogTable inside, which handles cursor nav and key bindings.
         self.can_focus = False
@@ -174,16 +205,22 @@ class RunCatalogPanel(Vertical):
         yield self._hint
 
     def on_mount(self) -> None:
-        # Right-justify numeric column headers so they line up over their
-        # right-justified data cells.
-        self._table.add_columns(
-            _r("Run #"),
-            "Title",
-            _r("Dist (m)"),
-            _r("λ (Å)"),
-            _r("Count"),
-            _r("Time(s)"),
-        )
+        self._sync_columns()
+
+    def _sync_columns(self) -> None:
+        """(Re)build the header row for the current instrument.
+
+        Called on mount and again whenever the instrument changes, since
+        USANS shows four columns where SANS shows six. Right-justify the
+        numeric headers so they line up over their right-justified cells.
+        """
+        wanted = columns_for(self._instrument)
+        if wanted == self._columns:
+            return
+        if self._columns:
+            self._table.clear(columns=True)
+        self._table.add_columns(*(_r(c) if c in _RIGHT_ALIGNED else c for c in wanted))
+        self._columns = wanted
 
     # ------------------------------------------------------------------
     # Public API
@@ -202,7 +239,7 @@ class RunCatalogPanel(Vertical):
         self._all_files = list(files)
         self._instrument = instrument
         self._facility = facility
-        self._header.update(f"OnCat catalog · {ipts}")
+        self._header.update(f"OnCat catalog · {instrument} · {ipts}")
         # Loading a fresh catalog drops any leftover filter and tags —
         # otherwise stale state from the previous IPTS would silently
         # hide rows or carry over selections that no longer match.
@@ -239,21 +276,38 @@ class RunCatalogPanel(Vertical):
         if self._tagged_runs:
             bits.append(f"tagged: [b yellow]{len(self._tagged_runs)}[/]")
         self._meta.update("  ·  ".join(bits))
+        self._sync_columns()
+        self._hint.update(_HINT_USANS if self._columns == COLUMNS_USANS else _HINT_SANS)
         self._table.clear()
+        usans = self._columns == COLUMNS_USANS
+        # USANS titles carry the grouping key, so give them the room the
+        # dropped Dist / λ columns freed up.
+        title_width = 60 if usans else 40
         for f in self._files:
             tag_marker = "* " if f.run_number in self._tagged_runs else "  "
-            self._table.add_row(
+            cells = [
                 _r(tag_marker + str(f.run_number)),
-                (f.title or "")[:40],
+                (f.title or "")[:title_width],
+            ]
+            if not usans:
                 # detector_distance_m converts the raw mm value from OnCat
                 # for us — UI quotes metres with one decimal: "2.5", "1.3".
-                _r(f"{f.detector_distance_m:.1f}"),
-                _r(f"{f.wavelength_a:.1f}"),
-                _r(_format_counts(f.total_counts)),
-                _r(str(int(f.duration_s))),
-            )
+                cells.append(_r(f"{f.detector_distance_m:.1f}"))
+                cells.append(_r(f"{f.wavelength_a:.1f}"))
+            cells.append(_r(_format_counts(f.total_counts)))
+            cells.append(_r(str(int(f.duration_s))))
+            self._table.add_row(*cells)
         if self._files:
             self._table.move_cursor(row=0)
+
+    def set_instrument(self, instrument: str) -> None:
+        """Re-render for a different instrument (``:instrument usans``)."""
+        if instrument == self._instrument:
+            return
+        self._instrument = instrument
+        if self._ipts:
+            self._header.update(f"OnCat catalog · {instrument} · {self._ipts}")
+        self._rebuild()
 
     @property
     def ipts(self) -> str:
@@ -312,6 +366,25 @@ class RunCatalogPanel(Vertical):
             self.filter_substring = ""
             return
         self.app.close_inline_viewer(self._panel_id)  # type: ignore[attr-defined]
+
+    def action_activate_row(self) -> None:
+        """``Enter`` on the catalog — meaning depends on the instrument mode.
+
+        SANS: plot the cursor row's raw NeXus (unchanged behaviour).
+        USANS: build the preliminary reduction table from this catalog,
+        which is the natural next step once an IPTS is loaded. ``p`` still
+        plots the raw run in both modes.
+        """
+        from sansdir.core.instrument import MODE_USANS, mode_for_instrument
+
+        if mode_for_instrument(self._instrument) != MODE_USANS:
+            self.action_plot_current()
+            return
+        self.app.run_worker(
+            self.app.registry.dispatch("usans.init_table"),  # type: ignore[attr-defined]
+            name="usans:init_table",
+            exclusive=False,
+        )
 
     def action_plot_current(self) -> None:
         """Plot the raw NeXus file for the cursor row's run number."""

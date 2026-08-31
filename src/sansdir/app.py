@@ -30,6 +30,7 @@ from sansdir.commands.parser import ParseError, parse_command_line
 from sansdir.commands.registry import CommandRegistry, UnknownCommandError
 from sansdir.config import load_config
 from sansdir.core.history import CommandHistory
+from sansdir.core.instrument import mode_for_instrument, normalise_instrument, resolve_instrument
 from sansdir.ui.command_input import CommandInput, CommandLineRow
 from sansdir.ui.help import HelpScreen
 from sansdir.ui.key_hint_bar import KeyHintBar
@@ -81,14 +82,25 @@ class SansdirApp(App[int]):
         self._history = history if history is not None else CommandHistory()
         self.registry: CommandRegistry = build_default_registry(app=self)
         self._cfg = load_config()
+        # Instrument mode: a launch path under /SNS/USANS (or any path
+        # containing "usans") auto-selects USANS; otherwise the configured
+        # default, falling back to [oncat].default_instrument — which is
+        # exactly what every pre-USANS session did.
+        self._instrument: str = resolve_instrument(
+            (self._start_left, self._start_right),
+            configured=self._cfg.instrument.default,
+            fallback=self._cfg.oncat.default_instrument,
+            auto_detect=self._cfg.instrument.auto_detect,
+        )
         # Build the keymap, then apply [keys] overrides from config so
         # power users can rebind without forking the source.
         self.keymap: list[KeyBinding] = _apply_keymap_overrides(
-            default_keymap(), self._cfg.keys.overrides, self.registry
+            default_keymap(mode=self.instrument_mode), self._cfg.keys.overrides, self.registry
         )
         self._cmdline = CommandInput(registry=self.registry, history=self._history)
         self._cmdline_row = CommandLineRow(self._cmdline)
-        self._hintbar = KeyHintBar(self.keymap)
+        self._hintbar = KeyHintBar(self.keymap, mode=self.instrument_mode)
+        self._titlebar = TitleBar(self._instrument)
         self._active_id: str = "left"
         self._max: bool = False
 
@@ -98,7 +110,7 @@ class SansdirApp(App[int]):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield TitleBar()
+            yield self._titlebar
             yield self._pathbar
             yield self._panes
             yield self._statusbar
@@ -125,6 +137,58 @@ class SansdirApp(App[int]):
     # AppProtocol surface (used by command handlers in commands/builtins.py)
     # ------------------------------------------------------------------
 
+    # ---- instrument mode ---------------------------------------------
+
+    @property
+    def instrument(self) -> str:
+        """Instrument this session targets — drives OnCat and catalog columns."""
+        return self._instrument
+
+    @property
+    def instrument_mode(self) -> str:
+        """``"SANS"`` or ``"USANS"``; see :mod:`sansdir.core.instrument`."""
+        return mode_for_instrument(self._instrument)
+
+    def set_instrument(self, name: str) -> str:
+        """Switch instrument, rebuilding anything the mode changes.
+
+        The keymap and hint bar are rebuilt because USANS adds ``r``; the
+        catalog is re-rendered because USANS uses different columns. The
+        registry is *not* rebuilt — every command stays registered in both
+        modes so ``:usans reduce`` works even if someone forgot to switch.
+
+        Returns:
+            The normalised instrument name now in effect.
+        """
+        previous_mode = self.instrument_mode
+        self._instrument = normalise_instrument(name)
+        if self.instrument_mode != previous_mode:
+            self.keymap = _apply_keymap_overrides(
+                default_keymap(mode=self.instrument_mode),
+                self._cfg.keys.overrides,
+                self.registry,
+            )
+            self._hintbar.set_keymap(self.keymap, mode=self.instrument_mode)
+        self._titlebar.set_instrument(self._instrument)
+        # Re-render the catalog so its columns follow the new mode.
+        catalog = self._right_slot.catalog
+        if self._right_slot.has_catalog:
+            catalog.set_instrument(self._instrument)
+        self._refresh_status()
+        return self._instrument
+
+    def loaded_catalog(self) -> tuple[str, list] | None:  # type: ignore[type-arg]
+        """``(ipts, runs)`` for the loaded run catalog, or ``None``.
+
+        Reads the *unfiltered* run list: a ``/`` filter narrows what the
+        user is looking at, not what a generated reduction table should
+        cover.
+        """
+        right = self._right_slot
+        if not right.has_catalog:
+            return None
+        return right.catalog.ipts, right.catalog.all_files
+
     @property
     def active_panel(self) -> FilePanel:
         return self._left if self._active_id == "left" else self._right
@@ -132,6 +196,22 @@ class SansdirApp(App[int]):
     @property
     def inactive_panel(self) -> FilePanel:
         return self._right if self._active_id == "left" else self._left
+
+    @property
+    def working_panel(self) -> FilePanel:
+        """The pane whose cwd the user is actually working in.
+
+        Normally the active pane. But when the active slot is showing the
+        **run catalog**, its underlying FilePanel's cwd is incidental —
+        the catalog covers it, and the directory the user navigated to
+        lives in the *other* pane (``i`` cds the active pane into
+        ``<IPTS>/shared`` and loads the catalog opposite it). Commands
+        that write a file "here" should follow the user's eye, not the
+        hidden panel behind the table.
+        """
+        if self._active_slot.catalog_visible:
+            return self.inactive_panel
+        return self.active_panel
 
     def focus_active_surface(self) -> None:
         """Focus the right widget in the active slot.
@@ -300,12 +380,26 @@ class SansdirApp(App[int]):
     def is_other_pane_viewing(self) -> bool:
         return self._inactive_slot.viewer_visible
 
+    def revalidate_panes(self) -> None:
+        """Bring both slots back in step with the filesystem.
+
+        Called after anything that can delete or move files. Two states it
+        repairs: a pane sitting inside a directory that no longer exists
+        (re-anchored to the nearest surviving ancestor by
+        :meth:`FilePanel.refresh_listing`), and an inline viewer still
+        showing a deleted file.
+        """
+        for slot in (self._left_slot, self._right_slot):
+            slot.revalidate()
+        self._left.refresh_listing()
+        self._right.refresh_listing()
+
     def show_catalog_in_other_pane(
         self,
         ipts: str,
         files: list,  # type: ignore[type-arg]
         *,
-        instrument: str = "EQSANS",
+        instrument: str = "",
         facility: str = "SNS",
     ) -> None:
         """Mount the OnCat run catalog. Always opens on the *right* slot.
@@ -318,7 +412,9 @@ class SansdirApp(App[int]):
         into ``IPTS/shared`` by the caller, so F2 to hide reveals that
         directory.
         """
-        self._right_slot.show_catalog(ipts, files, instrument=instrument, facility=facility)
+        self._right_slot.show_catalog(
+            ipts, files, instrument=instrument or self.instrument, facility=facility
+        )
         # Keep focus on whatever the user was doing — this is the
         # MDIR-style "load it on the side, you keep navigating" flow.
         self.focus_active_surface()
@@ -351,7 +447,15 @@ class SansdirApp(App[int]):
             else:
                 self.focus_active_surface()
         else:
-            right.show_catalog(right.catalog.ipts, right.catalog.files)
+            # Preserve the instrument/facility the catalog was loaded with —
+            # re-showing with the defaults would silently relabel a USANS
+            # catalog as EQSANS and break its raw-file paths.
+            right.show_catalog(
+                right.catalog.ipts,
+                right.catalog.all_files,
+                instrument=right.catalog.instrument,
+                facility=right.catalog.facility,
+            )
             if self._active_id == "right":
                 # User explicitly Tab'd to the right pane before F2;
                 # focus the catalog table so Up/Down work right away.

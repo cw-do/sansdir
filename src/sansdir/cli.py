@@ -314,6 +314,205 @@ def mask(
     click.echo(f"# log: {result.log_path}")
 
 
+_USANS_EPILOG = """\
+Examples:
+
+  \b
+  # Build a preliminary setup CSV + NOTE.md for an IPTS.
+  sansdir usans init 37679 --start-run 49434
+
+  \b
+  # Review it, then reduce it (log-binning is on by default).
+  $EDITOR IPTS-37679_setup.csv
+  sansdir usans reduce IPTS-37679_setup.csv -o ./output
+
+Reduction is delegated to the instrument team's `reduceUSANS`
+(neutrons/usansred); sansdir only prepares the table and invokes it in a
+clean environment. Nothing under /SNS is written to.
+"""
+
+
+@main.group(epilog=_USANS_EPILOG)
+def usans() -> None:
+    """USANS reduction — build a setup table, then reduce it.
+
+    The same two operations the TUI exposes as ``usans.init_table`` and
+    ``usans.reduce``, available headless for scripts and batch jobs.
+    """
+
+
+@usans.command("init")
+@click.argument("ipts")
+@click.option(
+    "--start-run",
+    type=int,
+    default=None,
+    help="First run of the experiment; earlier blocks are recorded in the NOTE only.",
+)
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Folder of pre-processed ARN ASCII (default: /SNS/USANS/<IPTS>/shared/autoreduce).",
+)
+@click.option(
+    "--out-dir",
+    "-d",
+    type=click.Path(file_okay=False),
+    default=".",
+    show_default=True,
+    help="Directory to write <IPTS>_setup.csv and <IPTS>_NOTE.md into.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Explicit setup-CSV path (overrides --out-dir for the CSV).",
+)
+@click.option(
+    "--thickness",
+    type=float,
+    default=None,
+    help="Default sample thickness in cm (default: [usans].thickness_cm).",
+)
+def usans_init(
+    ipts: str,
+    start_run: int | None,
+    data_dir: str | None,
+    out_dir: str,
+    output: str | None,
+    thickness: float | None,
+) -> None:
+    """Build a preliminary USANS reduction table for IPTS from OnCat.
+
+    Groups the run list by title, auto-detects the empty-cell background,
+    and sets num_of_scans from the ARN-scan files actually on disk. The
+    result is *preliminary*: read the NOTE and correct the CSV before
+    reducing.
+    """
+    import asyncio
+    from pathlib import Path
+
+    from sansdir.config import load_config
+    from sansdir.core.oncat import OnCatClient, OnCatError
+    from sansdir.usans.catalog import build_catalog, ipts_label, output_paths, write_outputs
+
+    cfg = load_config()
+    label = ipts_label(ipts)
+
+    async def _fetch() -> list:  # type: ignore[type-arg]
+        async with OnCatClient(cfg.oncat) as client:
+            return await client.list_datafiles(label, instrument="USANS")
+
+    try:
+        runs = asyncio.run(_fetch())
+    except OnCatError as exc:
+        raise click.ClickException(f"OnCat: {exc}") from exc
+    if not runs:
+        raise click.ClickException(f"OnCat returned no USANS runs for {label}")
+
+    cat = build_catalog(
+        label,
+        runs,
+        start_run=start_run,
+        data_dir=data_dir,
+        data_dir_template=cfg.usans.data_dir_template,
+        thickness_cm=thickness if thickness is not None else cfg.usans.thickness_cm,
+    )
+    csv_path, note_path = output_paths(cat, out_dir)
+    if output:
+        csv_path = Path(output)
+        note_path = csv_path.with_name(f"{label}_NOTE.md")
+    write_outputs(cat, csv_path, note_path, logbin=cfg.usans.logbin)
+    click.echo(str(csv_path))
+    click.echo(str(note_path))
+    for warning in cat.warnings:
+        click.echo(f"# warning: {warning}", err=True)
+
+
+@usans.command("reduce")
+@click.argument("setup_csv", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--data-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=None,
+    help="Folder of pre-processed ARN ASCII (default: derived from the IPTS).",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(file_okay=False),
+    default="output",
+    show_default=True,
+    help="Directory for the reduced curves.",
+)
+@click.option(
+    "--no-logbin",
+    is_flag=True,
+    default=False,
+    help="Skip -l; reduce without log-binning (no UN_*_det_1_lb.txt).",
+)
+def usans_reduce(
+    setup_csv: str,
+    data_dir: str | None,
+    output: str,
+    no_logbin: bool,
+) -> None:
+    """Reduce SETUP_CSV with the installed reduceUSANS engine.
+
+    The engine reads its per-run ASCII from the directory holding the CSV,
+    so when the CSV lives elsewhere sansdir stages a throwaway directory of
+    symlinks — the instrument's data folder is never written to.
+    """
+    from sansdir.config import load_config
+    from sansdir.usans import runner
+    from sansdir.usans.catalog import default_data_dir, ipts_from_path
+    from sansdir.usans.table import ReductionTable, TableError
+
+    cfg = load_config()
+    if setup_csv.lower().endswith(".csv"):
+        try:
+            table = ReductionTable.from_csv(setup_csv)
+        except TableError as exc:
+            raise click.ClickException(str(exc)) from exc
+        problems = table.validate()
+        if problems:
+            raise click.ClickException(
+                "setup table is not reducible:\n  " + "\n  ".join(problems)
+            )
+        ipts = table.ipts or ipts_from_path(setup_csv)
+    else:
+        ipts = ipts_from_path(setup_csv)
+
+    resolved = data_dir or (
+        str(default_data_dir(ipts, cfg.usans.data_dir_template)) if ipts else ""
+    )
+    if not resolved:
+        raise click.ClickException(
+            "could not derive the USANS data directory from the CSV — pass --data-dir"
+        )
+
+    try:
+        result = runner.reduce_csv(
+            setup_csv,
+            data_dir=resolved,
+            output_dir=output,
+            logbin=not no_logbin and cfg.usans.logbin,
+            command=cfg.usans.reduce_command,
+            pixi_manifest=cfg.usans.pixi_manifest,
+            timeout=cfg.usans.reduce_timeout_seconds or None,
+        )
+    except (runner.ReduceError, FileNotFoundError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not result.ok:
+        click.echo(result.stdout, err=True)
+        click.echo(result.stderr, err=True)
+        raise click.ClickException(f"reduceUSANS exited {result.returncode}")
+    for path in result.produced:
+        click.echo(str(path))
+
+
 @main.command()
 def version() -> None:
     """Print the sansdir version and exit."""

@@ -47,8 +47,13 @@ HINT_ROW_2: tuple[str, ...] = (
     "?",
 )
 
+# USANS mode appends its own cells to row 2. Everything before ``r`` is
+# identical to SANS, so a USANS user still reads the same familiar strip.
+HINT_ROW_2_USANS: tuple[str, ...] = (*HINT_ROW_2, "r")
+
 # Back-compat: tests import this — keep it as the concatenated row order.
-HINT_ORDER: tuple[str, ...] = HINT_ROW_1 + HINT_ROW_2
+# The USANS-only cells sit at the end so the SANS strip stays a prefix.
+HINT_ORDER: tuple[str, ...] = HINT_ROW_1 + HINT_ROW_2_USANS
 
 LABEL_OVERRIDES: dict[str, str] = {
     "f2": "Rename",
@@ -74,6 +79,7 @@ LABEL_OVERRIDES: dict[str, str] = {
     "i": "IPTS",
     ":": "Cmd",
     "?": "Help",
+    "r": "Reduce",
 }
 
 KEY_DISPLAY: dict[str, str] = {
@@ -103,6 +109,7 @@ KEY_DISPLAY: dict[str, str] = {
     "i": "i",
     ":": ":",
     "?": "?",
+    "r": "r",
 }
 
 
@@ -118,13 +125,31 @@ class KeyHintBar(Widget):
     }
     """
 
-    def __init__(self, keymap: list[KeyBinding] | None = None) -> None:
+    def __init__(self, keymap: list[KeyBinding] | None = None, *, mode: str = "SANS") -> None:
         super().__init__()
-        self._keymap = keymap if keymap is not None else default_keymap()
+        self._mode = mode
+        self._keymap = keymap if keymap is not None else default_keymap(mode=mode)
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        """Recompute both rows from the current keymap and mode."""
+        row2_keys = HINT_ROW_2_USANS if self._mode.upper() == "USANS" else HINT_ROW_2
         self._row1 = self._build_cells(self._keymap, HINT_ROW_1)
-        self._row2 = self._build_cells(self._keymap, HINT_ROW_2)
+        self._row2 = self._build_cells(self._keymap, row2_keys)
         # Tests still inspect ._cells; expose the concatenation.
         self._cells = self._row1 + self._row2
+
+    def set_keymap(self, keymap: list[KeyBinding], *, mode: str | None = None) -> None:
+        """Swap in a new keymap (and optionally mode) and repaint.
+
+        Used by ``:instrument`` — switching to USANS adds the ``r`` cell
+        without rebuilding the whole app.
+        """
+        self._keymap = keymap
+        if mode is not None:
+            self._mode = mode
+        self._rebuild()
+        self.refresh()
 
     @staticmethod
     def _build_cells(keymap: list[KeyBinding], keys: tuple[str, ...]) -> list[tuple[str, str]]:

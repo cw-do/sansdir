@@ -188,3 +188,27 @@ def format_size(n: int) -> str:
         if value < 1024:
             return f"{value:.1f} {unit}"
     return f"{value:.1f} EB"
+
+
+# Bytes sampled from the head of a file when deciding text vs. binary.
+TEXT_SNIFF_BYTES: int = 8192
+
+
+def is_text_file(path: str | os.PathLike[str], *, sniff_bytes: int = TEXT_SNIFF_BYTES) -> bool:
+    """True when ``path`` looks like human-readable text.
+
+    Content sniff, not an extension allowlist: a NUL byte in the first
+    ``sniff_bytes`` means binary. That covers the SANS reality — ``.dat``,
+    ``_Iq.dat``, ``NOTE.md``, ``.csv``, ``.log``, files with no extension
+    at all — while correctly rejecting ``.nxs.h5``, whose HDF5 header is
+    full of NULs.
+
+    Directories, unreadable files and empty paths return ``False`` so
+    callers can fall through to whatever they did before.
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(sniff_bytes)
+    except OSError:
+        return False
+    return b"\x00" not in head

@@ -88,6 +88,52 @@ class OnCatConfig:
 
 
 @dataclass(frozen=True)
+class InstrumentConfig:
+    """``[instrument]`` section — the SANS ⟷ USANS mode switch.
+
+    ``default`` is the instrument a session starts on; the empty string
+    means "fall back to ``[oncat].default_instrument``", which is what
+    every pre-USANS config does, so existing setups are unaffected.
+
+    ``auto_detect`` lets a launch path under ``/SNS/USANS`` (or any path
+    containing ``usans``) override ``default``. Set it to ``false`` to pin
+    the mode regardless of where sansdir is started.
+    """
+
+    default: str = ""
+    auto_detect: bool = True
+
+
+@dataclass(frozen=True)
+class UsansConfig:
+    """``[usans]`` section — how to reach the reduction engine.
+
+    sansdir never reduces USANS data itself; it shells out to the
+    instrument team's ``reduceUSANS`` (``neutrons/usansred``). These keys
+    exist so a host with a different deployment layout doesn't need a code
+    change.
+
+    Attributes:
+        pixi_manifest: Root of the ``usansred`` pixi deployment.
+        reduce_command: Explicit override for the engine's argv. Non-empty
+            wins over every other lookup.
+        data_dir_template: Where the pre-processed per-run ASCII lives;
+            ``{ipts}`` is substituted with e.g. ``IPTS-37679``.
+        logbin: Pass ``-l`` to the engine by default, producing the
+            standard log-binned ``UN_<name>_det_1_lb.txt``.
+        thickness_cm: Default sample thickness written into new setup CSVs.
+        reduce_timeout_seconds: Kill the engine after this long; 0 waits.
+    """
+
+    pixi_manifest: str = "/usr/local/pixi/usansred"
+    reduce_command: str = ""
+    data_dir_template: str = "/SNS/USANS/{ipts}/shared/autoreduce"
+    logbin: bool = True
+    thickness_cm: float = 0.1
+    reduce_timeout_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
 class Config:
     """Top-level config. Add new sections here as later phases need them."""
 
@@ -95,6 +141,8 @@ class Config:
     keys: KeysConfig = field(default_factory=KeysConfig)
     mail: MailConfig = field(default_factory=MailConfig)
     oncat: OnCatConfig = field(default_factory=OnCatConfig)
+    instrument: InstrumentConfig = field(default_factory=InstrumentConfig)
+    usans: UsansConfig = field(default_factory=UsansConfig)
 
 
 def default_config_path() -> Path:
@@ -125,6 +173,8 @@ def load_config(path: Path | None = None) -> Config:
     keys_section = data.get("keys", {}) if isinstance(data, dict) else {}
     mail_section = data.get("mail", {}) if isinstance(data, dict) else {}
     oncat_section = data.get("oncat", {}) if isinstance(data, dict) else {}
+    instrument_section = data.get("instrument", {}) if isinstance(data, dict) else {}
+    usans_section = data.get("usans", {}) if isinstance(data, dict) else {}
     return Config(
         ui=UiConfig(theme=str(ui_section.get("theme", UiConfig.theme))),
         keys=KeysConfig(
@@ -161,6 +211,22 @@ def load_config(path: Path | None = None) -> Config:
             ),
             request_timeout_seconds=float(
                 oncat_section.get("request_timeout_seconds", OnCatConfig.request_timeout_seconds)
+            ),
+        ),
+        instrument=InstrumentConfig(
+            default=str(instrument_section.get("default", InstrumentConfig.default)),
+            auto_detect=bool(instrument_section.get("auto_detect", InstrumentConfig.auto_detect)),
+        ),
+        usans=UsansConfig(
+            pixi_manifest=str(usans_section.get("pixi_manifest", UsansConfig.pixi_manifest)),
+            reduce_command=str(usans_section.get("reduce_command", UsansConfig.reduce_command)),
+            data_dir_template=str(
+                usans_section.get("data_dir_template", UsansConfig.data_dir_template)
+            ),
+            logbin=bool(usans_section.get("logbin", UsansConfig.logbin)),
+            thickness_cm=float(usans_section.get("thickness_cm", UsansConfig.thickness_cm)),
+            reduce_timeout_seconds=float(
+                usans_section.get("reduce_timeout_seconds", UsansConfig.reduce_timeout_seconds)
             ),
         ),
     )

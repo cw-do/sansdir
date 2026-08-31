@@ -167,6 +167,12 @@ class FilePanel(DataTable):
         # Reactive watcher fires refresh_listing.
 
     def refresh_listing(self) -> None:
+        # The cwd can vanish under us — deleted from the other pane, from a
+        # ``:!rm``, or by someone else on a shared filesystem. Rendering an
+        # empty listing at a dead path is indistinguishable from an empty
+        # directory, so climb to the nearest surviving ancestor instead and
+        # say so. See :meth:`_reanchor_to_existing_ancestor`.
+        self._reanchor_to_existing_ancestor()
         try:
             entries = list_dir(
                 self.cwd,
@@ -180,6 +186,33 @@ class FilePanel(DataTable):
                 self.notify(f"{type(exc).__name__}: {exc}", severity="warning")
         self._all_entries = entries
         self._apply_filter()
+
+    def _reanchor_to_existing_ancestor(self) -> bool:
+        """Walk ``cwd`` up to the nearest directory that still exists.
+
+        Returns True (and notifies) when the pane had to move. Tags and any
+        filter are dropped, because they referred to a directory that is
+        gone. ``/`` always exists, so the walk terminates.
+        """
+        if self.cwd.is_dir():
+            return False
+        gone = self.cwd
+        target = self.cwd.parent
+        while target != target.parent and not target.is_dir():
+            target = target.parent
+        if not target.is_dir():  # pragma: no cover — only if / is unreadable
+            return False
+        self.tags.clear()
+        # ``set_reactive`` writes without firing the watcher — a plain
+        # assignment to either of these re-enters refresh_listing().
+        self.set_reactive(FilePanel.filter_substring, "")
+        self.set_reactive(FilePanel.cwd, target)
+        if self.is_mounted:
+            self.notify(
+                f"{gone.name or gone} is gone — moved this pane up to {target}",
+                severity="warning",
+            )
+        return True
 
     # ------------------------------------------------------------------
     # Tags
@@ -291,6 +324,24 @@ class FilePanel(DataTable):
             return
         row = min(self.cursor_row + 1, len(self._entries) - 1)
         self.move_cursor(row=row)
+
+    def move_cursor_to_path(self, path: Path) -> bool:
+        """Put the cursor on ``path``; ``False`` if it isn't in the listing.
+
+        For commands that *create* a file — a reduction table, an archive,
+        a mask — so the thing just made is the thing under the cursor,
+        ready for the next keystroke, rather than leaving the user on
+        ``..`` hunting for it.
+
+        Call after :meth:`refresh_listing`; a file written since the last
+        listing isn't in ``_entries`` yet.
+        """
+        target = Path(path)
+        for i, entry in enumerate(self._entries):
+            if entry.path == target:
+                self.move_cursor(row=i)
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Actions reachable via the panel's own BINDINGS

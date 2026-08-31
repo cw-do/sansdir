@@ -89,6 +89,14 @@ class FakePanel:
     def move_cursor_down(self) -> None:
         self.cursor_advances += 1
 
+    def move_cursor_to_path(self, path: Path) -> bool:
+        # The fake has no listing widget; record where the cursor was put
+        # so tests can assert the real panel would have landed there.
+        if not Path(path).exists():
+            return False
+        self.cursor_path = Path(path)
+        return True
+
 
 @dataclass
 class FakeApp:
@@ -109,6 +117,14 @@ class FakeApp:
     editor_calls: list[Path] = None  # type: ignore[assignment]
     viewer_calls: list[Path] = None  # type: ignore[assignment]
     _other_pane_viewing: bool = False
+    # Instrument mode (Phase USANS). Defaults keep every pre-USANS test
+    # on the SANS path it was written for.
+    instrument: str = "EQSANS"
+    catalog_instrument: str = ""
+    catalog: tuple[str, list] = None  # type: ignore[assignment]
+    active_slot_is_catalog: bool = False
+    registry: object = None
+    revalidations: int = 0
 
     def __post_init__(self) -> None:
         if self.shells_run is None:
@@ -131,6 +147,12 @@ class FakeApp:
     @property
     def inactive_panel(self) -> FakePanel:
         return self.right if self.active_id == "left" else self.left
+
+    @property
+    def working_panel(self) -> FakePanel:
+        # The fake has no slots; when a test marks the active slot as
+        # showing the catalog, fall back to the other pane like the real app.
+        return self.inactive_panel if self.active_slot_is_catalog else self.active_panel
 
     def set_active(self, panel_id: str) -> None:
         if panel_id == "other":
@@ -185,6 +207,53 @@ class FakeApp:
 
     def is_other_pane_viewing(self) -> bool:
         return self._other_pane_viewing
+
+    def revalidate_panes(self) -> None:
+        self.revalidations += 1
+        self.left.refresh_listing()
+        self.right.refresh_listing()
+
+    # ---- instrument mode ------------------------------------------------
+
+    @property
+    def instrument_mode(self) -> str:
+        from sansdir.core.instrument import mode_for_instrument
+
+        return mode_for_instrument(self.instrument)
+
+    def set_instrument(self, name: str) -> str:
+        from sansdir.core.instrument import normalise_instrument
+
+        self.instrument = normalise_instrument(name)
+        return self.instrument
+
+    def loaded_catalog(self) -> tuple[str, list] | None:  # type: ignore[type-arg]
+        return self.catalog
+
+    def show_catalog_in_other_pane(
+        self,
+        ipts: str,
+        files: list,  # type: ignore[type-arg]
+        *,
+        instrument: str = "",
+        facility: str = "SNS",
+    ) -> None:
+        self.catalog = (ipts, list(files))
+        self.catalog_instrument = instrument
+
+
+def bind_registry(app: FakeApp):  # type: ignore[no-untyped-def]
+    """Registry bound to ``app``, attached back so re-dispatch works.
+
+    Several commands (``ui.activate_cursor``, ``usans.reduce``) delegate to
+    others through ``app.registry`` — the registry is the single dispatch
+    path — so the fake needs the same handle the real app has.
+    """
+    from sansdir.commands.builtins import build_default_registry
+
+    reg = build_default_registry(app=app)
+    app.registry = reg
+    return reg
 
 
 @pytest.fixture

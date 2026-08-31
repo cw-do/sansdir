@@ -46,6 +46,9 @@ class PanelProtocol(Protocol):
 
     def move_cursor_down(self) -> None: ...
 
+    def move_cursor_to_path(self, path: Path) -> bool:
+        """Put the cursor on ``path``; False when it isn't listed."""
+
 
 class AppProtocol(Protocol):
     """The slice of :class:`~sansdir.app.SansdirApp` that handlers touch."""
@@ -55,6 +58,10 @@ class AppProtocol(Protocol):
 
     @property
     def inactive_panel(self) -> PanelProtocol: ...
+
+    @property
+    def working_panel(self) -> PanelProtocol:
+        """The pane whose cwd the user is working in (see SansdirApp)."""
 
     def set_active(self, panel_id: str) -> None:
         """``panel_id`` ∈ ``{"left", "right", "other"}``."""
@@ -85,6 +92,23 @@ class AppProtocol(Protocol):
 
     def is_other_pane_viewing(self) -> bool: ...
 
+    def revalidate_panes(self) -> None:
+        """Re-sync both panes with the filesystem after a destructive op."""
+
     def show_catalog_in_other_pane(self, ipts: str, files: list) -> None: ...  # type: ignore[type-arg]
 
     def toggle_other_pane_catalog(self) -> None: ...
+
+    def loaded_catalog(self) -> tuple[str, list] | None:  # type: ignore[type-arg]
+        """``(ipts, runs)`` for the loaded run catalog, or ``None``."""
+
+    @property
+    def instrument(self) -> str:
+        """Instrument this session targets (``"EQSANS"``, ``"USANS"``, …)."""
+
+    @property
+    def instrument_mode(self) -> str:
+        """``"SANS"`` or ``"USANS"`` — see :mod:`sansdir.core.instrument`."""
+
+    def set_instrument(self, name: str) -> str:
+        """Switch instrument; returns the normalised name now in effect."""

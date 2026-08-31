@@ -174,8 +174,10 @@ def _make_ui_refresh(app: AppProtocol) -> Command:
         n_before = len(app.active_panel._all_entries) + len(  # type: ignore[attr-defined]
             app.inactive_panel._all_entries  # type: ignore[attr-defined]
         )
-        app.active_panel.refresh_listing()
-        app.inactive_panel.refresh_listing()
+        # revalidate_panes() re-lists *and* repairs the two states a plain
+        # refresh can't: a pane inside a deleted directory, and a viewer
+        # still rendering a deleted file.
+        app.revalidate_panes()
         n_after = len(app.active_panel._all_entries) + len(  # type: ignore[attr-defined]
             app.inactive_panel._all_entries  # type: ignore[attr-defined]
         )
@@ -575,8 +577,9 @@ def _make_ui_move_tagged(app: AppProtocol) -> Command:
             app.notify_user(f"move failed: {exc}", severity="error")
             return 0
         app.active_panel.clear_tags()
-        app.inactive_panel.refresh_listing()
-        app.active_panel.refresh_listing()
+        # Move removes the source, so it can strand a pane or a viewer just
+        # like delete can.
+        app.revalidate_panes()
         return len(srcs)
 
     return Command(
@@ -598,7 +601,10 @@ def _make_oncat_search(app: AppProtocol) -> Command:
         if not isinstance(app, _RealApp):
             return None  # pragma: no cover
         cfg = load_config()
-        instr = instrument or cfg.oncat.default_instrument
+        # The session's instrument (SANS or USANS mode) wins over the
+        # config default, so ``i`` browses USANS experiments when sansdir
+        # was launched under a USANS path or switched with ``:instrument``.
+        instr = instrument or app.instrument or cfg.oncat.default_instrument
 
         async def _push_modal(screen) -> object:  # type: ignore[no-untyped-def]
             loop = asyncio.get_running_loop()
@@ -758,19 +764,25 @@ def _make_plot_image(app: AppProtocol) -> Command:
 
 
 def _make_ui_activate_cursor(app: AppProtocol) -> Command:
-    """``Enter`` smart-dispatch: dir → cd, image → plot, else → cd (errors).
+    """``Enter`` smart-dispatch: dir → cd, image → plot, text → view.
 
     The classic file-manager Enter only had to mean "cd into the
-    folder under the cursor" — but with images on disk the natural
-    expectation is "open it". We branch by path kind:
+    folder under the cursor" — but with images and readable data files
+    on disk the natural expectation is "open it". We branch by path kind:
 
     * directory → :command:`nav.cd`
     * known image extension → :command:`plot.image`
-    * anything else → :command:`nav.cd` (which raises a clean
-      :class:`NotADirectoryError`, surfaced as a status notify)
+    * anything that sniffs as text → :command:`view.in_other_pane`,
+      i.e. the same in-pane preview ``F3`` gives. Covers ``.md``,
+      ``.csv``, ``.txt``, ``.dat``, ``.log`` and extensionless files
+      without an extension allowlist to maintain.
+    * anything else (binary: ``.nxs.h5``, archives, images we can't
+      render) → :command:`nav.cd`, which raises a clean
+      :class:`NotADirectoryError`, surfaced as a status notify
     """
 
     async def handler() -> str | None:
+        from sansdir.core.filesystem import is_text_file
         from sansdir.plot.image import is_image
 
         cur = app.active_panel.cursor_path
@@ -788,8 +800,16 @@ def _make_ui_activate_cursor(app: AppProtocol) -> Command:
             return await app.registry.dispatch(  # type: ignore[attr-defined]
                 "plot.image", paths=[str(target)]
             )
-        # Fall back so the user gets the existing "not a directory"
-        # notification rather than a silent no-op.
+        if is_text_file(target):
+            await app.registry.dispatch(  # type: ignore[attr-defined]
+                "view.in_other_pane", path=str(target)
+            )
+            # Report the path rather than the viewer's bool so every
+            # branch of this handler agrees on its return type.
+            return str(target)
+        # Binary and unreadable files fall back so the user gets the
+        # existing "not a directory" notification rather than a silent
+        # no-op.
         return await app.registry.dispatch(  # type: ignore[attr-defined]
             "nav.cd", path=str(target)
         )
@@ -1438,6 +1458,492 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
     )
 
 
+# ---------------------------------------------------------------------------
+# USANS — instrument mode, preliminary setup CSV, reduction
+# ---------------------------------------------------------------------------
+
+
+async def _prompt_text(
+    app: AppProtocol,
+    message: str,
+    *,
+    default: str = "",
+    title: str = "Prompt",
+    help_text: str = "",
+) -> str | None:
+    """Ask the user for one line of text.
+
+    Returns the entered string, or ``None`` when they cancelled. Outside a
+    real Textual app (unit tests, the LLM layer, headless dispatch) there
+    is nobody to ask, so ``default`` is returned unchanged — callers should
+    therefore pass every value they care about as an explicit command
+    parameter and rely on the prompt only for the interactive path.
+    """
+    from sansdir.app import SansdirApp as _RealApp
+    from sansdir.ui.dialogs import TextPromptDialog
+
+    if not isinstance(app, _RealApp):
+        return default
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[str | None] = loop.create_future()
+
+    def _cb(value: str | None) -> None:
+        if not fut.done():
+            fut.set_result(value)
+
+    app.push_screen(
+        TextPromptDialog(message, default=default, title=title, help_text=help_text),
+        _cb,
+    )
+    return await fut
+
+
+def _make_instrument_set(app: AppProtocol) -> Command:
+    def handler(name: str = "") -> str:
+        from sansdir.core.instrument import KNOWN_INSTRUMENTS, normalise_instrument
+
+        if not name.strip():
+            return f"{app.instrument} ({app.instrument_mode} mode)"
+        wanted = normalise_instrument(name)
+        resolved = app.set_instrument(wanted)
+        if wanted not in KNOWN_INSTRUMENTS:
+            app.notify_user(
+                f"instrument set to {resolved} (not a name sansdir knows; "
+                f"treated as SANS). Known: {', '.join(KNOWN_INSTRUMENTS)}",
+                severity="warning",
+            )
+        else:
+            app.notify_user(f"instrument: {resolved} ({app.instrument_mode} mode)")
+        return resolved
+
+    return Command(
+        name="instrument.set",
+        description="Switch the session between SANS and USANS instruments.",
+        params=(
+            CommandParam(
+                name="name",
+                type="string",
+                description="Instrument name (EQSANS, BIOSANS, GPSANS, USANS). Blank reports current.",
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        aliases=("instrument",),
+        examples=("instrument usans", "instrument eqsans", "instrument"),
+    )
+
+
+async def _resolve_usans_runs(app: AppProtocol, ipts: str = "") -> tuple[str, list] | None:  # type: ignore[type-arg]
+    """Get ``(ipts, runs)`` for a USANS reduction table, fetching if needed.
+
+    Resolution order for the IPTS:
+
+    1. an explicit ``ipts`` argument,
+    2. the working pane's path — in USANS mode you are nearly always sitting
+       in ``/SNS/USANS/IPTS-N/shared``, so the answer is already on screen,
+    3. the loaded run catalog,
+    4. a prompt.
+
+    The cwd outranks the catalog because the CSV is written *into* the cwd:
+    generating an IPTS-11111 table inside ``IPTS-37679/shared`` because a
+    stale catalog was still loaded would be a nasty surprise.
+
+    Runs come from the loaded catalog when it already holds that IPTS;
+    otherwise they're fetched from OnCat and the catalog is populated as a
+    side effect, so the run list the table was built from stays on screen
+    for cross-reference. Returns ``None`` if the user cancelled.
+    """
+    from sansdir.config import load_config
+    from sansdir.core.oncat import OnCatClient, OnCatError
+    from sansdir.usans.catalog import ipts_from_path, ipts_label
+
+    loaded = app.loaded_catalog()
+    label = ipts_label(ipts) if ipts else ipts_from_path(app.working_panel.cwd)
+    if not label and loaded is not None:
+        label = loaded[0]
+    if not label:
+        answer = await _prompt_text(
+            app,
+            "IPTS number (this folder doesn't name one):",
+            default="",
+            title="USANS setup table",
+            help_text=(
+                "e.g. 37679 — sansdir fetches the run list from OnCat and\n"
+                "shows it in the right pane. `i` browses experiments instead."
+            ),
+        )
+        if answer is None or not answer.strip():
+            return None
+        label = ipts_label(answer.strip())
+
+    if loaded is not None and loaded[0] == label and loaded[1]:
+        return label, loaded[1]
+
+    cfg = load_config()
+    app.notify_user(f"fetching the {label} run list from OnCat…")
+    try:
+        async with OnCatClient(cfg.oncat) as client:
+            runs = await client.list_datafiles(label, instrument="USANS")
+    except OnCatError as exc:
+        app.notify_user(f"OnCat: {exc}", severity="error")
+        return None
+    if runs:
+        # Put the catalog up beside the table we're about to write.
+        app.show_catalog_in_other_pane(label, runs, instrument="USANS")  # type: ignore[call-arg]
+    return label, runs
+
+
+def _make_usans_init_table(app: AppProtocol) -> Command:
+    async def handler(
+        start_run: int = 0, out_dir: str = "", data_dir: str = "", ipts: str = ""
+    ) -> str | None:
+        from sansdir.config import load_config
+        from sansdir.usans.catalog import build_catalog, output_paths, summarize, write_outputs
+
+        resolved = await _resolve_usans_runs(app, ipts)
+        if resolved is None:
+            return None
+        ipts, runs = resolved
+        if not runs:
+            app.notify_user(f"OnCat returned no USANS runs for {ipts}", severity="warning")
+            return None
+
+        cfg = load_config()
+        if start_run <= 0:
+            answer = await _prompt_text(
+                app,
+                "First run of the experiment (blank = include every block):",
+                default="",
+                title=f"USANS setup table — {ipts}",
+                help_text=(
+                    "Blocks starting before this run are recorded in the NOTE but\n"
+                    "left out of the reduction CSV — that's how the alignment and\n"
+                    "test runs at the start of a beam cycle get dropped."
+                ),
+            )
+            if answer is None:
+                return None
+            answer = answer.strip()
+            if answer:
+                try:
+                    start_run = int(answer)
+                except ValueError:
+                    app.notify_user(f"not a run number: {answer!r}", severity="error")
+                    return None
+
+        target_dir = Path(out_dir).expanduser() if out_dir else Path(app.working_panel.cwd)
+        cat = await asyncio.to_thread(
+            build_catalog,
+            ipts,
+            runs,
+            start_run=start_run or None,
+            data_dir=data_dir or None,
+            data_dir_template=cfg.usans.data_dir_template,
+            thickness_cm=cfg.usans.thickness_cm,
+        )
+        csv_path, note_path = output_paths(cat, target_dir)
+        if csv_path.exists() and not await app.confirm(
+            f"{csv_path.name} already exists in {target_dir}.\nOverwrite it (and the NOTE)?"
+        ):
+            return None
+        # Pass the reduction's real log-binning setting so the NOTE's
+        # filename legend lists the files this host will actually write.
+        await asyncio.to_thread(
+            write_outputs, cat, csv_path, note_path, logbin=cfg.usans.logbin
+        )
+
+        app.active_panel.refresh_listing()
+        app.inactive_panel.refresh_listing()
+        # Land the cursor on the table we just wrote: it's what the next
+        # keystroke (F4 to review, r to reduce) acts on, so leaving the
+        # user parked on ``..`` would make them hunt for it.
+        working = app.working_panel
+        if working.cwd == csv_path.parent:
+            working.move_cursor_to_path(csv_path)
+        warnings = cat.warnings
+        if warnings:
+            app.notify_user(
+                f"{csv_path.name}: {warnings[0]}"
+                + (f" (+{len(warnings) - 1} more in {note_path.name})" if len(warnings) > 1 else ""),
+                severity="warning",
+            )
+        app.notify_user(
+            f"wrote {csv_path.name} ({summarize(cat)}) + {note_path.name} — "
+            "review with F4, reduce with r"
+        )
+        return str(csv_path)
+
+    return Command(
+        name="usans.init_table",
+        description=(
+            "Build a preliminary USANS setup CSV (+NOTE.md); infers the IPTS from the pane."
+        ),
+        params=(
+            CommandParam(
+                name="start_run",
+                type="int",
+                description="First run of the experiment; earlier blocks are excluded. 0 = prompt.",
+                required=False,
+                default=0,
+            ),
+            CommandParam(
+                name="out_dir",
+                type="path",
+                description=(
+                    "Where to write the CSV + NOTE. Blank = the working pane's directory "
+                    "(the file pane, not the one the catalog covers)."
+                ),
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="data_dir",
+                type="path",
+                description=(
+                    "Folder of pre-processed ARN ASCII used to verify num_of_scans. "
+                    "Blank = /SNS/USANS/<IPTS>/shared/autoreduce."
+                ),
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="ipts",
+                type="string",
+                description=(
+                    "IPTS to build the table for. Blank = read it from the pane's path, "
+                    "then the loaded catalog, then prompt."
+                ),
+                required=False,
+                default="",
+            ),
+        ),
+        handler=handler,
+        aliases=("usans-init",),
+        examples=("usans-init", "usans-init 49434", "usans.init_table start_run=49434"),
+    )
+
+
+async def _offer_to_generate(
+    app: AppProtocol,
+    target: Path | None,
+    *,
+    generated_only: bool = True,
+) -> str | None:
+    """``r`` with no setup table under the cursor: offer to build one.
+
+    Deliberately stops after generating rather than reducing straight
+    through. The table is a *first draft* — its background pick, block
+    sizes and restart guesses all need the eyes the NOTE is written for.
+    One more ``r`` reduces it, and that keystroke is the review gate.
+
+    Args:
+        app: The running app.
+        target: What the cursor was on, for the message. May be ``None``.
+        generated_only: Reserved for a future "generate and reduce" mode;
+            currently always stops after writing the table.
+
+    Returns:
+        The generated CSV's path, or ``None`` if the user declined.
+    """
+    from sansdir.usans.catalog import ipts_from_path
+
+    label = ipts_from_path(app.working_panel.cwd)
+    loaded = app.loaded_catalog()
+    if not label and loaded is not None:
+        label = loaded[0]
+    # Only name the target when it's actually a file the user picked.
+    # The cursor often sits on ``..``, and "IPTS-37679 is not a USANS setup
+    # table" reads like an accusation against the directory.
+    if target is not None and target.is_file():
+        what = f"{target.name} is not a USANS setup table"
+    else:
+        what = "No setup table selected"
+    where = f" for {label}" if label else ""
+    if not await app.confirm(f"{what}.\n\nBuild a preliminary reduction table{where}?"):
+        return None
+    written = await app.registry.dispatch("usans.init_table")  # type: ignore[attr-defined]
+    if not written:
+        return None
+    # Put the fresh table on screen — reviewing it is the next step, and
+    # the NOTE beside it explains anything the generator had to guess.
+    app.view_in_other_pane(Path(written))
+    app.notify_user(f"{Path(written).name} — review it (F4), then press r again to reduce")
+    return str(written)
+
+
+def _make_usans_reduce(app: AppProtocol) -> Command:
+    from sansdir.config import load_config as _load_config
+
+    # Read once at registration so ``[usans].logbin`` becomes the command's
+    # advertised default — the ``:``-line and the LLM schema then show the
+    # value this host actually uses.
+    _default_logbin = _load_config().usans.logbin
+
+    async def handler(
+        path: str = "",
+        output_dir: str = "",
+        data_dir: str = "",
+        logbin: bool = _default_logbin,
+    ) -> str | None:
+        from sansdir.config import load_config
+        from sansdir.usans import runner
+        from sansdir.usans.catalog import default_data_dir, ipts_from_path
+        from sansdir.usans.table import ReductionTable, TableError
+
+        cfg = load_config()
+        target = Path(path).expanduser() if path else app.active_panel.cursor_path
+        target = Path(target) if target is not None else None
+
+        # `r` is the single USANS verb: reduce what's under the cursor, or —
+        # when that isn't a setup table at all — offer to build one. A file
+        # that *is* a setup table but fails validation deliberately does NOT
+        # come here: you're mid-edit on a real table and regenerating would
+        # throw away your corrections.
+        table = None
+        if target is None or not target.is_file() or target.suffix.lower() not in (".csv", ".json"):
+            return await _offer_to_generate(app, target, generated_only=True)
+        if target.suffix.lower() == ".csv":
+            try:
+                table = ReductionTable.from_csv(target)
+            except (TableError, OSError):
+                # A .csv that doesn't parse as a setup table is almost
+                # certainly some other CSV the cursor happened to land on.
+                return await _offer_to_generate(app, target, generated_only=True)
+            if not table.rows:
+                return await _offer_to_generate(app, target, generated_only=True)
+            problems = table.validate()
+            if problems:
+                app.notify_user(
+                    f"{target.name} is not reducible yet — "
+                    + "; ".join(problems[:2])
+                    + (f" (+{len(problems) - 2} more)" if len(problems) > 2 else "")
+                    + ". Fix it with F4.",
+                    severity="error",
+                )
+                return None
+
+        ipts = (table.ipts if table else "") or ipts_from_path(target)
+        resolved_data_dir = (
+            Path(data_dir).expanduser()
+            if data_dir
+            else (default_data_dir(ipts, cfg.usans.data_dir_template) if ipts else None)
+        )
+        if resolved_data_dir is None or not resolved_data_dir.is_dir():
+            answer = await _prompt_text(
+                app,
+                "USANS data directory (pre-processed ARN ASCII):",
+                default=str(resolved_data_dir or ""),
+                title=f"USANS reduce — {target.name}",
+                help_text=(
+                    "reduceUSANS reads USANS_<run>_monitor_scan_ARN.txt and\n"
+                    "USANS_<run>_detector_scan_ARN_peak_N.txt from this folder."
+                ),
+            )
+            if not answer or not answer.strip():
+                return None
+            resolved_data_dir = Path(answer.strip()).expanduser()
+        if not resolved_data_dir.is_dir():
+            app.notify_user(f"data directory not found: {resolved_data_dir}", severity="error")
+            return None
+
+        resolved_out = Path(output_dir).expanduser() if output_dir else None
+        if resolved_out is None:
+            answer = await _prompt_text(
+                app,
+                "Output directory for the reduced curves:",
+                default=str(target.parent / "output"),
+                title=f"USANS reduce — {target.name}",
+                help_text=(
+                    "Created if it doesn't exist. Reduced curves land here as\n"
+                    "UN_<name>_det_1_lb.txt and UN_<name>_det_1_background_subtracted.txt."
+                ),
+            )
+            if not answer or not answer.strip():
+                return None
+            resolved_out = Path(answer.strip()).expanduser()
+
+        n_rows = len(table.rows) if table else 0
+        app.notify_user(
+            f"reducing {n_rows or 'the'} sample rows with reduceUSANS — this can take a while…"
+        )
+        timeout = cfg.usans.reduce_timeout_seconds or None
+        try:
+            result = await asyncio.to_thread(
+                runner.reduce_csv,
+                target,
+                data_dir=resolved_data_dir,
+                output_dir=resolved_out,
+                logbin=logbin,
+                command=cfg.usans.reduce_command,
+                pixi_manifest=cfg.usans.pixi_manifest,
+                timeout=timeout,
+            )
+        except (runner.ReduceError, FileNotFoundError, OSError) as exc:
+            app.notify_user(f"reduceUSANS: {exc}", severity="error")
+            return None
+
+        if not result.ok:
+            tail = result.tail(4)
+            app.notify_user(
+                f"reduceUSANS exited {result.returncode}" + (f" — {tail}" if tail else ""),
+                severity="error",
+            )
+            return None
+
+        app.notify_user(f"reduced {len(result.produced)} curves → {resolved_out}")
+        if await app.confirm(
+            f"Reduced {len(result.produced)} curves into\n{resolved_out}\n\n"
+            "Show that directory in the other pane?"
+        ):
+            app.inactive_panel.set_cwd(resolved_out)
+        return str(resolved_out)
+
+    return Command(
+        name="usans.reduce",
+        description=(
+            "Reduce the setup CSV under the cursor, or offer to build one when there isn't."
+        ),
+        params=(
+            CommandParam(
+                name="path",
+                type="path",
+                description="Setup CSV to reduce. Blank = the file under the cursor.",
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="output_dir",
+                type="path",
+                description="Where reduced curves are written. Blank = prompt.",
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="data_dir",
+                type="path",
+                description=(
+                    "Folder of pre-processed ARN ASCII. "
+                    "Blank = /SNS/USANS/<IPTS>/shared/autoreduce."
+                ),
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="logbin",
+                type="bool",
+                description="Pass -l for log-binned output (the standard reduced curve).",
+                required=False,
+                default=_default_logbin,
+            ),
+        ),
+        handler=handler,
+        aliases=("usans-reduce",),
+        examples=("usans-reduce", "usans-reduce IPTS-37679_setup.csv", "usans-reduce logbin=false"),
+        danger=True,
+    )
+
+
 def _make_pane_toggle_catalog(app: AppProtocol) -> Command:
     def handler() -> None:
         app.toggle_other_pane_catalog()
@@ -1818,6 +2324,30 @@ def _make_view_file(app: AppProtocol) -> Command:
     )
 
 
+def _make_view_in_other_pane(app: AppProtocol) -> Command:
+    """``view.in_other_pane`` — show a file beside you, without toggling.
+
+    The open-only counterpart to :command:`view.toggle_other_pane` (F3).
+    ``Enter`` and the LLM layer need "put this file on screen" to be
+    idempotent: with the toggle, Enter on file A then Enter on file B
+    would close the viewer instead of switching to B.
+    """
+
+    def handler(path: str) -> bool:
+        target = Path(path).expanduser()
+        if not target.is_file():
+            app.notify_user(f"not a file: {target}", severity="warning")
+            return False
+        return app.view_in_other_pane(target)
+
+    return Command(
+        name="view.in_other_pane",
+        description="Show a file in the other pane (open, not toggle).",
+        params=(CommandParam(name="path", type="path", description="File to display."),),
+        handler=handler,
+    )
+
+
 def _make_view_toggle_other_pane(app: AppProtocol) -> Command:
     def handler() -> bool:
         from sansdir.app import SansdirApp as _RealApp
@@ -1906,7 +2436,11 @@ def _make_ui_delete_tagged(app: AppProtocol) -> Command:
         prev_path = panel.cursor_path
         removed = fileops.delete_paths(srcs)
         panel.clear_tags()
-        panel.refresh_listing()
+        # Re-list *both* panes first: the other one may have been sitting
+        # inside, or viewing, a path we just removed, and nothing else would
+        # notice. This has to happen before the cursor re-anchoring below,
+        # since re-listing resets the cursor.
+        app.revalidate_panes()
         # Re-anchor the cursor: prefer the same path if it survived,
         # else the entry at the same row index (clamped) — that's
         # whichever file was just below the deleted one (or the new
@@ -1994,11 +2528,15 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_ui_zip_tagged(app),
         _make_ui_mail_tagged(app),
         _make_view_file(app),
+        _make_view_in_other_pane(app),
         _make_view_toggle_other_pane(app),
         _make_edit_file(app),
         _make_app_browse_tree(app),
         _make_oncat_search(app),
         _make_pane_toggle_catalog(app),
+        _make_instrument_set(app),
+        _make_usans_init_table(app),
+        _make_usans_reduce(app),
         _make_plot_iq(app),
         _make_plot_transmission(app),
         _make_plot_iqxqy(app),

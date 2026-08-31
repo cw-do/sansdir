@@ -123,13 +123,19 @@ def _hdf_under_cursor(app: AppProtocol) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def default_keymap() -> list[KeyBinding]:
+def default_keymap(mode: str = "SANS") -> list[KeyBinding]:
     """The Phase-1 navigation keymap.
 
     Phases 2+ extend this list (selection, copy/move, plot, …) — each
     addition is a new binding that names an already-registered command.
+
+    Args:
+        mode: Instrument mode (:mod:`sansdir.core.instrument`). USANS adds
+            its own bindings on top of the shared set; SANS — the default
+            — gets exactly the keymap it always had, so no existing key
+            changes meaning when the USANS feature is present but unused.
     """
-    return [
+    bindings = [
         # Pane focus / layout
         KeyBinding("tab", "pane.activate", "Switch active pane", _activate_other),
         KeyBinding("ctrl+u", "pane.swap", "Swap left and right panes"),
@@ -228,4 +234,24 @@ def default_keymap() -> list[KeyBinding]:
         KeyBinding("question_mark", "app.help", "Help overlay"),
         KeyBinding("?", "app.help", "Help overlay", show_in_help=False),
         KeyBinding("q", "app.quit", "Quit"),
+    ]
+    if mode.upper() == "USANS":
+        bindings.extend(usans_keymap())
+    return bindings
+
+
+def usans_keymap() -> list[KeyBinding]:
+    """USANS-only bindings, appended by :func:`default_keymap` in USANS mode.
+
+    Exactly one key, on purpose. ``r`` is the whole USANS verb: it reduces
+    the setup table under the cursor, and when there isn't one it offers to
+    build it from the current IPTS (inferred from the pane's path). So the
+    "generate" step needs no binding and no hint-bar cell of its own, and
+    nothing has to be dropped to make room. Everything else — opening the
+    CSV, editing it (``F4``), plotting the reduced curves (``p``),
+    filtering, navigating — reuses the bindings SANS users already know.
+    ``r`` is unbound in the SANS keymap, so nothing collides.
+    """
+    return [
+        KeyBinding("r", "usans.reduce", "Reduce setup CSV — or build one if there isn't"),
     ]

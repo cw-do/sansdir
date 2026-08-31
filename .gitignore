@@ -72,4 +72,5 @@ docs/figures/*.svg
 # Working documents for the AI coding agent — kept locally, not published.
 CLAUDE.md
 PLANNING.md
+PLANNING-*.md
 TASKS.md
