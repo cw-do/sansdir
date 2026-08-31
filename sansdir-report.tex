@@ -605,22 +605,27 @@ approximately 14,100 lines across 56 modules.
     Path & Contents \\
     \midrule
     \texttt{cli.py} & Click entry point; \texttt{tui}, \texttt{extract},
-      \texttt{mask}, and \texttt{version} subcommands. \\
+      \texttt{mask}, \texttt{usans}, and \texttt{version} subcommands. \\
     \texttt{app.py} & The Textual application shell. \\
     \texttt{config.py} & \Ac{toml} configuration loader. \\
     \texttt{commands/} & \texttt{registry.py} (the \texttt{Command} model and
-      dispatch), \texttt{builtins.py} (all 52 registrations),
+      dispatch), \texttt{builtins.py} (all 56 registrations),
       \texttt{parser.py} (the \key{:} line), \texttt{schema.py} (\ac{json} tool
       schema export). \\
     \texttt{core/} & \texttt{filesystem.py} (listing and sorting),
       \texttt{fileops.py} (copy, move, delete), \texttt{archive.py},
-      \texttt{mailer.py}, \texttt{oncat.py}, \texttt{history.py}. \\
+      \texttt{mailer.py}, \texttt{oncat.py}, \texttt{history.py},
+      \texttt{instrument.py} (\ac{sans}/\ac{usans} mode resolution). \\
     \texttt{hdf/} & \texttt{reader.py} (safe open, tree walk, value previews),
       \texttt{metadata.py}, \texttt{batch.py} (parallel extraction). \\
     \texttt{plot/} & \texttt{detect.py} (file-kind classification),
       \texttt{ascii1d.py}, \texttt{ascii2d.py}, \texttt{tile.py},
       \texttt{generic.py}, \texttt{image.py}, \texttt{hdf5\_detector.py},
       \texttt{backend.py}, \texttt{window.py} (the plot subprocess). \\
+    \texttt{usans/} & \texttt{grouping.py} (title blocks), \texttt{reconcile.py}
+      (scan counts derived from disk), \texttt{table.py} (the setup \ac{csv}),
+      \texttt{catalog.py} (table and notes), \texttt{runner.py} (invoking the
+      external engine). Pure; imports no interface or network module. \\
     \texttt{mask/} & \texttt{core.py} (shapes and the mask builder),
       \texttt{detector.py}, \texttt{banktube.py}, \texttt{writers.py},
       \texttt{mantid\_writer.py}, \texttt{gui.py}, \texttt{api.py}. \\
@@ -1312,6 +1317,17 @@ f5 = "ui.move_tagged"             # unknown commands are dropped at startup
 default_instrument = "EQSANS"
 cache_ttl_seconds  = 86400
 
+[instrument]
+default     = "EQSANS"   # "" falls back to [oncat].default_instrument
+auto_detect = true       # a /SNS/USANS/... launch path overrides `default`
+
+[usans]
+pixi_manifest     = "/usr/local/pixi/usansred"
+reduce_command    = ""   # explicit override for the engine argv
+data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
+logbin            = true
+thickness_cm      = 0.1
+
 [mail]
 command = "mail"                  # or "mutt"
 default_subject = "[sansdir] data"
@@ -1325,6 +1341,113 @@ user who cannot launch the program also cannot use it to fix the file.
 
 Themes may also be changed at runtime with \texttt{:theme <name>}; issuing
 \texttt{:theme} with no argument lists the available names.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 11b. USANS REDUCTION
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{USANS REDUCTION}
+\label{sec:usans}
+
+\Ac{usans} overlaps almost entirely with what the program already does: the same
+proposal catalog, the same file manager, the same one-dimensional plotting, the
+same editor. What it adds is a short reduction workflow. Rather than ship a
+second application, the program carries an \emph{instrument mode} and a small,
+self-contained module.
+
+\subsection{INSTRUMENT MODE}
+
+The mode is either \ac{sans} or \ac{usans}, and it is resolved once at launch:
+path detection first, then \texttt{[instrument].default}, then
+\texttt{[oncat].default\_instrument}. Any launch path containing
+\texttt{usans}---which covers \texttt{/SNS/USANS/IPTS-\textit{N}} as well as a
+user's own scratch directories---selects \ac{usans}. Path detection outranks the
+configuration file because a user who opens a \ac{usans} proposal directory means
+it, whatever their defaults say. The command \texttt{instrument.set}, reached as
+\texttt{:instrument usans}, switches at runtime.
+
+The mode governs four things: which instrument the proposal browser queries,
+which columns the run catalog shows (\ac{usans} has no moveable detector and a
+fixed incident wavelength, so the distance and wavelength columns would be
+constants and are dropped), what \key{Enter} does on a catalog row, and whether
+the \key{r} binding is live. It is signalled in the title bar and by the presence
+of \texttt{r:Reduce} in the key hint bar.
+
+Mode scoping is applied to \emph{bindings}, not to registrations. The
+\ac{usans} commands are registered in both modes, so \texttt{:usans-reduce}
+works whether or not the user remembered to switch; only the key disappears.
+Correspondingly, \texttt{default\_keymap()} called with no argument returns
+exactly the map it returned before \ac{usans} existed, which is what the help
+overlay, the hint bar, and the existing test suite all observe.
+
+\subsection{THE SETUP TABLE}
+
+The reduction engine is driven by a small \ac{csv} listing, one row per sample:
+a flag distinguishing the empty-cell background from the samples, a name that
+becomes the output filename stem, a first run number, a scan count, a thickness,
+and optionally runs to exclude. The program generates this table from the
+proposal's run list and then gets out of the way: the user reviews and corrects
+it with \key{F4}, the same editor used for any other file. There is deliberately
+no table-editing widget.
+
+Generation groups consecutive runs sharing a title into blocks and picks the
+block whose title names an empty cell or banjo as the background. The
+load-bearing step is the scan count. A titled block of $N$ consecutive runs is
+$(N-1)$ analyzer rocking-curve scans plus one transmission run, and the engine
+reads only the rocking-curve files. $N$ is not a constant: it varies with the
+experiment's settings. Passing the run count that the catalog reports therefore
+makes the engine fail on the transmission run's absent input. The program instead
+derives the count from which runs actually have rocking-curve files on disk,
+which handles any block size without configuration, and expresses any gap inside
+a block through the \ac{csv}'s exclude column.
+
+Some judgements cannot be made from the data alone. A measurement that was
+stopped and restarted under one title leaves an oversized block in which only
+the last few runs are real; the generator narrows to the last window of the modal
+size and flags the block. Every such judgement---narrowed blocks, unusual sizes,
+blocks with no reducible runs, the transmission runs that were dropped, the
+background that was chosen---is written to a companion notes file. The generated
+table is a first draft, and the notes exist so that reviewing it is quick rather
+than archaeological.
+
+\subsection{INVOKING THE ENGINE}
+
+The reduction mathematics belongs to the instrument team's \texttt{usansred}
+package, deployed on the cluster as a pixi environment. The program locates its
+console script and runs it as a subprocess; it does not reimplement, vendor, or
+wrap the physics. Two deployment realities are absorbed on the caller's side.
+
+First, the console script inherits the invoking user's \texttt{\textasciitilde
+/.local} site packages and aborts on a stale \texttt{pandas}, which is reachable
+on the analysis nodes. Every invocation therefore disables user site packages and
+empties \texttt{PYTHONPATH}.
+
+Second, the engine resolves its per-run input relative to the directory holding
+the setup \ac{csv}, not the working directory. The reviewed table normally lives
+in the user's own folder, and the pre-processed data lives under the proposal's
+autoreduce directory---which is instrument data the program must not write to,
+and which is frequently read-only to the user in any case. Rather than copy the
+table into it, the program builds a temporary directory of symbolic links to the
+data, places a copy of the table there, and runs the engine in that directory.
+Nothing beneath the instrument data root is modified.
+
+\subsection{ONE KEY}
+
+The two operations are exposed through a single binding. \key{r} reduces the
+setup table under the cursor; when the cursor is not on one, it offers to build
+a table for the proposal named by the current path, fetching the run list,
+showing the catalog beside the user, and leaving the cursor on the file it wrote.
+
+It stops there rather than reducing immediately. The table is a first draft whose
+guesses the notes exist to expose, so the second \key{r} is the review step, and
+it costs one keystroke. The one case that does \emph{not} offer to regenerate is
+a table that parses but fails validation---two backgrounds, a zero scan count:
+there the user is mid-edit on a real table, and regenerating would discard the
+corrections. That case reports the problem and points at \key{F4}.
+
+Reduced output is ordinary two- or three-column text, so the existing plotting
+path handles it with only a filename rule added to the classifier. The rule
+matches on the name rather than the column count so that a sample whose name
+happens to contain \texttt{trans} is not routed to the transmission plotter.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 12. DATA FORMATS
@@ -1498,6 +1621,14 @@ but remain unverified on the \ac{hfir} \ac{sans} instruments. And a mask that
 \texttt{drtsans} will honor still requires a Mantid environment at save time, as
 described in Section~\ref{sec:mask}.
 
+The \ac{usans} workflow of Section~\ref{sec:usans} has been exercised end to end
+against a single proposal's data. Its grouping and scan-count reconciliation are
+driven by conventions---consecutive same-title blocks, a trailing transmission
+run, empty-cell titles naming a banjo---that hold for the experiments examined
+but are not enforced by the data format. This is why the generated table is
+presented as a draft for review rather than as an input to be reduced
+unattended.
+
 Work in progress extends the program in two directions: minting \acp{doi} for
 tagged file sets through the Zenodo \ac{api}, and a natural-language layer that
 would translate a free-text instruction into registry commands for the user to
@@ -1573,6 +1704,8 @@ Any command may be invoked from the \key{:} line by name or alias.
     Extract log values from many NeXus files into a table. \\
   \texttt{hdf.show\_keys} (\texttt{hdf}) & \texttt{path} & Open the \ac{hdf}
     tree browser. \\
+  \texttt{instrument.set} (\texttt{instrument}) & \texttt{name?} & Switch the
+    session between \ac{sans} and \ac{usans}. \\
   \texttt{mail.send} & \texttt{recipient}, \texttt{subject?},
     \texttt{attachments?}, \texttt{body?} & Send mail via the configured
     client. \\
@@ -1617,6 +1750,14 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{ui.mask} (\texttt{mask}) & \texttt{path?} & Open the mask editor. \\
   \texttt{ui.move\_tagged} & --- & Move the selection to the inactive pane. \\
   \texttt{ui.plot\_auto} & --- & Plot the selection, routing by file kind. \\
+  \texttt{usans.init\_table} (\texttt{usans-init}) & \texttt{start\_run?},
+    \texttt{out\_dir?}, \texttt{data\_dir?}, \texttt{ipts?} & Build a
+    preliminary \ac{usans} setup \ac{csv} and notes. \\
+  \texttt{usans.reduce} (\texttt{usans-reduce}) & \texttt{path?},
+    \texttt{output\_dir?}, \texttt{data\_dir?}, \texttt{logbin?} & Reduce a
+    setup \ac{csv}, or offer to build one. \\
+  \texttt{view.in\_other\_pane} & \texttt{path} & Show a file in the other pane
+    (open, not toggle). \\
   \texttt{ui.plot\_generic} & --- & Linear plot of the selection. \\
   \texttt{ui.refresh} (\texttt{refresh}) & --- & Re-read both listings. \\
   \texttt{ui.rename} (\texttt{rename}) & --- & Rename the file under the
@@ -1663,7 +1804,8 @@ from help.
   \key{Ctrl+U} & Swap the two panes & \texttt{pane.swap} \\
   \key{=} & Sync the inactive pane & \texttt{pane.sync} \\
   \key{Ctrl+O} & Maximize or restore & \texttt{pane.toggle\_max} \\
-  \key{Enter} & Open directory or image & \texttt{ui.activate\_cursor} \\
+  \key{Enter} & Open a directory, image, or text file &
+    \texttt{ui.activate\_cursor} \\
   \key{Backspace} & Ascend one directory & \texttt{nav.up} \\
   \key{Space} & Tag or untag the current row & \texttt{tag.toggle} \\
   \key{+} & Tag by glob & \texttt{app.cmdline\_prompt} \\
@@ -1694,6 +1836,8 @@ from help.
   \key{e} & Email the selection & \texttt{ui.mail\_tagged} \\
   \key{:} & Open the command line & \texttt{app.cmdline\_open} \\
   \key{?} & Help overlay & \texttt{app.help} \\
+  \key{r} & Reduce a \ac{usans} setup table (\ac{usans} mode only) &
+    \texttt{usans.reduce} \\
   \key{q} & Quit & \texttt{app.quit} \\
 \end{longtable}
 \end{small}
