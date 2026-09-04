@@ -163,7 +163,13 @@ def build_catalog(
 # ---------------------------------------------------------------------------
 
 
-def render_note(cat: Catalog, *, today: str | None = None, logbin: bool = True) -> str:
+def render_note(
+    cat: Catalog,
+    *,
+    today: str | None = None,
+    logbin: bool = True,
+    short_name_copy: bool = True,
+) -> str:
     """Render the human-readable companion to the setup CSV.
 
     Everything the generator guessed or dropped goes here: skipped
@@ -176,6 +182,9 @@ def render_note(cat: Catalog, *, today: str | None = None, logbin: bool = True) 
         today: Override the generation date (tests pin this).
         logbin: Whether the reduction will pass ``-l``. Changes which
             files appear and what ``_background_subtracted`` contains.
+        short_name_copy: Whether the reduce will also write ``_bsub.txt``
+            aliases; documented in the legend so the user knows both names
+            point at the same curve.
     """
     today = today or date.today().isoformat()
     typical = modal_scan_count(cat.groups)
@@ -223,7 +232,7 @@ def render_note(cat: Catalog, *, today: str | None = None, logbin: bool = True) 
     lines.extend(_render_annotation_section(cat))
     lines.extend(_render_excluded_section(cat))
     lines.extend(_render_odd_size_section(cat, typical))
-    lines.extend(_render_output_legend(cat, logbin=logbin))
+    lines.extend(_render_output_legend(cat, logbin=logbin, short_name_copy=short_name_copy))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -345,7 +354,9 @@ def _render_odd_size_section(cat: Catalog, typical: int | None) -> list[str]:
     return lines
 
 
-def _render_output_legend(cat: Catalog, *, logbin: bool = True) -> list[str]:
+def _render_output_legend(
+    cat: Catalog, *, logbin: bool = True, short_name_copy: bool = True
+) -> list[str]:
     """Explain the reduced-output filename postfixes.
 
     These names come from ``reduceUSANS`` itself, not from sansdir, and
@@ -353,8 +364,16 @@ def _render_output_legend(cat: Catalog, *, logbin: bool = True) -> list[str]:
     subtraction's *input*, and the file you actually want was called
     ``_lbs.txt`` by the older loose script. Spelling it out next to every
     generated table costs nothing and saves plotting the wrong curve.
+
+    When ``short_name_copy`` is on, the legend also names the ``_bsub.txt``
+    alias sansdir writes beside the engine's verbose file.
     """
     bg_name = cat.background.name if cat.background is not None else "<background>"
+    final = "UN_<name>_det_1_background_subtracted.txt"
+    plot_line = (
+        f"**Plot `{final}`**"
+        + (" (or its shorter alias `UN_<name>_det_1_bsub.txt`)" if short_name_copy else "")
+    )
     lines = [
         "## What the reduced filenames mean",
         "",
@@ -370,9 +389,9 @@ def _render_output_legend(cat: Catalog, *, logbin: bool = True) -> list[str]:
             "| `UN_<name>_det_1_unscaled.txt` | no | no | no |",
             "| `UN_<name>_det_1.txt` | yes | no | no |",
             "| `UN_<name>_det_1_lb.txt` | yes | yes | **no** |",
-            "| `UN_<name>_det_1_background_subtracted.txt` | yes | yes | **yes** |",
+            f"| `{final}` | yes | yes | **yes** |",
             "",
-            "**Plot `UN_<name>_det_1_background_subtracted.txt`.** That is the "
+            f"{plot_line}. That is the "
             "final reduced curve — log-binned *and* background subtracted. "
             "Older scripts called this file `_lbs.txt`; `usansred` renamed it.",
             "",
@@ -390,9 +409,17 @@ def _render_output_legend(cat: Catalog, *, logbin: bool = True) -> list[str]:
             "|------|--------|-----------------------|",
             "| `UN_<name>_det_1_unscaled.txt` | no | no |",
             "| `UN_<name>_det_1.txt` | yes | no |",
-            "| `UN_<name>_det_1_background_subtracted.txt` | yes | **yes** |",
+            f"| `{final}` | yes | **yes** |",
             "",
-            "**Plot `UN_<name>_det_1_background_subtracted.txt`** for the final curve.",
+            f"{plot_line} for the final curve.",
+        ]
+    if short_name_copy:
+        lines += [
+            "",
+            "sansdir also writes a shorter alias, "
+            "`UN_<name>_det_1_bsub.txt`, beside each `_background_subtracted.txt` "
+            "(identical contents). The long name is kept so the engine's "
+            "`summary.xlsx` and other tools still find it.",
         ]
     lines += [
         "",
@@ -432,17 +459,22 @@ def write_outputs(
     *,
     today: str | None = None,
     logbin: bool = True,
+    short_name_copy: bool = True,
 ) -> tuple[Path, Path]:
     """Write the setup CSV and the NOTE; returns both paths.
 
-    ``logbin`` should match what the reduction will actually pass, so the
-    NOTE's filename legend describes the files the user will really get.
+    ``logbin`` and ``short_name_copy`` should match what the reduction will
+    actually do, so the NOTE's filename legend describes the files the user
+    will really get.
     """
     csv_path = Path(csv_path)
     note_path = Path(note_path)
     cat.table.to_csv(csv_path)
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text(render_note(cat, today=today, logbin=logbin), encoding="utf-8")
+    note_path.write_text(
+        render_note(cat, today=today, logbin=logbin, short_name_copy=short_name_copy),
+        encoding="utf-8",
+    )
     return csv_path, note_path
 
 

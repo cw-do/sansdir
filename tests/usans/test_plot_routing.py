@@ -31,6 +31,7 @@ _REDUCED_BODY = (
         "UN_S0-20C_det_1_unscaled.txt",
         "UN_S0-20C_det_1_background_subtracted.txt",
         "UN_emptyBanjo-restart_det_1_lb.txt",
+        "UN_S0-20C_det_1_bsub.txt",
     ],
 )
 def test_reduced_usans_output_is_classified_as_iq(tmp_path: Path, name: str) -> None:

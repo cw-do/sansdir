@@ -356,8 +356,13 @@ all `_lb.txt`, which is log-binned but is the subtraction's *input*:
 | `UN_<name>_det_1_background_subtracted.txt` | yes | yes | **yes** ← plot this |
 
 The last one is the final curve; the older loose `usans-reduction` script
-called it `_lbs.txt`, and `usansred` renamed it. The background sample gets
-no `_background_subtracted.txt` — nothing is subtracted from itself.
+called it `_lbs.txt`, and `usansred` renamed it to the mouthful above. Since
+that name is long, sansdir writes a shorter **`UN_<name>_det_1_bsub.txt`**
+alias beside it (identical contents) after every reduce — plot whichever you
+prefer. The verbose original is kept so the engine's `summary.xlsx` and any
+collaborator scripts still find it; set `[usans].short_name_copy = false` to
+skip the alias. The background sample gets no subtracted file at all —
+nothing is subtracted from itself.
 
 Reduction itself is **not** implemented in sansdir: `r` shells out to the
 instrument team's installed `reduceUSANS` (`neutrons/usansred`) with `-l`
@@ -565,6 +570,7 @@ reduce_command    = ""                            # explicit argv override
 data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
 logbin            = true                          # pass -l by default
 thickness_cm      = 0.1                           # default in new setup CSVs
+short_name_copy   = true                          # also write UN_*_bsub.txt aliases
 
 [mail]
 command = "mail"        # or "mutt"

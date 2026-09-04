@@ -424,7 +424,9 @@ def usans_init(
     if output:
         csv_path = Path(output)
         note_path = csv_path.with_name(f"{label}_NOTE.md")
-    write_outputs(cat, csv_path, note_path, logbin=cfg.usans.logbin)
+    write_outputs(
+        cat, csv_path, note_path, logbin=cfg.usans.logbin, short_name_copy=cfg.usans.short_name_copy
+    )
     click.echo(str(csv_path))
     click.echo(str(note_path))
     for warning in cat.warnings:
@@ -502,6 +504,7 @@ def usans_reduce(
             command=cfg.usans.reduce_command,
             pixi_manifest=cfg.usans.pixi_manifest,
             timeout=cfg.usans.reduce_timeout_seconds or None,
+            short_name_copy=cfg.usans.short_name_copy,
         )
     except (runner.ReduceError, FileNotFoundError) as exc:
         raise click.ClickException(str(exc)) from exc

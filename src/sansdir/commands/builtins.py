@@ -1647,10 +1647,15 @@ def _make_usans_init_table(app: AppProtocol) -> Command:
             f"{csv_path.name} already exists in {target_dir}.\nOverwrite it (and the NOTE)?"
         ):
             return None
-        # Pass the reduction's real log-binning setting so the NOTE's
-        # filename legend lists the files this host will actually write.
+        # Pass the reduction's real log-binning and short-name settings so
+        # the NOTE's filename legend lists the files this host will write.
         await asyncio.to_thread(
-            write_outputs, cat, csv_path, note_path, logbin=cfg.usans.logbin
+            write_outputs,
+            cat,
+            csv_path,
+            note_path,
+            logbin=cfg.usans.logbin,
+            short_name_copy=cfg.usans.short_name_copy,
         )
 
         app.active_panel.refresh_listing()
@@ -1878,6 +1883,7 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
                 command=cfg.usans.reduce_command,
                 pixi_manifest=cfg.usans.pixi_manifest,
                 timeout=timeout,
+                short_name_copy=cfg.usans.short_name_copy,
             )
         except (runner.ReduceError, FileNotFoundError, OSError) as exc:
             app.notify_user(f"reduceUSANS: {exc}", severity="error")

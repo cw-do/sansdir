@@ -226,3 +226,14 @@ def test_write_outputs_threads_the_logbin_flag(
     cat = build_catalog("IPTS-1", runs_5x, start_run=1003, data_dir=data_dir_5x)
     _, note_path = write_outputs(cat, *output_paths(cat, tmp_path), logbin=False)
     assert "interpolation" in note_path.read_text(encoding="utf-8")
+
+
+def test_note_legend_names_the_short_alias_when_enabled(
+    runs_5x: list[FakeRun], data_dir_5x: Path
+) -> None:
+    cat = build_catalog("IPTS-1", runs_5x, start_run=1003, data_dir=data_dir_5x)
+    with_alias = render_note(cat, today="2026-01-01", short_name_copy=True)
+    without = render_note(cat, today="2026-01-01", short_name_copy=False)
+    assert "UN_<name>_det_1_bsub.txt" in with_alias
+    assert "identical contents" in with_alias
+    assert "_bsub.txt" not in without

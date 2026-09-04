@@ -101,3 +101,38 @@ def test_load_keys_section_default_is_empty_dict(tmp_path: Path) -> None:
     cfg = load_config(p)
     assert cfg.keys == KeysConfig()
     assert cfg.keys.overrides == {}
+
+
+def test_usans_section_defaults(tmp_path: Path) -> None:
+    cfg = load_config(tmp_path / "none.toml")
+    assert cfg.usans.logbin is True
+    assert cfg.usans.short_name_copy is True
+    assert cfg.usans.pixi_manifest == "/usr/local/pixi/usansred"
+
+
+def test_usans_section_overrides(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text(
+        """
+        [usans]
+        logbin = false
+        short_name_copy = false
+        thickness_cm = 0.25
+        reduce_command = "my-reduce"
+        """,
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    assert cfg.usans.logbin is False
+    assert cfg.usans.short_name_copy is False
+    assert cfg.usans.thickness_cm == 0.25
+    assert cfg.usans.reduce_command == "my-reduce"
+
+
+def test_instrument_section_defaults_and_override(tmp_path: Path) -> None:
+    assert load_config(tmp_path / "none.toml").instrument.auto_detect is True
+    p = tmp_path / "config.toml"
+    p.write_text('[instrument]\ndefault = "USANS"\nauto_detect = false\n', encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg.instrument.default == "USANS"
+    assert cfg.instrument.auto_detect is False

@@ -244,3 +244,99 @@ def test_reduce_smoke(tmp_path: Path) -> None:
     names = {p.name for p in result.produced}
     assert "UN_S0-20C_det_1_lb.txt" in names
     assert "UN_S0-20C_det_1_background_subtracted.txt" in names
+
+
+# ---------------------------------------------------------------------------
+# Short-name aliases
+# ---------------------------------------------------------------------------
+
+
+def _reduced_output(tmp_path: Path, names: list[str]) -> Path:
+    out = tmp_path / "output"
+    out.mkdir()
+    for name in names:
+        (out / name).write_text("1e-4,12.0,0.3,\n", encoding="utf-8")
+    return out
+
+
+def test_write_short_name_copies_aliases_the_subtracted_file(tmp_path: Path) -> None:
+    out = _reduced_output(
+        tmp_path,
+        [
+            "UN_S0-20C_det_1_background_subtracted.txt",
+            "UN_S0-20C_det_1_lb.txt",
+        ],
+    )
+    made = runner.write_short_name_copies(out)
+
+    alias = out / "UN_S0-20C_det_1_bsub.txt"
+    assert made == [alias]
+    assert alias.is_file()
+    # Identical contents, and the verbose original is kept.
+    assert alias.read_text(encoding="utf-8") == (
+        out / "UN_S0-20C_det_1_background_subtracted.txt"
+    ).read_text(encoding="utf-8")
+    assert (out / "UN_S0-20C_det_1_background_subtracted.txt").is_file()
+
+
+def test_write_short_name_copies_leaves_lb_alone(tmp_path: Path) -> None:
+    """Only the verbose subtracted name is aliased; short names are untouched."""
+    out = _reduced_output(tmp_path, ["UN_S0_det_1_lb.txt", "UN_S0_det_1.txt"])
+    assert runner.write_short_name_copies(out) == []
+    assert not (out / "UN_S0_det_1_bsub.txt").exists()
+
+
+def test_write_short_name_copies_is_idempotent(tmp_path: Path) -> None:
+    out = _reduced_output(tmp_path, ["UN_S0_det_1_background_subtracted.txt"])
+    first = runner.write_short_name_copies(out)
+    assert first  # made it once
+    second = runner.write_short_name_copies(out)
+    assert second == [], "an up-to-date alias is not rewritten"
+
+
+def test_write_short_name_copies_refreshes_a_stale_alias(tmp_path: Path) -> None:
+    out = _reduced_output(tmp_path, ["UN_S0_det_1_background_subtracted.txt"])
+    stale = out / "UN_S0_det_1_bsub.txt"
+    stale.write_text("OLD\n", encoding="utf-8")
+    import os
+    import time
+
+    src = out / "UN_S0_det_1_background_subtracted.txt"
+    # Make the source newer than the stale alias.
+    past = time.time() - 100
+    os.utime(stale, (past, past))
+    runner.write_short_name_copies(out)
+    assert stale.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+
+
+def test_reduce_csv_writes_the_short_alias(tmp_path: Path) -> None:
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = tmp_path / "setup.csv"
+    csv.write_text("b,E,100,4,0.1\ns,S0,104,4,0.1\n", encoding="utf-8")
+    out = tmp_path / "out"
+    engine = _stub_engine(
+        tmp_path,
+        'echo "q,i,e" > "$3/UN_S0_det_1_background_subtracted.txt"\n'
+        'echo "q,i,e" > "$3/UN_S0_det_1_lb.txt"\n',
+    )
+    result = runner.reduce_csv(csv, data_dir=data_dir, output_dir=out, command=str(engine))
+
+    assert result.ok
+    assert (out / "UN_S0_det_1_bsub.txt").is_file()
+    # The alias is NOT counted as a produced curve — the count stays honest.
+    assert (out / "UN_S0_det_1_bsub.txt") not in result.produced
+    assert (out / "UN_S0_det_1_background_subtracted.txt") in result.produced
+
+
+def test_reduce_csv_can_skip_the_short_alias(tmp_path: Path) -> None:
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = tmp_path / "setup.csv"
+    csv.write_text("b,E,100,4,0.1\ns,S0,104,4,0.1\n", encoding="utf-8")
+    out = tmp_path / "out"
+    engine = _stub_engine(tmp_path, 'echo "q,i,e" > "$3/UN_S0_det_1_background_subtracted.txt"\n')
+    runner.reduce_csv(
+        csv, data_dir=data_dir, output_dir=out, command=str(engine), short_name_copy=False
+    )
+    assert not (out / "UN_S0_det_1_bsub.txt").exists()

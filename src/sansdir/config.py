@@ -123,6 +123,11 @@ class UsansConfig:
             standard log-binned ``UN_<name>_det_1_lb.txt``.
         thickness_cm: Default sample thickness written into new setup CSVs.
         reduce_timeout_seconds: Kill the engine after this long; 0 waits.
+        short_name_copy: After a reduce, also write a short-named copy of the
+            verbose engine output (``_background_subtracted.txt`` ->
+            ``_bsub.txt``). The original is kept, so the engine's own
+            ``summary.xlsx`` and any downstream tooling are unaffected. Set
+            to ``false`` to skip the extra file.
     """
 
     pixi_manifest: str = "/usr/local/pixi/usansred"
@@ -131,6 +136,7 @@ class UsansConfig:
     logbin: bool = True
     thickness_cm: float = 0.1
     reduce_timeout_seconds: float = 0.0
+    short_name_copy: bool = True
 
 
 @dataclass(frozen=True)
@@ -227,6 +233,9 @@ def load_config(path: Path | None = None) -> Config:
             thickness_cm=float(usans_section.get("thickness_cm", UsansConfig.thickness_cm)),
             reduce_timeout_seconds=float(
                 usans_section.get("reduce_timeout_seconds", UsansConfig.reduce_timeout_seconds)
+            ),
+            short_name_copy=bool(
+                usans_section.get("short_name_copy", UsansConfig.short_name_copy)
             ),
         ),
     )

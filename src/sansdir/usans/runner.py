@@ -47,6 +47,14 @@ _STAGE_PREFIX: str = "sansdir-usans-"
 # Reduced-output filenames the engine writes into the output directory.
 OUTPUT_GLOB: str = "UN_*_det_1*.txt"
 
+# The engine (usansred) hard-codes verbose output suffixes. This maps the
+# long ones sansdir aliases to shorter, plot-friendly names. The originals
+# are always kept, so the engine's own ``summary.xlsx`` and any downstream
+# tooling that expects the standard name keep working.
+SHORT_NAME_MAP: dict[str, str] = {
+    "_det_1_background_subtracted.txt": "_det_1_bsub.txt",
+}
+
 
 class ReduceError(RuntimeError):
     """Raised when ``reduceUSANS`` can't be found or exits non-zero."""
@@ -211,6 +219,42 @@ def stage_inputs(setup_csv: Path, data_dir: Path, stage_dir: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Short-name aliases
+# ---------------------------------------------------------------------------
+
+
+def write_short_name_copies(output_dir: str | Path) -> list[Path]:
+    """Alongside each verbose engine output, write a short-named copy.
+
+    ``usansred`` names its final curve ``UN_<name>_det_1_background_subtracted.txt``;
+    this adds ``UN_<name>_det_1_bsub.txt`` with identical contents. A copy,
+    not a symlink: the reduced curves are a deliverable users move and share,
+    and a dangling link after a move is worse than a duplicate file.
+
+    Non-destructive — the original is always kept — so it is safe to run
+    unconditionally. Only files whose short alias is missing or older than
+    the source are (re)written, so a repeated reduce doesn't thrash.
+
+    Returns:
+        The alias paths written (empty when the engine produced no
+        verbose-named output, e.g. an empty-cell-only run).
+    """
+    out = Path(output_dir)
+    made: list[Path] = []
+    for long_suffix, short_suffix in SHORT_NAME_MAP.items():
+        for src in sorted(out.glob(f"UN_*{long_suffix}")):
+            dst = src.with_name(src.name[: -len(long_suffix)] + short_suffix)
+            try:
+                if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+                    continue
+                shutil.copyfile(src, dst)
+            except OSError:
+                continue
+            made.append(dst)
+    return made
+
+
+# ---------------------------------------------------------------------------
 # Running
 # ---------------------------------------------------------------------------
 
@@ -240,6 +284,7 @@ def reduce_csv(
     command: str = "",
     pixi_manifest: str = DEFAULT_PIXI_MANIFEST,
     timeout: float | None = None,
+    short_name_copy: bool = True,
 ) -> ReduceResult:
     """Reduce every sample in ``setup_csv`` with the installed engine.
 
@@ -256,6 +301,9 @@ def reduce_csv(
         command: ``[usans].reduce_command`` override.
         pixi_manifest: Root of the ``usansred`` pixi deployment.
         timeout: Seconds before the engine is killed; ``None`` waits.
+        short_name_copy: After a successful run, also write short-named
+            aliases of the verbose engine output (see
+            :func:`write_short_name_copies`). Non-destructive.
 
     Returns:
         A :class:`ReduceResult`; check :attr:`ReduceResult.ok`.
@@ -309,7 +357,11 @@ def reduce_csv(
         if stage:
             shutil.rmtree(stage, ignore_errors=True)
 
+    # Count the engine's own output *before* aliasing, so the reduced-curve
+    # count the user sees stays honest (one curve, not one plus its alias).
     produced = tuple(sorted(output_dir.glob(OUTPUT_GLOB)))
+    if short_name_copy and proc.returncode == 0:
+        write_short_name_copies(output_dir)
     return ReduceResult(
         output_dir=output_dir,
         returncode=proc.returncode,
