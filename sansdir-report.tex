@@ -1327,6 +1327,7 @@ reduce_command    = ""   # explicit override for the engine argv
 data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
 logbin            = true
 thickness_cm      = 0.1
+short_name_copy   = true   # also write UN_*_bsub.txt aliases
 
 [mail]
 command = "mail"                  # or "mutt"
@@ -1448,6 +1449,13 @@ Reduced output is ordinary two- or three-column text, so the existing plotting
 path handles it with only a filename rule added to the classifier. The rule
 matches on the name rather than the column count so that a sample whose name
 happens to contain \texttt{trans} is not routed to the transmission plotter.
+
+The engine's final curve carries a verbose suffix,
+\texttt{\_background\_subtracted.txt}. Because that name is long, the program
+writes a shorter \texttt{\_bsub.txt} alias beside it after each reduce, keeping
+the original so the engine's own summary spreadsheet and any downstream tooling
+that expects the standard name continue to work. The alias is a copy, not a
+symbolic link, and is controlled by \texttt{[usans].short\_name\_copy}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 12. DATA FORMATS
