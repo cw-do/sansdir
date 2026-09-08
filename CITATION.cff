@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use sansdir in published work, please cite it as below."
+title: "sansdir: a keyboard-driven terminal file manager and reduction front-end for SANS and USANS data"
+abstract: >-
+  A dual-pane terminal user interface for navigating, inspecting, plotting and
+  reducing small-angle and ultra-small-angle neutron scattering data on the
+  ORNL analysis cluster. Includes OnCat catalog integration, NeXus metadata
+  extraction, detector masking, USANS reduction table generation, and
+  desmearing by truncated Abel inversion.
+type: software
+authors:
+  - family-names: "Do"
+    given-names: "Changwoo"
+    email: "doc1@ornl.gov"
+    affiliation: "Oak Ridge National Laboratory"
+license: MIT
+repository-code: "https://github.com/cw-do/sansdir"
+keywords:
+  - small-angle neutron scattering
+  - SANS
+  - USANS
+  - neutron scattering
+  - data reduction
+  - terminal user interface
+references:
+  - type: article
+    title: "Analytical desmearing of Bonse-Hart ultra-small-angle neutron scattering data via truncated Abel inversion"
+    authors:
+      - family-names: "Huang"
+        given-names: "Guan-Rong"
+      - family-names: "Chen"
+        given-names: "Wei-Ren"
+    journal: "Journal of Applied Crystallography"
+    volume: 59
+    start: 1083
+    year: 2026
+    notes: "Algorithm implemented in sansdir.usans.desmear"
