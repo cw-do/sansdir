@@ -30,20 +30,26 @@ matplotlib plots in their own windows when one *is* available.
 
 ### Option A — Zero-install on the ORNL analysis cluster *(recommended)*
 
-The repo at `/SNS/EQSANS/shared/script/sansdir` ships its own bundled
-venv. Anyone with read access — every cluster user — can run it
-directly, with no Python or pip steps:
+Run the **stable release** at `/SNS/EQSANS/shared/script/sansdir-stable`.
+It ships its own bundled venv, so any cluster user can run it directly with
+no Python or pip steps:
 
 ```bash
-/SNS/EQSANS/shared/script/sansdir/bin/sansdir
-/SNS/EQSANS/shared/script/sansdir/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
+/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir
+/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
 ```
+
+> **Use `sansdir-stable`, not `sansdir`.** The neighbouring `sansdir/`
+> directory is the maintainer's *development* tree — an editable checkout that
+> changes mid-edit. `sansdir-stable/` holds a non-editable install frozen at a
+> released tag (see its `VERSION` file), so a half-finished change can never
+> reach you. The maintainer advances it with `./update.sh <tag>`.
 
 To save typing, drop a symlink (or a copy) into your `PATH`:
 
 ```bash
 mkdir -p ~/bin
-ln -s /SNS/EQSANS/shared/script/sansdir/bin/sansdir ~/bin/sansdir
+ln -s /SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir ~/bin/sansdir
 # (~/bin and ~/.local/bin are on your PATH on the analysis nodes by default)
 sansdir --version
 ```
@@ -51,13 +57,13 @@ sansdir --version
 Or prepend the shared bin directory:
 
 ```bash
-echo 'export PATH="/SNS/EQSANS/shared/script/sansdir/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="/SNS/EQSANS/shared/script/sansdir-stable/bin:$PATH"' >> ~/.bashrc
 ```
 
 You can also **just copy the script** and run it from anywhere:
 
 ```bash
-cp /SNS/EQSANS/shared/script/sansdir/.venv/bin/sansdir ~/bin/
+cp /SNS/EQSANS/shared/script/sansdir-stable/.venv/bin/sansdir ~/bin/
 ~/bin/sansdir
 ```
 
@@ -68,8 +74,8 @@ lives. The chain when you run the copy:
 
 ```
 [your copy of the script]
-  → /gpfs/.../sansdir/.venv/bin/python   (via absolute shebang)
-    → /gpfs/.../sansdir/src/sansdir/cli.py  (via the venv's editable install)
+  → /gpfs/.../sansdir-stable/.venv/bin/python        (via absolute shebang)
+    → .../site-packages/sansdir/cli.py               (installed, not linked)
 ```
 
 A **symlink is preferable to a copy** in practice: when I refresh the
@@ -78,8 +84,9 @@ no re-copying.
 
 What still has to live on the shared mount (don't move these):
 
-- `/SNS/EQSANS/shared/script/sansdir/.venv/` — the bundled Python + deps.
-- `/SNS/EQSANS/shared/script/sansdir/src/sansdir/` — the source the egg-link points to.
+- `/SNS/EQSANS/shared/script/sansdir-stable/.venv/` — the bundled Python,
+  dependencies **and** the installed sansdir package. Self-contained: nothing
+  in it refers back to the development tree.
 
 What's portable (copy / symlink wherever):
 
