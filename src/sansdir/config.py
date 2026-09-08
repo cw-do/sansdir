@@ -123,6 +123,8 @@ class UsansConfig:
             standard log-binned ``UN_<name>_det_1_lb.txt``.
         thickness_cm: Default sample thickness written into new setup CSVs.
         reduce_timeout_seconds: Kill the engine after this long; 0 waits.
+        sigma_y: Slit half-width in A^-1 used when desmearing. The SNS
+            Bonse-Hart value is 0.13 (Huang et al. 2026, eq. 17).
         short_name_copy: After a reduce, also write a short-named copy of the
             verbose engine output (``_background_subtracted.txt`` ->
             ``_bsub.txt``). The original is kept, so the engine's own
@@ -137,6 +139,7 @@ class UsansConfig:
     thickness_cm: float = 0.1
     reduce_timeout_seconds: float = 0.0
     short_name_copy: bool = True
+    sigma_y: float = 0.13
 
 
 @dataclass(frozen=True)
@@ -237,5 +240,6 @@ def load_config(path: Path | None = None) -> Config:
             short_name_copy=bool(
                 usans_section.get("short_name_copy", UsansConfig.short_name_copy)
             ),
+            sigma_y=float(usans_section.get("sigma_y", UsansConfig.sigma_y)),
         ),
     )

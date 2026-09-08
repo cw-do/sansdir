@@ -243,15 +243,17 @@ def default_keymap(mode: str = "SANS") -> list[KeyBinding]:
 def usans_keymap() -> list[KeyBinding]:
     """USANS-only bindings, appended by :func:`default_keymap` in USANS mode.
 
-    Exactly one key, on purpose. ``r`` is the whole USANS verb: it reduces
+    Two keys. ``r`` is the whole reduction verb: it reduces
     the setup table under the cursor, and when there isn't one it offers to
     build it from the current IPTS (inferred from the pane's path). So the
     "generate" step needs no binding and no hint-bar cell of its own, and
     nothing has to be dropped to make room. Everything else — opening the
     CSV, editing it (``F4``), plotting the reduced curves (``p``),
     filtering, navigating — reuses the bindings SANS users already know.
-    ``r`` is unbound in the SANS keymap, so nothing collides.
+    ``d`` desmears the selected reduced curves. Both are unbound in the SANS
+    keymap, so nothing collides.
     """
     return [
         KeyBinding("r", "usans.reduce", "Reduce setup CSV — or build one if there isn't"),
+        KeyBinding("d", "usans.desmear", "Desmear selected USANS I(Q) curves"),
     ]

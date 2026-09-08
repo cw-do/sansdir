@@ -74,3 +74,10 @@ CLAUDE.md
 PLANNING.md
 PLANNING-*.md
 TASKS.md
+
+# Algorithm reference material: published papers (IUCr / AIP copyright) and
+# the prototype script they were implemented from. The repo is public, so the
+# PDFs stay local — sansdir/usans/desmear.py cites both by DOI instead.
+docs/desmear_ref/
+docs/desmear.py
+docs/usans_gpr_inversion.pdf

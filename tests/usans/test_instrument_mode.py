@@ -109,12 +109,13 @@ def test_sans_keymap_is_unchanged_by_the_usans_feature() -> None:
     assert not any(kb.command.startswith("usans.") for kb in default_keymap())
 
 
-def test_usans_mode_adds_r_and_keeps_every_sans_binding() -> None:
+def test_usans_mode_adds_its_keys_and_keeps_every_sans_binding() -> None:
     sans = default_keymap()
     usans = default_keymap(mode="USANS")
     assert usans[: len(sans)] == sans
-    assert [kb.key for kb in usans[len(sans) :]] == ["r"]
-    assert usans[-1].command == "usans.reduce"
+    added = usans[len(sans) :]
+    assert [kb.key for kb in added] == ["r", "d"]
+    assert [kb.command for kb in added] == ["usans.reduce", "usans.desmear"]
 
 
 def test_usans_bindings_name_registered_commands(tmp_path: Path) -> None:

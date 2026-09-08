@@ -49,7 +49,7 @@ HINT_ROW_2: tuple[str, ...] = (
 
 # USANS mode appends its own cells to row 2. Everything before ``r`` is
 # identical to SANS, so a USANS user still reads the same familiar strip.
-HINT_ROW_2_USANS: tuple[str, ...] = (*HINT_ROW_2, "r")
+HINT_ROW_2_USANS: tuple[str, ...] = (*HINT_ROW_2, "r", "d")
 
 # Back-compat: tests import this — keep it as the concatenated row order.
 # The USANS-only cells sit at the end so the SANS strip stays a prefix.
@@ -80,6 +80,7 @@ LABEL_OVERRIDES: dict[str, str] = {
     ":": "Cmd",
     "?": "Help",
     "r": "Reduce",
+    "d": "Desmear",
 }
 
 KEY_DISPLAY: dict[str, str] = {
@@ -110,6 +111,7 @@ KEY_DISPLAY: dict[str, str] = {
     ":": ":",
     "?": "?",
     "r": "r",
+    "d": "d",
 }
 
 

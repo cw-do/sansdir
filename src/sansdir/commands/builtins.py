@@ -1950,6 +1950,179 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
     )
 
 
+def _make_usans_desmear(app: AppProtocol) -> Command:
+    from sansdir.config import load_config as _load_config
+
+    _cfg0 = _load_config().usans
+
+    async def handler(
+        paths: list[str] | None = None,
+        sans: str = "",
+        out_dir: str = "",
+        sigma_y: float = _cfg0.sigma_y,
+        ask_for_sans: bool = True,
+    ) -> list[str]:
+        from sansdir.config import load_config
+        from sansdir.usans.desmear import DesmearError, desmear
+        from sansdir.usans.desmear_io import (
+            desmeared_path,
+            looks_like_iq,
+            read_curve,
+            write_curve,
+        )
+
+        cfg = load_config()
+        selected = (
+            [Path(p) for p in paths] if paths is not None else list(app.active_panel.selection())
+        )
+        if not selected:
+            app.notify_user("nothing tagged or under cursor", severity="warning")
+            return []
+        curves = [p for p in selected if looks_like_iq(p)]
+        skipped = len(selected) - len(curves)
+        if not curves:
+            app.notify_user(
+                "no reduced I(Q) curves in the selection — desmearing needs the "
+                "background-subtracted USANS text files",
+                severity="warning",
+            )
+            return []
+        if skipped:
+            app.notify_user(f"skipping {skipped} file(s) that are not 1-D I(Q) curves")
+
+        # A single curve is the case where pairing with SANS is worth the
+        # interaction; a batch is assumed USANS-only, as the high-Q side would
+        # have to be matched per sample and cannot be guessed for a whole
+        # folder at once.
+        sans_data = None
+        sans_path: Path | None = None
+        if sans:
+            sans_path = Path(sans).expanduser()
+        elif len(curves) == 1 and ask_for_sans:
+            sans_path = await _ask_for_sans_curve(app, curves[0])
+        if sans_path is not None:
+            if not looks_like_iq(sans_path):
+                app.notify_user(f"{sans_path.name} is not a 1-D I(Q) curve", severity="error")
+                return []
+            sans_data = read_curve(sans_path)
+
+        target_dir = Path(out_dir).expanduser() if out_dir else None
+        written: list[str] = []
+        failed: list[str] = []
+        for src in curves:
+            try:
+                q, i, di = read_curve(src)
+                result = await asyncio.to_thread(
+                    desmear, q, i, di, sans=sans_data, sigma_y=sigma_y or cfg.usans.sigma_y
+                )
+                dest = desmeared_path(src, target_dir)
+                await asyncio.to_thread(
+                    write_curve, result, dest, source=src, sans_source=sans_path
+                )
+            except (DesmearError, ValueError, OSError) as exc:
+                failed.append(f"{src.name}: {exc}")
+                continue
+            written.append(str(dest))
+            if len(curves) == 1:
+                app.notify_user(
+                    f"{dest.name}: {result.mode}, gain x{result.gain_at_low_q:.3g} at low Q, "
+                    f"h={result.bandwidth:.3g}"
+                )
+                for warning in result.warnings:
+                    app.notify_user(warning, severity="warning")
+
+        app.revalidate_panes()
+        working = app.working_panel
+        if written and Path(written[-1]).parent == working.cwd:
+            working.move_cursor_to_path(Path(written[-1]))
+        if failed:
+            app.notify_user(
+                f"{len(failed)} curve(s) could not be desmeared — {failed[0]}"
+                + (f" (+{len(failed) - 1} more)" if len(failed) > 1 else ""),
+                severity="error",
+            )
+        if written:
+            where = "with SANS" if sans_data is not None else "USANS-only"
+            app.notify_user(f"desmeared {len(written)} curve(s) ({where})")
+        return written
+
+    return Command(
+        name="usans.desmear",
+        description="Desmear the selected USANS I(Q) curves (truncated Abel inversion).",
+        params=(
+            CommandParam(
+                name="paths",
+                type="files",
+                description="Curves to desmear. Blank = the active pane's selection.",
+                required=False,
+                default=None,
+            ),
+            CommandParam(
+                name="sans",
+                type="path",
+                description=(
+                    "Companion pinhole SANS curve supplying the high-Q side. "
+                    "Blank = ask (single curve) or go USANS-only (batch)."
+                ),
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="out_dir",
+                type="path",
+                description="Where to write. Blank = beside each input curve.",
+                required=False,
+                default="",
+            ),
+            CommandParam(
+                name="sigma_y",
+                type="float",
+                description="Slit half-width in A^-1 (SNS USANS: 0.13).",
+                required=False,
+                default=_cfg0.sigma_y,
+            ),
+            CommandParam(
+                name="ask_for_sans",
+                type="bool",
+                description="Offer the SANS picker for a single curve.",
+                required=False,
+                default=True,
+            ),
+        ),
+        handler=handler,
+        aliases=("desmear",),
+        examples=("desmear", "desmear sans=EQSANS_merged.txt", "usans.desmear sigma_y=0.13"),
+    )
+
+
+async def _ask_for_sans_curve(app: AppProtocol, curve: Path) -> Path | None:
+    """Offer to pair one USANS curve with a companion SANS measurement.
+
+    The question goes in this pane and the file list stays in the other, so
+    the user can look through the folder while reading what is being asked.
+    Declining is a normal answer, not an error: the USANS-only path is
+    supported, just narrower.
+    """
+    from sansdir.app import SansdirApp as _RealApp
+
+    if not isinstance(app, _RealApp):
+        return None
+    return await app.pick_file_in_other_pane(
+        f"Desmearing [b]{curve.name}[/b].\n\n"
+        "Do you have a matching [b]SANS[/b] curve for this sample?",
+        title="USANS desmear — high-Q data",
+        help_text=(
+            "Equation 15 needs I(Q) out to Q ~ 0.13 A^-1, two decades above the\n"
+            "USANS window. A pinhole SANS curve for the same sample supplies it\n"
+            "and makes the result trustworthy over the full joined range.\n\n"
+            "Without one, the high-Q side is extrapolated as a power law and the\n"
+            "result is truncated to the measured USANS range.\n\n"
+            "Pick the SANS file in the other pane, or press Esc to go USANS-only."
+        ),
+        start_dir=curve.parent,
+    )
+
+
 def _make_pane_toggle_catalog(app: AppProtocol) -> Command:
     def handler() -> None:
         app.toggle_other_pane_catalog()
@@ -2543,6 +2716,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_instrument_set(app),
         _make_usans_init_table(app),
         _make_usans_reduce(app),
+        _make_usans_desmear(app),
         _make_plot_iq(app),
         _make_plot_transmission(app),
         _make_plot_iqxqy(app),

@@ -19,6 +19,7 @@ import asyncio
 import shlex
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -103,6 +104,9 @@ class SansdirApp(App[int]):
         self._titlebar = TitleBar(self._instrument)
         self._active_id: str = "left"
         self._max: bool = False
+        # Set while pick_file_in_other_pane() is awaiting a choice; on_key
+        # routes Enter/Esc to it and suppresses the rest of the keymap.
+        self._pick_future: asyncio.Future[Path | None] | None = None
 
     # ------------------------------------------------------------------
     # Layout
@@ -125,8 +129,7 @@ class SansdirApp(App[int]):
         except Exception as exc:
             self.notify(
                 f"theme '{self._cfg.ui.theme}' not available ({exc}); "
-                "using default. Try one of: "
-                + ", ".join(sorted(self.available_themes)),
+                "using default. Try one of: " + ", ".join(sorted(self.available_themes)),
                 severity="warning",
             )
         self._apply_active_class()
@@ -380,6 +383,77 @@ class SansdirApp(App[int]):
     def is_other_pane_viewing(self) -> bool:
         return self._inactive_slot.viewer_visible
 
+    async def pick_file_in_other_pane(
+        self,
+        message: str,
+        *,
+        title: str = "Select a file",
+        help_text: str = "",
+        start_dir: Path | None = None,
+    ) -> Path | None:
+        """Ask a question in this pane; let the user answer in the other one.
+
+        A modal would cover the very file list the user has to read. Instead
+        the question goes into the active slot and the *opposite* pane becomes
+        active, so arrows, ``/`` filtering and ``Backspace`` all work exactly
+        as they normally do while choosing. ``Enter`` picks the file under the
+        cursor, ``Esc`` declines.
+
+        Args:
+            message: The question. Rich markup allowed.
+            title: Heading above it.
+            help_text: Extra guidance under the question.
+            start_dir: Directory to show the picking pane in; defaults to
+                wherever that pane already is.
+
+        Returns:
+            The chosen file, or ``None`` if the user pressed ``Esc``.
+        """
+        if self._pick_future is not None:
+            self.notify_user("already waiting for a file selection", severity="warning")
+            return None
+
+        asking_id = self._active_id
+        picking_id = "right" if asking_id == "left" else "left"
+        asking_slot = self._left_slot if asking_id == "left" else self._right_slot
+        picking_slot = self._right_slot if asking_id == "left" else self._left_slot
+        picking_panel = self._right if asking_id == "left" else self._left
+
+        # Remember what the picking pane was showing so we can put it back.
+        restore_mode = picking_slot.mode
+        restore_cwd = picking_panel.cwd
+        asking_slot.show_prompt(title, message, help_text)
+        picking_slot.show_panel()
+        if start_dir is not None and Path(start_dir).is_dir():
+            picking_panel.set_cwd(Path(start_dir))
+        self.set_active(picking_id)
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[Path | None] = loop.create_future()
+        self._pick_future = fut
+        try:
+            chosen = await fut
+        finally:
+            self._pick_future = None
+            asking_slot.show_panel()
+            if restore_mode == "catalog" and picking_slot.has_catalog:
+                picking_slot.show_catalog(
+                    picking_slot.catalog.ipts,
+                    picking_slot.catalog.all_files,
+                    instrument=picking_slot.catalog.instrument,
+                    facility=picking_slot.catalog.facility,
+                )
+            elif start_dir is not None:
+                picking_panel.set_cwd(restore_cwd)
+            self.set_active(asking_id)
+        return chosen
+
+    def _resolve_pick(self, value: Path | None) -> None:
+        """Complete an in-flight :meth:`pick_file_in_other_pane`."""
+        fut = self._pick_future
+        if fut is not None and not fut.done():
+            fut.set_result(value)
+
     def revalidate_panes(self) -> None:
         """Bring both slots back in step with the filesystem.
 
@@ -508,6 +582,13 @@ class SansdirApp(App[int]):
         # own bindings handle Up/Down/Tab/Esc and normal characters.
         if self.focused is self._cmdline:
             return
+        # A pick_file_in_other_pane() is waiting for an answer. Enter chooses,
+        # Esc declines, and a short allowlist keeps navigating; everything
+        # else is swallowed so `q` cannot quit and `d`/`r` cannot re-enter a
+        # command out from under the pending one.
+        if self._pick_future is not None:
+            self._on_key_while_picking(event)
+            return
         # CatalogTable owns its own ``p`` / ``Enter`` (plot raw run),
         # ``m`` (HDF5 tree for the cursor's run), ``M`` (batch-extract
         # the selection), ``K`` (mask editor), ``space`` (tag run) and
@@ -516,9 +597,9 @@ class SansdirApp(App[int]):
         # and a blanket "skip-when-focused-binds-anything" check would
         # also kill Enter on a FilePanel, where DataTable's row-select
         # binding shouldn't block ``nav.cd``.
-        if event.key in (
-            "p", "enter", "m", "M", "K", "space", "u"
-        ) and _is_catalog_table(self.focused):
+        if event.key in ("p", "enter", "m", "M", "K", "space", "u") and _is_catalog_table(
+            self.focused
+        ):
             return
         # Inline viewer owns ``q`` / ``escape`` (close-from-the-viewer).
         # Without this branch the App's ``q`` keymap entry would quit
@@ -531,6 +612,44 @@ class SansdirApp(App[int]):
                 event.prevent_default()
                 self._dispatch(kb)
                 return
+
+    # Keys that still reach the keymap while a file pick is in flight: pure
+    # navigation and filtering of the pane the user is choosing in.
+    _PICK_ALLOWED: ClassVar[frozenset[str]] = frozenset(
+        {"backspace", "slash", "/", "h", "1", "2", "3", "4", "g", "G"}
+    )
+
+    def _on_key_while_picking(self, event: events.Key) -> None:
+        """Route a keystroke while :meth:`pick_file_in_other_pane` is awaiting."""
+        if event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self._resolve_pick(None)
+            return
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            cursor = self.active_panel.cursor_path
+            if cursor is None or not cursor.is_file():
+                self.notify_user(
+                    "that is not a file — pick one, or Esc to skip", severity="warning"
+                )
+                return
+            self._resolve_pick(cursor)
+            return
+        if event.key in self._PICK_ALLOWED:
+            for kb in self.keymap:
+                if event.key == kb.key:
+                    event.stop()
+                    event.prevent_default()
+                    self._dispatch(kb)
+                    return
+            return
+        # Arrows / j / k / page keys are the DataTable's own bindings; let
+        # them through untouched. Anything else is swallowed.
+        if event.key not in ("up", "down", "j", "k", "pageup", "pagedown", "home", "end"):
+            event.stop()
+            event.prevent_default()
 
     def _dispatch(self, kb: KeyBinding) -> None:
         """Run the handler inline (sync) or as a worker (async).

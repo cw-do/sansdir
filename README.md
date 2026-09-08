@@ -319,6 +319,7 @@ p    → plot UN_*_det_1_lb.txt / _background_subtracted.txt
 | Key | What it does                                                                |
 |-----|-----------------------------------------------------------------------------|
 | `r`  | **Reduce** the setup CSV under the cursor — or offer to build one          |
+| `d`  | **Desmear** the selected reduced curves (see below)                        |
 | `F4` | Review / correct the CSV in `$EDITOR`                                      |
 | `p`  | Plot the reduced `UN_*_det_1_lb.txt` / `_background_subtracted.txt` curves |
 | `i` | Browse USANS experiments — only needed for an IPTS you're *not* sitting in  |
@@ -394,6 +395,67 @@ b,emptyBanjo-restart,49434,4,0.1
 s,S0-20C,49439,4,0.1
 s,S0-40C,49444,4,0.1,49446
 ```
+
+### Desmearing (`d`)
+
+USANS is slit-collimated, so what the instrument records is an average of the
+true intensity over a tall vertical acceptance:
+
+```
+I_exp(Q) = (1/σ_y) ∫₀^{σ_y} I(√(Q² + s²)) ds
+```
+
+`d` inverts that — the **truncated Abel inversion** of Huang et al.,
+*J. Appl. Cryst.* **59**, 1083 (2026), eq. 15. It is closed-form and
+non-iterative, unlike the Lake algorithm it replaces, so uncertainties
+propagate through one operator instead of accumulating over iterations.
+
+Select reduced curves (`Space` to tag, or just put the cursor on one) and
+press `d`. Each `foo.txt` becomes `foo_desmeared.txt` — plain 3-column
+`Q I dI`, so `p` plots it like any other reduced curve.
+
+**The high-Q problem, and why `d` asks.** Eq. 15 evaluates `I` at
+`Q_m = √(Q² + σ_y²) ≈ σ_y ≈ 0.13 Å⁻¹` — two decades above the USANS window —
+and integrates all the way out to there. Huang et al. Fig. 2 shows what
+happens without that information: the reconstruction tracks the truth at low
+Q, then deviates and collapses. So:
+
+| Selection | What happens |
+|---|---|
+| **One curve** | sansdir asks *"do you have a matching SANS curve?"* — the question appears in your pane, the **file list stays in the other one**, so you can browse and `/`-filter while reading it. `Enter` picks, `Esc` declines. |
+| **Several curves** | No question: a high-Q companion has to be matched per sample, so a batch always runs USANS-only. |
+
+With a SANS companion the two are put on the same smearing basis, scale-matched,
+joined across the instrument gap, and inverted over the full joined range.
+
+Without one, the high-Q side is extrapolated as a power law out to σ_y — which
+is what NIST Igor/Irena does (Kline 2006) — and the output is **truncated to
+the measured USANS range**, with the caveat written into its header:
+
+```
+# WARNING - no SANS data was supplied.
+#   Equation 15 needs I(Q) out to Q_m ~ sigma_y = 0.13 A^-1, two
+#   decades above this measurement. That side was extrapolated as a
+#   power law Q^-4.00 fitted to the top of the USANS data.
+#   ...
+#   This file is therefore TRUNCATED to the measured USANS range;
+#   treat it as valid there and nowhere else.
+```
+
+**Accuracy.** On analytic benchmarks (smear a known power law, desmear it
+back) the recovered log-log slope is within 0.5% and the median error over
+the heart of the USANS window is **0.3–0.7%**, USANS-only. The quoted `dI`
+widens sharply toward the top of the range — that is the extrapolation losing
+authority, and it is deliberate: 97% of points land within 1σ of truth.
+
+Headless:
+
+```bash
+sansdir usans desmear output/UN_*_det_1_bsub.txt          # batch, USANS-only
+sansdir usans desmear UN_S0_det_1_bsub.txt --sans EQSANS_S0.txt
+```
+
+---
 
 ### Mask creation
 
@@ -571,6 +633,7 @@ data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
 logbin            = true                          # pass -l by default
 thickness_cm      = 0.1                           # default in new setup CSVs
 short_name_copy   = true                          # also write UN_*_bsub.txt aliases
+sigma_y           = 0.13                          # slit half-width for desmearing (A^-1)
 
 [mail]
 command = "mail"        # or "mutt"

@@ -296,8 +296,7 @@ def mask(
         shapes.extend(from_json)
     if not shapes:
         raise click.UsageError(
-            "no shapes given — use --rect / --ellipse / --circle / "
-            "--polygon / --shapes-json"
+            "no shapes given — use --rect / --ellipse / --circle / --polygon / --shapes-json"
         )
     result = create_mask(
         source=source,
@@ -325,6 +324,11 @@ Examples:
   # Review it, then reduce it (log-binning is on by default).
   $EDITOR IPTS-37679_setup.csv
   sansdir usans reduce IPTS-37679_setup.csv -o ./output
+
+  \b
+  # Desmear the reduced curves (slit -> pinhole equivalent).
+  sansdir usans desmear output/UN_*_det_1_bsub.txt
+  sansdir usans desmear output/UN_S0_det_1_bsub.txt --sans EQSANS_S0.txt
 
 Reduction is delegated to the instrument team's `reduceUSANS`
 (neutrons/usansred); sansdir only prepares the table and invokes it in a
@@ -480,9 +484,7 @@ def usans_reduce(
             raise click.ClickException(str(exc)) from exc
         problems = table.validate()
         if problems:
-            raise click.ClickException(
-                "setup table is not reducible:\n  " + "\n  ".join(problems)
-            )
+            raise click.ClickException("setup table is not reducible:\n  " + "\n  ".join(problems))
         ipts = table.ipts or ipts_from_path(setup_csv)
     else:
         ipts = ipts_from_path(setup_csv)
@@ -514,6 +516,71 @@ def usans_reduce(
         raise click.ClickException(f"reduceUSANS exited {result.returncode}")
     for path in result.produced:
         click.echo(str(path))
+
+
+@usans.command("desmear")
+@click.argument("curves", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--sans",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Companion pinhole SANS curve supplying the high-Q side.",
+)
+@click.option(
+    "--sigma-y",
+    type=float,
+    default=None,
+    help="Slit half-width in A^-1 (default: [usans].sigma_y, 0.13 for SNS).",
+)
+@click.option(
+    "--out-dir",
+    "-d",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Where to write. Default: beside each input curve.",
+)
+def usans_desmear(
+    curves: tuple[str, ...],
+    sans: str | None,
+    sigma_y: float | None,
+    out_dir: str | None,
+) -> None:
+    """Desmear reduced USANS I(Q) curves by truncated Abel inversion.
+
+    Slit-collimated USANS records an average over a tall vertical acceptance;
+    this inverts it (Huang et al., J. Appl. Cryst. 59, 1083 (2026), eq. 15).
+
+    Equation 15 needs the scattering out to Q ~ sigma_y = 0.13 A^-1, far above
+    the USANS window. Pass --sans to supply that from a pinhole measurement.
+    Without it the high-Q side is extrapolated as a power law and the output
+    is truncated to the measured USANS range, with the caveat in its header.
+    """
+    from sansdir.config import load_config
+    from sansdir.usans.desmear import DesmearError, desmear
+    from sansdir.usans.desmear_io import desmeared_path, read_curve, write_curve
+
+    cfg = load_config()
+    sans_data = read_curve(sans) if sans else None
+    failures = 0
+    for src in curves:
+        try:
+            q, i, di = read_curve(src)
+            result = desmear(q, i, di, sans=sans_data, sigma_y=sigma_y or cfg.usans.sigma_y)
+            dest = write_curve(
+                result,
+                desmeared_path(src, out_dir),
+                source=src,
+                sans_source=sans,
+            )
+        except (DesmearError, ValueError, OSError) as exc:
+            click.echo(f"# {src}: {exc}", err=True)
+            failures += 1
+            continue
+        click.echo(str(dest))
+        for warning in result.warnings:
+            click.echo(f"# warning: {warning}", err=True)
+    if failures:
+        raise click.ClickException(f"{failures} of {len(curves)} curve(s) could not be desmeared")
 
 
 @main.command()

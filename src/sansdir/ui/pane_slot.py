@@ -5,6 +5,8 @@ Holds three swappable views:
 * :class:`~sansdir.ui.panel.FilePanel`        — the default file listing
 * :class:`~sansdir.ui.inline_viewer.InlineFileViewer` — F3 in-pane preview
 * :class:`~sansdir.ui.run_catalog.RunCatalogPanel`    — OnCat run catalog
+* :class:`~sansdir.ui.prompt_panel.PromptPanel`       — a question answered
+  by picking a file in the *other* pane
 
 Exactly one is visible at a time. The :class:`~sansdir.ui.panel.FilePanel`
 remains the canonical "active pane" reference (held by the App) even when
@@ -22,12 +24,13 @@ from textual.containers import Container
 
 from sansdir.ui.inline_viewer import InlineFileViewer
 from sansdir.ui.panel import FilePanel
+from sansdir.ui.prompt_panel import PromptPanel
 from sansdir.ui.run_catalog import RunCatalogPanel
 
 if TYPE_CHECKING:
     from sansdir.core.oncat import Datafile
 
-PaneMode = Literal["list", "viewer", "catalog"]
+PaneMode = Literal["list", "viewer", "catalog", "prompt"]
 
 
 class PaneSlot(Container):
@@ -45,6 +48,7 @@ class PaneSlot(Container):
         self._panel = panel
         self._viewer = InlineFileViewer(panel_id=panel_id)
         self._catalog = RunCatalogPanel(panel_id=panel_id)
+        self._prompt = PromptPanel(panel_id=panel_id)
         self._mode: PaneMode = "list"
         # Remember the last loaded catalog so F2 can reopen it without
         # another OnCat round-trip.
@@ -54,10 +58,12 @@ class PaneSlot(Container):
         yield self._panel
         yield self._viewer
         yield self._catalog
+        yield self._prompt
 
     def on_mount(self) -> None:
         self._viewer.display = False
         self._catalog.display = False
+        self._prompt.display = False
 
     # ------------------------------------------------------------------
     # Accessors
@@ -76,6 +82,10 @@ class PaneSlot(Container):
         return self._catalog
 
     @property
+    def prompt(self) -> PromptPanel:
+        return self._prompt
+
+    @property
     def mode(self) -> PaneMode:
         return self._mode
 
@@ -86,6 +96,10 @@ class PaneSlot(Container):
     @property
     def catalog_visible(self) -> bool:
         return self._mode == "catalog"
+
+    @property
+    def prompt_visible(self) -> bool:
+        return self._mode == "prompt"
 
     @property
     def has_catalog(self) -> bool:
@@ -100,6 +114,8 @@ class PaneSlot(Container):
         self._panel.display = True
         self._viewer.display = False
         self._catalog.display = False
+        self._prompt.display = False
+        self._prompt.clear()
         self._mode = "list"
         # Hiding the viewer is not enough — its Static still holds the
         # decoded file. Free it; re-showing always re-reads from disk.
@@ -127,9 +143,19 @@ class PaneSlot(Container):
         ok = self._viewer.set_path(path)
         self._panel.display = False
         self._catalog.display = False
+        self._prompt.display = False
         self._viewer.display = True
         self._mode = "viewer"
         return ok
+
+    def show_prompt(self, title: str, message: str, help_text: str = "", keys: str = "") -> None:
+        """Put a question in this slot while the user answers in the other one."""
+        self._prompt.show(title, message, help_text, keys)
+        self._panel.display = False
+        self._viewer.display = False
+        self._catalog.display = False
+        self._prompt.display = True
+        self._mode = "prompt"
 
     def show_catalog(
         self,
@@ -142,6 +168,7 @@ class PaneSlot(Container):
         self._catalog.show(ipts, files, instrument=instrument, facility=facility)
         self._panel.display = False
         self._viewer.display = False
+        self._prompt.display = False
         self._catalog.display = True
         self._mode = "catalog"
         self._catalog_loaded = True
