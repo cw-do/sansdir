@@ -144,3 +144,20 @@ async def test_sort_key_keys(tmp_path: Path, key: str, expected: str) -> None:
         await pilot.pause()
         assert app.active_panel.sort_key == expected
         await pilot.press("q")
+
+
+async def test_help_overlay_shows_the_licence(tmp_path: Path) -> None:
+    """`?` must name the licence — it is the only place a TUI user will see it."""
+    from textual.widgets import Static
+
+    from sansdir import __copyright__, __license__
+
+    app = SansdirApp(start_path=tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        rendered = " ".join(str(w.content) for w in app.screen.query(Static))
+        assert __license__ in rendered
+        assert __copyright__ in rendered
+        assert "github.com/cw-do/sansdir" in rendered

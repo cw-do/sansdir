@@ -16,7 +16,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Static
 
-from sansdir import __version__
+from sansdir import __copyright__, __license__, __url__, __version__
 from sansdir.commands.registry import CommandRegistry
 from sansdir.ui.keys import KeyBinding
 
@@ -40,6 +40,9 @@ class HelpScreen(ModalScreen[None]):
         margin-bottom: 1;
     }
     HelpScreen .contact {
+        color: $text-muted;
+    }
+    HelpScreen .licence {
         color: $text-muted;
         margin-bottom: 1;
     }
@@ -73,6 +76,10 @@ class HelpScreen(ModalScreen[None]):
             yield Static(
                 "Contact: [b]Changwoo Do[/]  ·  doc1@ornl.gov",
                 classes="contact",
+            )
+            yield Static(
+                f"[b]{__license__}[/] licence  ·  {__copyright__}  ·  {__url__}",
+                classes="licence",
             )
 
             yield Static("Key bindings", classes="section")

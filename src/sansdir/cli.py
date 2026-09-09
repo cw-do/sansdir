@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import click
 
-from sansdir import __version__
+from sansdir import __copyright__, __license__, __url__, __version__
 
 
 class _SansdirGroup(click.Group):
@@ -585,8 +585,10 @@ def usans_desmear(
 
 @main.command()
 def version() -> None:
-    """Print the sansdir version and exit."""
+    """Print the sansdir version, licence and copyright, then exit."""
     click.echo(f"sansdir {__version__}")
+    click.echo(f"{__license__} licence · {__copyright__}")
+    click.echo(__url__)
 
 
 if __name__ == "__main__":

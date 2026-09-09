@@ -90,7 +90,7 @@ def test_load_keys_section_collects_string_overrides(tmp_path: Path) -> None:
 def test_load_keys_section_drops_non_string_values(tmp_path: Path) -> None:
     """Defensive: ``f5 = 123`` is silently dropped, not a startup crash."""
     p = tmp_path / "config.toml"
-    p.write_text("[keys]\nf5 = 123\nf6 = \"ui.move_tagged\"\n", encoding="utf-8")
+    p.write_text('[keys]\nf5 = 123\nf6 = "ui.move_tagged"\n', encoding="utf-8")
     cfg = load_config(p)
     assert cfg.keys.overrides == {"f6": "ui.move_tagged"}
 
@@ -136,3 +136,22 @@ def test_instrument_section_defaults_and_override(tmp_path: Path) -> None:
     cfg = load_config(p)
     assert cfg.instrument.default == "USANS"
     assert cfg.instrument.auto_detect is False
+
+
+def test_declared_licence_matches_the_license_file() -> None:
+    """The strings shown in `?` and `sansdir version` must not drift from LICENSE.
+
+    They are hard-coded in ``sansdir/__init__`` rather than read from package
+    metadata, because an editable install can carry stale metadata — so this
+    is the guard that keeps them honest.
+    """
+    from pathlib import Path as _Path
+
+    from sansdir import __copyright__, __license__
+
+    root = _Path(__file__).resolve().parents[1]
+    text = (root / "LICENSE").read_text(encoding="utf-8")
+    assert f"{__license__} License" in text, "LICENSE is not the licence we advertise"
+    assert __copyright__ in text, "copyright line differs from LICENSE"
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert f'"{__license__}"' in pyproject, "pyproject declares a different licence"
