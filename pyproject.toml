@@ -39,7 +39,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-httpx>=0.30",
     "pytest-textual-snapshot>=0.4",
-    "ruff>=0.5",
+    "ruff==0.15.*",  # pinned: must match .pre-commit-config.yaml
     "mypy>=1.10",
     "pyinstrument>=4.6",
     "pre-commit>=3.7",
