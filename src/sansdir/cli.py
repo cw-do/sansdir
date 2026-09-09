@@ -280,8 +280,9 @@ def mask(
         parse_rect,
         shapes_from_json,
     )
+    from sansdir.mask.core import Shape
 
-    shapes = []
+    shapes: list[Shape] = []
     for spec in rects:
         shapes.append(parse_rect(spec))
     for spec in ellipses:

@@ -94,7 +94,7 @@ def _reorder_tubes(bincounts: np.ndarray) -> np.ndarray:
     data = bincounts.reshape(-1, 8, EQSANS_NPIXELS_PER_TUBE).T  # (256, 8, 24)
     reordered = data[:, list(EQSANS_TUBE_REORDER), :]  # interleave tubes
     final = reordered.transpose().reshape(-1, EQSANS_NPIXELS_PER_TUBE)  # (192, 256)
-    return final.T  # (256, 192)
+    return np.asarray(final.T)  # (256, 192)
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +243,9 @@ def _reduce_to_detector_pixels(raw: np.ndarray) -> np.ndarray | None:
     if raw.size == EQSANS_NPIXELS_TOTAL:
         return np.asarray(raw).reshape(-1).astype(float)
     if raw.ndim == 2 and raw.shape[0] == EQSANS_NPIXELS_TOTAL:
-        return raw.sum(axis=1).astype(float)
+        return np.asarray(raw.sum(axis=1), dtype=float)
     if raw.ndim == 2 and raw.shape[1] == EQSANS_NPIXELS_TOTAL:
-        return raw.sum(axis=0).astype(float)
+        return np.asarray(raw.sum(axis=0), dtype=float)
     return None
 
 

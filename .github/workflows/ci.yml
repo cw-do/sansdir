@@ -35,5 +35,8 @@ jobs:
       - name: Ruff format check
         run: ruff format --check src tests
 
+      - name: Mypy
+        run: mypy src/sansdir
+
       - name: Pytest
         run: pytest -q

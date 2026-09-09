@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from sansdir.commands.registry import Command, CommandParam, CommandRegistry
 from sansdir.core import archive, fileops, mailer
@@ -786,31 +786,25 @@ def _make_ui_activate_cursor(app: AppProtocol) -> Command:
         cur = app.active_panel.cursor_path
         if cur is None:
             # Mirror nav.cd's empty-pane behaviour.
-            return await app.registry.dispatch(  # type: ignore[attr-defined]
-                "nav.cd", path=str(app.active_panel.cwd)
-            )
+            result = await app.registry.dispatch("nav.cd", path=str(app.active_panel.cwd))
+            return cast("str | None", result)
         target = Path(cur)
         if target.is_dir():
-            return await app.registry.dispatch(  # type: ignore[attr-defined]
-                "nav.cd", path=str(target)
-            )
+            result = await app.registry.dispatch("nav.cd", path=str(target))
+            return cast("str | None", result)
         if is_image(target):
-            return await app.registry.dispatch(  # type: ignore[attr-defined]
-                "plot.image", paths=[str(target)]
-            )
+            result = await app.registry.dispatch("plot.image", paths=[str(target)])
+            return cast("str | None", result)
         if is_text_file(target):
-            await app.registry.dispatch(  # type: ignore[attr-defined]
-                "view.in_other_pane", path=str(target)
-            )
+            await app.registry.dispatch("view.in_other_pane", path=str(target))
             # Report the path rather than the viewer's bool so every
             # branch of this handler agrees on its return type.
             return str(target)
         # Binary and unreadable files fall back so the user gets the
         # existing "not a directory" notification rather than a silent
         # no-op.
-        return await app.registry.dispatch(  # type: ignore[attr-defined]
-            "nav.cd", path=str(target)
-        )
+        result = await app.registry.dispatch("nav.cd", path=str(target))
+        return cast("str | None", result)
 
     return Command(
         name="ui.activate_cursor",
@@ -1023,6 +1017,7 @@ def _make_ui_mask(app: AppProtocol) -> Command:
 
         from sansdir.plot.backend import has_display
 
+        cur: Path | None
         if path is not None:
             cur = Path(path)
             if not cur.is_file():
@@ -1347,7 +1342,7 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any] | None] = loop.create_future()
 
-        def _cb(value: dict | None) -> None:
+        def _cb(value: dict[str, Any] | None) -> None:
             if not fut.done():
                 fut.set_result(value)
 
@@ -1771,7 +1766,7 @@ async def _offer_to_generate(
     where = f" for {label}" if label else ""
     if not await app.confirm(f"{what}.\n\nBuild a preliminary reduction table{where}?"):
         return None
-    written = await app.registry.dispatch("usans.init_table")  # type: ignore[attr-defined]
+    written = await app.registry.dispatch("usans.init_table")
     if not written:
         return None
     # Put the fresh table on screen — reviewing it is the next step, and
@@ -2439,7 +2434,7 @@ def _make_ui_mail_tagged(app: AppProtocol) -> Command:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any] | None] = loop.create_future()
 
-        def _cb(value: dict | None) -> None:
+        def _cb(value: dict[str, Any] | None) -> None:
             if not fut.done():
                 fut.set_result(value)
 

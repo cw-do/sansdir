@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from sansdir.core.history import default_history_path
@@ -139,12 +139,14 @@ def delete_paths(paths: Iterable[Path], *, trash: bool = True) -> list[Path]:
     path_list = [Path(p) for p in paths]
     removed: list[Path] = []
     use_trash = trash
-    send2trash_fn = None
+    send2trash_fn: Callable[[str], None] | None = None
     if use_trash:
         try:
-            from send2trash import send2trash as send2trash_fn
+            from send2trash import send2trash
         except ImportError:
             use_trash = False
+        else:
+            send2trash_fn = send2trash
 
     fell_back = False
     for p in path_list:

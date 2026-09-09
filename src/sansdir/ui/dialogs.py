@@ -8,7 +8,7 @@ a directory tree picker, and a metadata extract picker.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -380,7 +380,7 @@ class OnCatResultsDialog(ModalScreen[object]):
         self.dismiss(None)
 
 
-class MailDialog(ModalScreen["dict[str, Any] | None"]):
+class MailDialog(ModalScreen[dict[str, Any] | None]):
     """Recipient + subject + body modal.
 
     Returns ``{"recipient", "subject", "body"}`` on submit, or ``None`` on
@@ -844,7 +844,7 @@ class HdfKeyPickerScreen(ModalScreen[list[str] | None]):
         self.dismiss(None)
 
 
-class BatchExtractDialog(ModalScreen["dict[str, Any] | None"]):
+class BatchExtractDialog(ModalScreen[dict[str, Any] | None]):
     """Output form for the batch metadata extractor.
 
     The picker (:class:`HdfKeyPickerScreen`) is a separate full-screen

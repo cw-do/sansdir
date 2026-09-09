@@ -24,6 +24,7 @@ from typing import ClassVar
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.dom import DOMNode
 from textual.widgets import Input
 
 from sansdir.commands.builtins import build_default_registry
@@ -277,7 +278,7 @@ class SansdirApp(App[int]):
         # Modals (help, dialogs, picker) own their own focus; ignore.
         if self.screen is not self.screen_stack[0]:
             return
-        node = widget
+        node: DOMNode | None = widget
         while node is not None:
             if node is self._left_slot:
                 self._sync_active_id("left")

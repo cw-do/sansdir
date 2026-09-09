@@ -9,7 +9,7 @@ app → commands).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class PanelProtocol(Protocol):
@@ -59,6 +59,10 @@ class PanelProtocol(Protocol):
 
 class AppProtocol(Protocol):
     """The slice of :class:`~sansdir.app.SansdirApp` that handlers touch."""
+
+    #: The command registry, so a handler can re-dispatch through the one
+    #: sanctioned path instead of calling another handler directly.
+    registry: Any
 
     @property
     def active_panel(self) -> PanelProtocol: ...

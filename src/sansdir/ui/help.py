@@ -83,7 +83,7 @@ class HelpScreen(ModalScreen[None]):
             )
 
             yield Static("Key bindings", classes="section")
-            keys_table: DataTable[str] = DataTable(show_header=True, cursor_type=None)
+            keys_table: DataTable[str] = DataTable(show_header=True, cursor_type="none")
             keys_table.add_columns("Key", "Action", "Command")
             for kb in self._keymap:
                 if not kb.show_in_help:
@@ -92,7 +92,7 @@ class HelpScreen(ModalScreen[None]):
             yield keys_table
 
             yield Static("Registered commands", classes="section")
-            cmds_table: DataTable[str] = DataTable(show_header=True, cursor_type=None)
+            cmds_table: DataTable[str] = DataTable(show_header=True, cursor_type="none")
             cmds_table.add_columns("Command", "Description", "Aliases")
             for cmd in self._registry.all():
                 aliases = ", ".join(cmd.aliases) if cmd.aliases else ""

@@ -33,6 +33,7 @@ from sansdir.plot.ascii2d import Iq2D, read_iqxqy
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
+    from matplotlib.colors import Normalize
     from matplotlib.figure import Figure
 
 ColorbarMode = Literal["shared", "independent"]
@@ -220,8 +221,8 @@ def _intensity_and_norm(
     arr: np.ndarray,
     *,
     log_intensity: bool,
-    shared_norm: object | None = None,
-) -> tuple[np.ndarray, object | None]:
+    shared_norm: Normalize | None = None,
+) -> tuple[np.ndarray, Normalize | None]:
     """Mask non-positives for log scaling; return (array, norm)."""
     from matplotlib.colors import LogNorm
 
@@ -317,7 +318,7 @@ def _label_tiles(fig: Figure, tile_axes: list[tuple[Axes, Iq2D]]) -> None:
 
     # Positions and text metrics are only final after a draw.
     fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
+    renderer = fig.canvas.get_renderer()  # type: ignore[attr-defined]
 
     probe_ax = tile_axes[0][0]
 
