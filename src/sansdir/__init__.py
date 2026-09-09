@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 
 # Kept here rather than read from importlib.metadata: an editable install can
 # carry stale metadata (the shared dev venv reports 0.0.1), and the help
