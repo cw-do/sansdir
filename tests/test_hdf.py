@@ -294,15 +294,9 @@ def test_load_iqxy_reduced_rejects_inconsistent_axes(tmp_path: Path) -> None:
     f = tmp_path / "bad_axes.nxs"
     with h5py.File(f, "w") as fh:
         fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("bad"))
-        fh.create_dataset(
-            "mantid_workspace_1/workspace/values", data=np.zeros((4, 4))
-        )
-        fh.create_dataset(
-            "mantid_workspace_1/workspace/axis1", data=np.linspace(0, 1, 4)
-        )
-        fh.create_dataset(
-            "mantid_workspace_1/workspace/axis2", data=np.linspace(0, 1, 4)
-        )
+        fh.create_dataset("mantid_workspace_1/workspace/values", data=np.zeros((4, 4)))
+        fh.create_dataset("mantid_workspace_1/workspace/axis1", data=np.linspace(0, 1, 4))
+        fh.create_dataset("mantid_workspace_1/workspace/axis2", data=np.linspace(0, 1, 4))
     with pytest.raises(reader.HdfError, match="bin-edge"):
         hdf5_detector.load_iqxy_reduced(f)
 
@@ -315,9 +309,7 @@ def test_make_detector_figure_for_processed_short_nxs(tmp_path: Path) -> None:
     f = tmp_path / "processed.nxs"
     n = hdf5_detector.EQSANS_NPIXELS_TOTAL
     with h5py.File(f, "w") as fh:
-        fh.create_dataset(
-            "mantid_workspace_1/title", data=np.bytes_("processed-sample")
-        )
+        fh.create_dataset("mantid_workspace_1/title", data=np.bytes_("processed-sample"))
         fh.create_dataset(
             "mantid_workspace_1/workspace/values",
             data=np.arange(n, dtype=float).reshape(192, 256).ravel(),

@@ -269,9 +269,7 @@ def test_per_file_mode_filename_strips_double_suffix(tmp_path: Path) -> None:
     """``EQSANS_172749.nxs.h5`` → ``<filename>`` resolves to ``EQSANS_172749``."""
     f = tmp_path / "EQSANS_172749.nxs.h5"
     _write_nexus(f, temperature_mean=300.0, shear_mean=1.0, duration=600.0)
-    result = batch.extract_per_file(
-        [f], ["/entry/duration"], tmp_path / "<filename>_x.csv"
-    )
+    result = batch.extract_per_file([f], ["/entry/duration"], tmp_path / "<filename>_x.csv")
     assert result[0].name == "EQSANS_172749_x.csv"
 
 

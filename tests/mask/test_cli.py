@@ -21,9 +21,7 @@ def _write_synthetic_eqsans(path: Path) -> None:
     with h5py.File(path, "w") as fh:
         fh.create_dataset("entry/run_number", data=np.bytes_("0042"))
         fh.create_dataset("entry/title", data=np.bytes_("synthetic"))
-        fh.create_dataset(
-            "entry/instrument/name", data=np.bytes_("EQ-SANS")
-        )
+        fh.create_dataset("entry/instrument/name", data=np.bytes_("EQ-SANS"))
         chunk = EQSANS_NPIXELS_TOTAL // EQSANS_NBANKS
         for b in range(1, EQSANS_NBANKS + 1):
             lo = (b - 1) * chunk
@@ -54,8 +52,10 @@ def test_cli_writes_nxs_with_default_output(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     out = src.with_name(f"{src.stem}_mask.nxs")
     assert out.exists()
-    assert out.with_suffix(".mask_log.json").exists() or \
-        Path(str(out).replace(".nxs", ".mask_log.json")).exists()
+    assert (
+        out.with_suffix(".mask_log.json").exists()
+        or Path(str(out).replace(".nxs", ".mask_log.json")).exists()
+    )
 
 
 def test_cli_writes_xml(tmp_path: Path) -> None:
@@ -66,10 +66,14 @@ def test_cli_writes_xml(tmp_path: Path) -> None:
     result = runner.invoke(
         main,
         [
-            "mask", str(src),
-            "--circle", "96,128,5",
-            "--format", "xml",
-            "--output", str(out),
+            "mask",
+            str(src),
+            "--circle",
+            "96,128,5",
+            "--format",
+            "xml",
+            "--output",
+            str(out),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -93,8 +97,13 @@ def test_cli_inverse_flag_inverts_mask(tmp_path: Path) -> None:
     runner.invoke(
         main,
         [
-            "mask", str(src), "--rect", "10,10,20,20",
-            "--inverse", "--output", str(out_b),
+            "mask",
+            str(src),
+            "--rect",
+            "10,10,20,20",
+            "--inverse",
+            "--output",
+            str(out_b),
         ],
     )
     with h5py.File(out_a, "r") as f:
@@ -114,8 +123,14 @@ def test_cli_replay_via_shapes_json(tmp_path: Path) -> None:
     runner.invoke(
         main,
         [
-            "mask", str(src), "--rect", "5,5,12,12",
-            "--circle", "96,128,7", "--output", str(first),
+            "mask",
+            str(src),
+            "--rect",
+            "5,5,12,12",
+            "--circle",
+            "96,128,7",
+            "--output",
+            str(first),
         ],
     )
     log = first.with_name(first.stem + ".mask_log.json")
@@ -124,8 +139,12 @@ def test_cli_replay_via_shapes_json(tmp_path: Path) -> None:
     runner.invoke(
         main,
         [
-            "mask", str(src), "--shapes-json", str(log),
-            "--output", str(second),
+            "mask",
+            str(src),
+            "--shapes-json",
+            str(log),
+            "--output",
+            str(second),
         ],
     )
     with h5py.File(first, "r") as f:
@@ -143,10 +162,14 @@ def test_cli_polygon_shape(tmp_path: Path) -> None:
     result = runner.invoke(
         main,
         [
-            "mask", str(src),
-            "--polygon", "10,10,30,10,30,30",
-            "--format", "npy",
-            "--output", str(out),
+            "mask",
+            str(src),
+            "--polygon",
+            "10,10,30,10,30,30",
+            "--format",
+            "npy",
+            "--output",
+            str(out),
         ],
     )
     assert result.exit_code == 0, result.output

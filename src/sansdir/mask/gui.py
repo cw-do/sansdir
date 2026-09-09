@@ -132,9 +132,7 @@ class MaskController:
         )
         return self._add(shape, patch)
 
-    def add_ellipse(
-        self, xc: float, yc: float, rx: float, ry: float
-    ) -> Ellipse:
+    def add_ellipse(self, xc: float, yc: float, rx: float, ry: float) -> Ellipse:
         from matplotlib.patches import Ellipse as MplEllipse
 
         shape = Ellipse(xc, yc, rx, ry)
@@ -258,9 +256,7 @@ class MaskController:
         shape = self.builder.shapes[index]
         patch = self._patches[index]
         if isinstance(shape, Rectangle):
-            new_shape: Shape = Rectangle(
-                shape.x0 + dx, shape.y0 + dy, shape.x1 + dx, shape.y1 + dy
-            )
+            new_shape: Shape = Rectangle(shape.x0 + dx, shape.y0 + dy, shape.x1 + dx, shape.y1 + dy)
             if isinstance(patch, MplRectangle):
                 patch.set_xy((patch.get_x() + dx, patch.get_y() + dy))
         elif isinstance(shape, Circle):
@@ -268,15 +264,11 @@ class MaskController:
             if isinstance(patch, MplCircle):
                 patch.center = (patch.center[0] + dx, patch.center[1] + dy)
         elif isinstance(shape, Ellipse):
-            new_shape = Ellipse(
-                shape.xc + dx, shape.yc + dy, shape.rx, shape.ry
-            )
+            new_shape = Ellipse(shape.xc + dx, shape.yc + dy, shape.rx, shape.ry)
             if isinstance(patch, MplEllipse):
                 patch.center = (patch.center[0] + dx, patch.center[1] + dy)
         elif isinstance(shape, Polygon):
-            new_shape = Polygon(
-                tuple((x + dx, y + dy) for x, y in shape.vertices)
-            )
+            new_shape = Polygon(tuple((x + dx, y + dy) for x, y in shape.vertices))
             if isinstance(patch, MplPolygon):
                 xy = patch.get_xy()
                 xy = xy + np.array([dx, dy])
@@ -430,10 +422,7 @@ def run_editor(
     # Only EQSANS-shaped detectors (192 cols x 256 px) get the bank
     # decoration; other shapes fall back to plain coords so this code
     # doesn't lie about non-EQSANS layouts.
-    is_eqsans = (
-        image.shape[1] == _BANKTUBE_NTUBES
-        and image.shape[0] == _BANKTUBE_NPIX
-    )
+    is_eqsans = image.shape[1] == _BANKTUBE_NTUBES and image.shape[0] == _BANKTUBE_NPIX
 
     def format_coord(x: float, y: float) -> str:
         col = int(np.floor(x + 0.5)) - 1  # extent shifts by 0.5
@@ -680,11 +669,14 @@ def run_editor(
     spec_status_ax = fig.add_axes((0.20, 0.09, 0.78, 0.04))
     spec_status_ax.axis("off")
     spec_status_text = spec_status_ax.text(
-        0.0, 0.5,
-        "Mask spec — click [Mask Spec... (k)] or press k  "
-        "(e.g. b3, t50, b5-7 t10-15)",
+        0.0,
+        0.5,
+        "Mask spec — click [Mask Spec... (k)] or press k  (e.g. b3, t50, b5-7 t10-15)",
         transform=spec_status_ax.transAxes,
-        ha="left", va="center", fontsize=9, color="#888",
+        ha="left",
+        va="center",
+        fontsize=9,
+        color="#888",
     )
 
     def _ask_mask_spec() -> str | None:
@@ -745,8 +737,7 @@ def run_editor(
             patch.set_height(image.shape[0])
             n_added += 1
         spec_status_text.set_text(
-            f"+{n_added} rect{'s' if n_added != 1 else ''}, "
-            f"{len(cols)} cols  ({text!r})"
+            f"+{n_added} rect{'s' if n_added != 1 else ''}, {len(cols)} cols  ({text!r})"
         )
         spec_status_text.set_color("#080")
         update_status()
@@ -763,8 +754,14 @@ def run_editor(
 
     # Hold refs so GC doesn't collect the widgets.
     fig._sansdir_buttons = [  # type: ignore[attr-defined]
-        btn_rect, btn_ell, btn_edit, btn_undo,
-        btn_clear, btn_invert, btn_save, btn_quit,
+        btn_rect,
+        btn_ell,
+        btn_edit,
+        btn_undo,
+        btn_clear,
+        btn_invert,
+        btn_save,
+        btn_quit,
         btn_spec,
     ]
 
@@ -780,10 +777,10 @@ def run_editor(
     # what's on screen). ``Delete`` removes the selected shape.
     edit_state: dict[str, object] = {
         "selected_index": None,
-        "drag_origin": None,    # (x, y) where the drag started
-        "saved_edge": None,     # original edgecolor / lw to restore
+        "drag_origin": None,  # (x, y) where the drag started
+        "saved_edge": None,  # original edgecolor / lw to restore
         "saved_lw": None,
-        "drag_bg": None,        # cached static background for blit-fast drags
+        "drag_bg": None,  # cached static background for blit-fast drags
     }
 
     def _highlight(idx: int | None) -> None:
@@ -935,13 +932,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("source", type=Path)
     parser.add_argument(
-        "--output", "-o", type=Path, default=None,
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
         help="Output file (default: <source-stem>_mask.<ext> next to source)",
     )
     parser.add_argument(
-        "--format", "-f", choices=("xml", "nxs", "npy"), default="nxs",
+        "--format",
+        "-f",
+        choices=("xml", "nxs", "npy"),
+        default="nxs",
         help="Default save format used by the keyboard shortcut and the "
-             "Save button (Save .xml / .nxs explicitly override).",
+        "Save button (Save .xml / .nxs explicitly override).",
     )
     args = parser.parse_args(argv)
     return run_editor(args.source, args.output, args.format)

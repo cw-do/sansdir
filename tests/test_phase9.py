@@ -72,9 +72,7 @@ def test_overrides_add_new_binding() -> None:
 def test_overrides_drop_unknown_command_keep_default() -> None:
     base = default_keymap()
     reg = _registry()
-    merged = _apply_keymap_overrides(
-        base, {"f5": "no.such.command"}, reg
-    )
+    merged = _apply_keymap_overrides(base, {"f5": "no.such.command"}, reg)
     f5 = next(kb for kb in merged if kb.key == "f5")
     # Default kept; bogus override silently dropped.
     assert f5.command == "ui.refresh"
@@ -146,8 +144,7 @@ def test_display_path_rewrites_gpfs_to_sns(tmp_path: Path) -> None:
 
     assert display_path("/SNS/EQSANS/IPTS-12345") == "/SNS/EQSANS/IPTS-12345"
     assert (
-        display_path(f"{_GPFS_PREFIX}/EQSANS/IPTS-12345/shared")
-        == "/SNS/EQSANS/IPTS-12345/shared"
+        display_path(f"{_GPFS_PREFIX}/EQSANS/IPTS-12345/shared") == "/SNS/EQSANS/IPTS-12345/shared"
     )
     # Non-cluster paths pass through unchanged.
     assert display_path(tmp_path) == str(tmp_path)

@@ -384,9 +384,7 @@ async def test_browser_caps_visible_rows_with_overflow_hint(
 
         from sansdir.ui.oncat_browser import OnCatBrowserScreen
 
-        browser = next(
-            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
-        )
+        browser = next(s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen))
         lv = browser.query_one("#results-list", ListView)
         # Cap honoured — never more than MAX_VISIBLE children mounted.
         assert len(lv.children) == OnCatBrowserScreen.MAX_VISIBLE
@@ -410,8 +408,7 @@ async def test_browser_filter_is_debounced(
     quiet period, not four times.
     """
     rows = [
-        {"id": f"IPTS-{200 + i}", "rank": 200 + i, "title": f"r{i}", "size": 1}
-        for i in range(20)
+        {"id": f"IPTS-{200 + i}", "rank": 200 + i, "title": f"r{i}", "size": 1} for i in range(20)
     ]
     _stub_oauth_and_experiments(httpx_mock, rows)
     app = _real_app(tmp_path)
@@ -421,9 +418,7 @@ async def test_browser_filter_is_debounced(
         await pilot.pause()
         from sansdir.ui.oncat_browser import OnCatBrowserScreen
 
-        browser = next(
-            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
-        )
+        browser = next(s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen))
         # Establish a baseline AFTER the on_mount refresh ran.
         calls = {"n": 0}
         original = browser._refresh_list
@@ -444,9 +439,7 @@ async def test_browser_filter_is_debounced(
         # whether the event loop happens to schedule a timer fire
         # between keystrokes — both outcomes are correctly debounced;
         # the per-keystroke count is what we're guarding against).
-        assert 1 <= calls["n"] <= 2, (
-            f"expected 1-2 rebuilds with debounce, got {calls['n']}"
-        )
+        assert 1 <= calls["n"] <= 2, f"expected 1-2 rebuilds with debounce, got {calls['n']}"
         await pilot.press("escape")
         await pilot.press("q")
 
@@ -470,12 +463,36 @@ async def test_browser_r_force_refreshes_via_callback(
 
     # Stale snapshot (what the user sees first).
     stale = [
-        Experiment(ipts="IPTS-100", title="old", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
+        Experiment(
+            ipts="IPTS-100",
+            title="old",
+            pi="",
+            members=(),
+            activity="",
+            instrument="EQSANS",
+            facility="SNS",
+        ),
     ]
     # Fresh snapshot (what the refresh callback returns).
     fresh = [
-        Experiment(ipts="IPTS-100", title="old", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
-        Experiment(ipts="IPTS-200", title="new!", pi="", members=(), activity="", instrument="EQSANS", facility="SNS"),
+        Experiment(
+            ipts="IPTS-100",
+            title="old",
+            pi="",
+            members=(),
+            activity="",
+            instrument="EQSANS",
+            facility="SNS",
+        ),
+        Experiment(
+            ipts="IPTS-200",
+            title="new!",
+            pi="",
+            members=(),
+            activity="",
+            instrument="EQSANS",
+            facility="SNS",
+        ),
     ]
 
     call_count = {"n": 0}
@@ -493,9 +510,7 @@ async def test_browser_r_force_refreshes_via_callback(
         await pilot.pause()
         from textual.widgets import ListView
 
-        browser = next(
-            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
-        )
+        browser = next(s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen))
         # Initially: 1 row.
         lv = browser.query_one("#results-list", ListView)
         assert len(lv.children) == 1
@@ -511,6 +526,7 @@ async def test_browser_r_force_refreshes_via_callback(
         # Refresh hint is rendered with the eye-catching colour
         # markup so the user knows the action exists.
         from textual.widgets import Static
+
         hint = browser.query_one("#refresh-hint", Static).render()
         text = hint.plain if hasattr(hint, "plain") else str(hint)
         assert "refresh" in text.lower()
@@ -536,17 +552,26 @@ async def test_browser_refresh_failure_shows_error_status(
         await pilot.pause()
         app.push_screen(
             OnCatBrowserScreen(
-                [Experiment(ipts="IPTS-1", title="x", pi="", members=(), activity="", instrument="EQSANS", facility="SNS")],
+                [
+                    Experiment(
+                        ipts="IPTS-1",
+                        title="x",
+                        pi="",
+                        members=(),
+                        activity="",
+                        instrument="EQSANS",
+                        facility="SNS",
+                    )
+                ],
                 on_refresh=boom,
             )
         )
         await pilot.pause()
-        browser = next(
-            s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen)
-        )
+        browser = next(s for s in app.screen_stack if isinstance(s, OnCatBrowserScreen))
         await browser.action_refresh()
         await pilot.pause()
         from textual.widgets import Static
+
         hint = browser.query_one("#overflow-hint", Static).render()
         text = hint.plain if hasattr(hint, "plain") else str(hint)
         assert "refresh failed" in text.lower()

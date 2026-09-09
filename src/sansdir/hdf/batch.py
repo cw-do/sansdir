@@ -270,9 +270,7 @@ def extract_to_file(
     ``./extracted_<YYYYMMDD-HHMMSS>.<ext>``.
     """
     if out_path is not None and "<filename>" in str(out_path):
-        return extract_per_file(
-            files, keys, out_path, fmt=fmt, progress_cb=progress_cb
-        )
+        return extract_per_file(files, keys, out_path, fmt=fmt, progress_cb=progress_cb)
     if out_path is None:
         ext = {"tsv": "tsv", "csv": "csv", "columns": "txt"}[fmt]
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -306,9 +304,7 @@ def extract_per_file(
     """
     template = str(out_template)
     if "<filename>" not in template:
-        raise ValueError(
-            "extract_per_file: out_template must contain '<filename>' placeholder"
-        )
+        raise ValueError("extract_per_file: out_template must contain '<filename>' placeholder")
     files_list = [Path(p) for p in files]
     written: list[Path] = []
     total = len(files_list)
@@ -380,9 +376,7 @@ def _read_array(fh, key: str) -> np.ndarray | None:  # type: ignore[no-untyped-d
     return arr.ravel()
 
 
-def _build_array_rows(
-    keys: Sequence[str], arrays: dict[str, np.ndarray | None]
-) -> list[list[str]]:
+def _build_array_rows(keys: Sequence[str], arrays: dict[str, np.ndarray | None]) -> list[list[str]]:
     """Lay out the per-key arrays as a row-major table.
 
     Row count is the longest array (excluding scalars). Scalars are

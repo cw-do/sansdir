@@ -180,8 +180,7 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
                 classes="hint",
             )
             yield Static(
-                "[dim]↑/↓ navigate · Enter select · / filter · "
-                "s sort · Esc cancel[/dim]",
+                "[dim]↑/↓ navigate · Enter select · / filter · s sort · Esc cancel[/dim]",
                 classes="hint",
             )
 
@@ -219,9 +218,7 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         # available; in that case we just rebuild inline.
         self._cancel_pending_refresh()
         try:
-            self._refresh_timer = self.set_timer(
-                self.FILTER_DEBOUNCE_MS / 1000, self._refresh_list
-            )
+            self._refresh_timer = self.set_timer(self.FILTER_DEBOUNCE_MS / 1000, self._refresh_list)
         except Exception:
             # Fallback: not mounted yet → rebuild inline.
             self._refresh_list()
@@ -356,9 +353,6 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
             # sees the count delta.
             with contextlib.suppress(Exception):
                 hint = self.query_one("#overflow-hint", Static)
-                hint.update(
-                    f"[green]refreshed — "
-                    f"{len(new_experiments)} experiments[/green]"
-                )
+                hint.update(f"[green]refreshed — {len(new_experiments)} experiments[/green]")
         finally:
             self._refresh_in_progress = False

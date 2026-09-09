@@ -189,9 +189,7 @@ def load_config(path: Path | None = None) -> Config:
         keys=KeysConfig(
             # Drop non-string values defensively (e.g. user wrote
             # `f5 = 123`); the rest are normalised to lowercase keys.
-            overrides={
-                str(k): str(v) for k, v in keys_section.items() if isinstance(v, str)
-            }
+            overrides={str(k): str(v) for k, v in keys_section.items() if isinstance(v, str)}
         ),
         mail=MailConfig(
             command=str(mail_section.get("command", MailConfig.command)),
@@ -237,9 +235,7 @@ def load_config(path: Path | None = None) -> Config:
             reduce_timeout_seconds=float(
                 usans_section.get("reduce_timeout_seconds", UsansConfig.reduce_timeout_seconds)
             ),
-            short_name_copy=bool(
-                usans_section.get("short_name_copy", UsansConfig.short_name_copy)
-            ),
+            short_name_copy=bool(usans_section.get("short_name_copy", UsansConfig.short_name_copy)),
             sigma_y=float(usans_section.get("sigma_y", UsansConfig.sigma_y)),
         ),
     )

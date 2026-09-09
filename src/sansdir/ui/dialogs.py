@@ -588,9 +588,7 @@ class HdfKeyPickerScreen(ModalScreen[list[str] | None]):
                 id="search-input",
             )
             yield Tree[HdfNode](label=self._path.name, id="picker-tree")
-            yield DataTable(
-                id="search-results", cursor_type="row", show_header=True
-            )
+            yield DataTable(id="search-results", cursor_type="row", show_header=True)
             yield Static("", id="picker-meta", classes="meta")
             with Horizontal(classes="button-row"):
                 yield Button("Done (Ctrl+S)", id="done", variant="primary")
@@ -800,7 +798,9 @@ class HdfKeyPickerScreen(ModalScreen[list[str] | None]):
         self._search_rows = matches
         for n in matches:
             marker = "*" if self._effective_key(n) in self._selected else " "
-            shape = "x".join(str(d) for d in n.shape) or ("group" if n.kind == "group" else "scalar")
+            shape = "x".join(str(d) for d in n.shape) or (
+                "group" if n.kind == "group" else "scalar"
+            )
             table.add_row(marker, n.path, shape)
         self.add_class("-searching")
         if matches:
@@ -956,8 +956,7 @@ class BatchExtractDialog(ModalScreen[dict | None]):
                 # so this default works for either mode.
                 value="<filename>_extracted.csv",
                 placeholder=(
-                    "<filename>_temp.csv  (per-file mode auto-injects "
-                    "<filename>_ if you forget it)"
+                    "<filename>_temp.csv  (per-file mode auto-injects <filename>_ if you forget it)"
                 ),
                 id="out-input",
             )

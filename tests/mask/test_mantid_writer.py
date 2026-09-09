@@ -133,9 +133,7 @@ class TestWriteNxsViaMantidOrchestration:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         with pytest.raises(MantidWriterError, match="rc=2") as exc_info:
-            write_nxs_via_mantid(
-                tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta()
-            )
+            write_nxs_via_mantid(tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta())
         assert "some Mantid crash" in str(exc_info.value)
 
     def test_raises_writer_error_when_output_missing(
@@ -150,9 +148,7 @@ class TestWriteNxsViaMantidOrchestration:
             lambda cmd, **_kw: subprocess.CompletedProcess(cmd, 0, "ok", ""),
         )
         with pytest.raises(MantidWriterError, match="not written"):
-            write_nxs_via_mantid(
-                tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta()
-            )
+            write_nxs_via_mantid(tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta())
 
     def test_raises_writer_error_on_timeout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -186,9 +182,7 @@ class TestWriteNxsViaMantidOrchestration:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         with pytest.raises(MantidWriterError):
-            write_nxs_via_mantid(
-                tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta()
-            )
+            write_nxs_via_mantid(tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta())
         # Both temp paths gone after the call returned (via finally).
         for p in captured_paths:
             assert not Path(p).exists(), f"tempfile leaked: {p}"
@@ -208,14 +202,10 @@ class TestWriteNxsDispatcher:
         # conftest sets this globally; reaffirm explicitly here.
         monkeypatch.setenv("SANSDIR_NO_MANTID", "1")
         # Patch out the Mantid writer so we'd see it if called.
-        with patch(
-            "sansdir.mask.mantid_writer.write_nxs_via_mantid"
-        ) as mantid_call:
+        with patch("sansdir.mask.mantid_writer.write_nxs_via_mantid") as mantid_call:
             from sansdir.mask.writers import write_nxs
 
-            out = write_nxs(
-                tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta()
-            )
+            out = write_nxs(tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta())
         assert mantid_call.call_count == 0
         # Legacy writer produced a real h5 file.
         with h5py.File(out, "r") as f:
@@ -225,9 +215,7 @@ class TestWriteNxsDispatcher:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("SANSDIR_NO_MANTID", raising=False)
-        with patch(
-            "sansdir.mask.mantid_writer.write_nxs_via_mantid"
-        ) as mantid_call:
+        with patch("sansdir.mask.mantid_writer.write_nxs_via_mantid") as mantid_call:
             from sansdir.mask.writers import write_nxs
 
             write_nxs(
@@ -246,9 +234,7 @@ class TestWriteNxsDispatcher:
         from sansdir.mask.writers import write_nxs
 
         # Should silently fall back without raising.
-        out = write_nxs(
-            tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta()
-        )
+        out = write_nxs(tmp_path / "out.nxs", np.zeros((10, 10), dtype=np.uint8), _meta())
         with h5py.File(out, "r") as f:
             assert "mantid_workspace_1/event_workspace/indices" in f
 
@@ -264,9 +250,7 @@ class TestWriteNxsDispatcher:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **_kw: subprocess.CompletedProcess(
-                cmd, 1, "", "boom"
-            ),
+            lambda cmd, **_kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
         )
         from sansdir.mask.writers import write_nxs
 
@@ -305,9 +289,7 @@ def test_e2e_writer_produces_drtsans_compatible_output(
     # Use the user's actual IPTS-36811 mask log as the source —
     # it's the smallest real reproducible we have. If the file is
     # missing (e.g. running off-cluster) skip.
-    log_path = Path(
-        "/SNS/EQSANS/IPTS-36811/shared/mask4m.mask_log.json"
-    )
+    log_path = Path("/SNS/EQSANS/IPTS-36811/shared/mask4m.mask_log.json")
     if not log_path.exists():
         pytest.skip(f"reference mask log {log_path} not present")
     builder = MaskBuilder.from_log(log_path)

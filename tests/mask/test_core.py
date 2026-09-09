@@ -169,9 +169,7 @@ def test_builder_clear() -> None:
 def test_shape_dict_round_trip(shape) -> None:  # type: ignore[no-untyped-def]
     """``shape → dict → shape`` rasterises identically."""
     redone = shape_from_dict(shape.to_dict())
-    assert np.array_equal(
-        shape.rasterise((10, 10)), redone.rasterise((10, 10))
-    )
+    assert np.array_equal(shape.rasterise((10, 10)), redone.rasterise((10, 10)))
 
 
 def test_shape_from_dict_unknown_type_raises() -> None:

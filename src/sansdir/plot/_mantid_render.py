@@ -77,9 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     # Pick the two axes with the largest in-plane extent: that's the
     # detector face. EQSANS is curved in z (banjo) and flat in y.
     spans = pos.max(axis=0) - pos.min(axis=0)
-    h_ax = int(np.argmax(spans))      # widest direction = "tube"
-    v_ax = int(np.argsort(spans)[-2]) # second-widest = "pixel"
-    if h_ax == v_ax:                   # fallback if positions degenerate
+    h_ax = int(np.argmax(spans))  # widest direction = "tube"
+    v_ax = int(np.argsort(spans)[-2])  # second-widest = "pixel"
+    if h_ax == v_ax:  # fallback if positions degenerate
         h_ax, v_ax = 2, 1
     h_vals = pos[:, h_ax]
     v_vals = pos[:, v_ax]

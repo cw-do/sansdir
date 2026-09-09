@@ -178,9 +178,7 @@ def test_write_nxs_structure_matches_reference(tmp_path: Path) -> None:
         assert int(det.attrs["version"]) == 1
         # Identity detector_list — same as mask_4m2.nxs (so spectrum
         # k corresponds to detector k).
-        assert np.array_equal(
-            det["detector_list"][()], np.arange(n, dtype=np.int32)
-        )
+        assert np.array_equal(det["detector_list"][()], np.arange(n, dtype=np.int32))
         assert det["detector_count"][()].sum() == n
         assert det["spectra"][0] == 1
         assert det["detector_positions"].shape == (n, 3)
@@ -246,9 +244,7 @@ def test_saved_mask_round_trips_through_plot_loader(tmp_path: Path) -> None:
     # masked carry 0) so the plot loader sees the *complement*: the
     # drawn rectangle reads as 0 (grey/masked region on the heatmap)
     # and the rest of the detector reads as 1.
-    n_total = (
-        det.image.shape[0] * det.image.shape[1]
-    )
+    n_total = det.image.shape[0] * det.image.shape[1]
     assert int(det.image.sum()) == n_total - 121
     # Cells inside the drawn rectangle are 0 (masked → no events).
     assert det.image[105, 55] == 0

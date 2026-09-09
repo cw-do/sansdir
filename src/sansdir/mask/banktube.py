@@ -81,8 +81,7 @@ def bank_tube_to_col(bank: int, tube_in_bank: int) -> int:
         raise ValueError(f"bank {bank} out of range 0..{EQSANS_NBANKS - 1}")
     if not 0 <= tube_in_bank < EQSANS_NTUBES_PER_BANK:
         raise ValueError(
-            f"tube_in_bank {tube_in_bank} out of range "
-            f"0..{EQSANS_NTUBES_PER_BANK - 1}"
+            f"tube_in_bank {tube_in_bank} out of range 0..{EQSANS_NTUBES_PER_BANK - 1}"
         )
     column_group = bank // 2
     pos = (tube_in_bank * 2) + (bank % 2)
@@ -147,14 +146,10 @@ def parse_spec(spec: str) -> list[int]:
         elif tok[0] == "t":
             for c in _parse_range(tok[1:]):
                 if not 0 <= c < EQSANS_NTUBES:
-                    raise ValueError(
-                        f"tube/column {c} out of range 0..{EQSANS_NTUBES - 1}"
-                    )
+                    raise ValueError(f"tube/column {c} out of range 0..{EQSANS_NTUBES - 1}")
                 cols.add(c)
         else:
-            raise ValueError(
-                f"bad token {raw!r}: each token must start with 'b' or 't'"
-            )
+            raise ValueError(f"bad token {raw!r}: each token must start with 'b' or 't'")
     return sorted(cols)
 
 

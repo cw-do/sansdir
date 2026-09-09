@@ -137,8 +137,7 @@ def write_nxs_via_mantid(
     """
     if not is_drtsans_available(executable):
         raise MantidUnavailableError(
-            f"{executable!r} not on PATH — install Mantid or fall back "
-            f"to the legacy sansdir writer"
+            f"{executable!r} not on PATH — install Mantid or fall back to the legacy sansdir writer"
         )
     out = Path(output_path).resolve()
     det_ids = _masked_detector_ids(mask, source_meta).tolist()
@@ -185,8 +184,7 @@ def write_nxs_via_mantid(
             )
         if not out.exists():
             raise MantidWriterError(
-                f"drtsans returned 0 but {out} was not written;\n"
-                f"stdout tail: {res.stdout[-300:]}"
+                f"drtsans returned 0 but {out} was not written;\nstdout tail: {res.stdout[-300:]}"
             )
     finally:
         Path(cfg_path).unlink(missing_ok=True)

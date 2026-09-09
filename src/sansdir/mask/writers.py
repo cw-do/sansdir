@@ -44,9 +44,7 @@ def _masked_detector_ids(mask: np.ndarray, source_meta: SourceMeta) -> np.ndarra
     flat_mask = mask.reshape(-1)
     flat_ids = source_meta.pixel_ids.reshape(-1)
     if flat_mask.size != flat_ids.size:
-        raise ValueError(
-            f"mask size ({flat_mask.size}) != pixel_ids size ({flat_ids.size})"
-        )
+        raise ValueError(f"mask size ({flat_mask.size}) != pixel_ids size ({flat_ids.size})")
     return np.sort(flat_ids[flat_mask.astype(bool)])
 
 
@@ -216,9 +214,7 @@ def _write_nxs_legacy(
     out.parent.mkdir(parents=True, exist_ok=True)
     n = source_meta.pixel_ids.size
     if mask.size != n:
-        raise ValueError(
-            f"mask / pixel_ids ordering mismatch: mask {mask.size} vs ids {n}"
-        )
+        raise ValueError(f"mask / pixel_ids ordering mismatch: mask {mask.size} vs ids {n}")
 
     # Mask is in heatmap-flat order. Re-order into detector-id order
     # so ``indices[k+1] - indices[k]`` lines up with detector k
@@ -261,22 +257,16 @@ def _write_nxs_legacy(
         dl = ent.create_dataset("definition_local", data=defn)
         dl.attrs["URL"] = "http://www.isis.rl.ac.uk/xml/IXmantid.xml"
         dl.attrs["Version"] = "1.0"
-        ent.create_dataset(
-            "workspace_name", data=np.array([_bytes(out.name)])
-        )
+        ent.create_dataset("workspace_name", data=np.array([_bytes(out.name)]))
 
         # ``event_workspace`` group is the discriminator the existing
         # sansdir plot loader keys off — and matches mask_4m2.nxs.
         ew = ent.create_group("event_workspace")
         ew.attrs["NX_class"] = "NXdata"
-        a1 = ew.create_dataset(
-            "axis1", data=np.array([0.0, 1000.0], dtype=np.float64)
-        )
+        a1 = ew.create_dataset("axis1", data=np.array([0.0, 1000.0], dtype=np.float64))
         a1.attrs["distribution"] = "0"
         a1.attrs["units"] = "TOF"
-        a2 = ew.create_dataset(
-            "axis2", data=np.arange(1, n + 1, dtype=np.float64)
-        )
+        a2 = ew.create_dataset("axis2", data=np.arange(1, n + 1, dtype=np.float64))
         a2.attrs["caption"] = "Spectrum"
         a2.attrs["label"] = ""
         a2.attrs["units"] = "spectraNumber"
@@ -289,20 +279,14 @@ def _write_nxs_legacy(
         inst = ent.create_group("instrument")
         inst.attrs["NX_class"] = "NXinstrument"
         inst.attrs["version"] = np.int32(1)
-        inst.create_dataset(
-            "name", data=np.array([_bytes(source_meta.instrument_name)])
-        )
+        inst.create_dataset("name", data=np.array([_bytes(source_meta.instrument_name)]))
         det = inst.create_group("detector")
         det.attrs["NX_class"] = "NXdetector"
         det.attrs["version"] = np.int32(1)
-        det.create_dataset(
-            "detector_list", data=np.arange(n, dtype=np.int32)
-        )
+        det.create_dataset("detector_list", data=np.arange(n, dtype=np.int32))
         det.create_dataset("detector_count", data=np.ones(n, dtype=np.int32))
         det.create_dataset("detector_index", data=np.arange(n, dtype=np.int32))
-        det.create_dataset(
-            "detector_positions", data=np.zeros((n, 3), dtype=np.float64)
-        )
+        det.create_dataset("detector_positions", data=np.zeros((n, 3), dtype=np.float64))
         det.create_dataset("spectra", data=np.arange(1, n + 1, dtype=np.int32))
 
         smp = ent.create_group("sample")
@@ -315,27 +299,19 @@ def _write_nxs_legacy(
         env.attrs["NX_class"] = "NXnote"
         env.create_dataset("author", data=np.array([_bytes("sansdir")]))
         env.create_dataset("date", data=np.array([_bytes(iso)]))
-        env.create_dataset(
-            "description", data=np.array([_bytes("Mantid Environment data")])
-        )
+        env.create_dataset("description", data=np.array([_bytes("Mantid Environment data")]))
         env.create_dataset(
             "data",
-            data=np.array(
-                [_bytes("sansdir mask writer; pure python; no Mantid runtime.")]
-            ),
+            data=np.array([_bytes("sansdir mask writer; pure python; no Mantid runtime.")]),
         )
         alg = proc.create_group("MantidAlgorithm_1")
         alg.attrs["NX_class"] = "NXnote"
         alg.create_dataset("author", data=np.array([_bytes("sansdir")]))
         alg.create_dataset("date", data=np.array([_bytes(iso)]))
-        alg.create_dataset(
-            "description", data=np.array([_bytes("Mantid Algorithm data")])
-        )
+        alg.create_dataset("description", data=np.array([_bytes("Mantid Algorithm data")]))
         alg.create_dataset(
             "data",
-            data=np.array(
-                [_bytes(f"sansdir.mask.create; SourceFile={source_meta.source_path}")]
-            ),
+            data=np.array([_bytes(f"sansdir.mask.create; SourceFile={source_meta.source_path}")]),
         )
     return out
 
@@ -432,5 +408,3 @@ __all__ = [
     "write_nxs",
     "write_xml",
 ]
-
-

@@ -99,11 +99,7 @@ def test_make_generic_figure_skips_all_nan_columns(tmp_path: Path) -> None:
     import matplotlib.pyplot as plt
 
     p = tmp_path / "summary.tsv"
-    p.write_text(
-        "filename\ttime\tphase1\n"
-        "EQSANS_1.nxs.h5\t0.0\t1.0\n"
-        "EQSANS_2.nxs.h5\t1.0\t2.0\n"
-    )
+    p.write_text("filename\ttime\tphase1\nEQSANS_1.nxs.h5\t0.0\t1.0\nEQSANS_2.nxs.h5\t1.0\t2.0\n")
     fig = generic.make_generic_figure([p])
     ax = fig.axes[0]
     # First numeric col (time) is x; phase1 is the lone series.

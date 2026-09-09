@@ -248,6 +248,7 @@ def test_index_of_patch_finds_the_overlay(fig_ax) -> None:  # type: ignore[no-un
     assert c.index_of_patch(overlay_patches[1]) == 1
     # An unrelated patch isn't in the list.
     from matplotlib.patches import Rectangle as MplRect
+
     other = MplRect((0, 0), 1, 1)
     assert c.index_of_patch(other) is None
 

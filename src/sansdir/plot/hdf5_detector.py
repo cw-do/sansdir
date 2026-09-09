@@ -171,8 +171,7 @@ def load_via_mantid(path: Path, *, mantid_python: str | None = None) -> Detector
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
             raise HdfError(
-                f"{path}: Mantid load failed (exit {proc.returncode})\n"
-                + "\n".join(tail)
+                f"{path}: Mantid load failed (exit {proc.returncode})\n" + "\n".join(tail)
             )
         data = np.load(out_npz, allow_pickle=False)
         image = np.asarray(data["image"])
@@ -316,8 +315,7 @@ def load_iqxy_reduced(path: Path) -> IqxyImage:
         values = np.asarray(ws["values"][()])
         if values.ndim != 2:
             raise HdfError(
-                f"{path}: workspace/values is {values.shape}; "
-                "Iqxy expects 2D (n_spectra, n_bins)"
+                f"{path}: workspace/values is {values.shape}; Iqxy expects 2D (n_spectra, n_bins)"
             )
         axis1 = np.asarray(ws["axis1"][()]) if "axis1" in ws else None
         axis2 = np.asarray(ws["axis2"][()]) if "axis2" in ws else None

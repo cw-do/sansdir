@@ -369,8 +369,7 @@ async def test_space_tag_preserves_scroll_position(tmp_path: Path) -> None:
         cursor_before = panel.cursor_row
         # Sanity: we're actually scrolled.
         assert scroll_before > 0, (
-            f"test fixture wasn't scrolled; cursor={cursor_before}, "
-            f"scroll_y={scroll_before}"
+            f"test fixture wasn't scrolled; cursor={cursor_before}, scroll_y={scroll_before}"
         )
         # Press Space — should tag-and-advance, but scroll should
         # only move if the new cursor row is off-screen, NOT snap
@@ -426,9 +425,7 @@ async def test_f8_delete_keeps_cursor_near_deleted_file(
         # should land there, NOT on row 0.
         cur = app.active_panel.current_entry
         assert cur is not None
-        assert cur.name == "noise.txt", (
-            f"cursor jumped away from the delete site to {cur.name!r}"
-        )
+        assert cur.name == "noise.txt", f"cursor jumped away from the delete site to {cur.name!r}"
         await pilot.press("q")
 
 
@@ -443,6 +440,7 @@ async def test_f8_delete_last_file_clamps_to_new_last(tmp_path: Path) -> None:
     fake_mod.send2trash = lambda p: Path(p).unlink()  # type: ignore[attr-defined]
 
     import pytest as _pytest
+
     monkey = _pytest.MonkeyPatch()
     monkey.setitem(sys.modules, "send2trash", fake_mod)
     try:
@@ -484,9 +482,7 @@ async def test_f2_renames_cursor_file(tmp_path: Path) -> None:
         # The TextPromptDialog is open with "a.dat" pre-filled.
         from sansdir.ui.dialogs import TextPromptDialog
 
-        dialog = next(
-            s for s in app.screen_stack if isinstance(s, TextPromptDialog)
-        )
+        dialog = next(s for s in app.screen_stack if isinstance(s, TextPromptDialog))
         # Replace the pre-filled value.
         from textual.widgets import Input
 

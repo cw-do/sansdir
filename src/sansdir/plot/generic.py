@@ -159,9 +159,7 @@ def make_generic_figure(
             y = data[:, ci]
             if np.all(np.isnan(y)):
                 continue
-            base_label = (
-                header[ci] if header and ci < len(header) else f"col{ci + 1}"
-            )
+            base_label = header[ci] if header and ci < len(header) else f"col{ci + 1}"
             label = f"{path.stem}:{base_label}" if len(path_list) > 1 else base_label
             ax.plot(x, y, marker=".", linestyle="-", label=label)
         if seen_header is None and header is not None:

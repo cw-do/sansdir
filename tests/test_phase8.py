@@ -161,9 +161,7 @@ async def test_dialog_per_file_mode_writes_one_csv_per_input(tmp_path: Path) -> 
         await pilot.pause()
         picker = _find_screen(app, "HdfKeyPickerScreen")
         assert picker is not None
-        picker.dismiss(
-            ["/entry/DASlogs/temperature/time", "/entry/DASlogs/temperature/value"]
-        )
+        picker.dismiss(["/entry/DASlogs/temperature/time", "/entry/DASlogs/temperature/value"])
         await pilot.pause()
         form = _find_screen(app, "BatchExtractDialog")
         assert form is not None
@@ -410,9 +408,7 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
     async with app.run_test() as pilot:
         await pilot.pause()
         slot = app._inactive_slot
-        slot.show_catalog(
-            "IPTS-99999", runs, instrument="EQSANS", facility=str(fake_root)[1:]
-        )
+        slot.show_catalog("IPTS-99999", runs, instrument="EQSANS", facility=str(fake_root)[1:])
         await pilot.pause()
         assert slot.catalog.raw_nexus_path(100).exists()
         # Tab into the catalog so K reaches the CatalogTable binding.
@@ -477,6 +473,7 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
 
     from sansdir.app import SansdirApp
+
     app = SansdirApp(
         start_path=left,
         right_path=right,
@@ -497,8 +494,7 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
         await pilot.pause(0.5)
         right_names_after = {e.name for e in app.inactive_panel._all_entries}
         assert "EQSANS_172749.nxs_mask.nxs" in right_names_after, (
-            "expected the right pane to refresh after the mask "
-            "subprocess exited with rc=0"
+            "expected the right pane to refresh after the mask subprocess exited with rc=0"
         )
         await pilot.press("q")
 
@@ -530,6 +526,7 @@ async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
 
     from sansdir.app import SansdirApp
+
     app = SansdirApp(
         start_path=left,
         right_path=right,
@@ -548,9 +545,7 @@ async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
         await pilot.pause(0.5)
         # rc=1 → no refresh → rogue file still not in cached listing.
         right_names_after = {e.name for e in app.inactive_panel._all_entries}
-        assert "rogue_appeared.txt" not in right_names_after, (
-            "rc=1 should NOT trigger a refresh"
-        )
+        assert "rogue_appeared.txt" not in right_names_after, "rc=1 should NOT trigger a refresh"
         await pilot.press("q")
 
 

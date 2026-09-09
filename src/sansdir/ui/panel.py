@@ -287,9 +287,7 @@ class FilePanel(DataTable):
             return 0
         # Capture the rows that were tagged before we drop the set,
         # so we know which rows need a repaint.
-        affected = [
-            i for i, e in enumerate(self._entries) if e.path in self.tags
-        ]
+        affected = [i for i, e in enumerate(self._entries) if e.path in self.tags]
         self.tags.clear()
         for i in affected:
             self._repaint_row(i)

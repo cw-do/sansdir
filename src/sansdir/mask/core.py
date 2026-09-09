@@ -145,9 +145,7 @@ class Polygon(Shape):
 
     def __post_init__(self) -> None:
         if len(self.vertices) < 3:
-            raise ValueError(
-                f"Polygon needs at least 3 vertices, got {len(self.vertices)}"
-            )
+            raise ValueError(f"Polygon needs at least 3 vertices, got {len(self.vertices)}")
 
     def rasterise(self, detector_shape: tuple[int, int]) -> np.ndarray:
         # Lazy-import: matplotlib.path is light but we keep it out of the
@@ -186,12 +184,7 @@ def shape_from_dict(data: dict[str, Any]) -> Shape:
     if cls is None:
         raise ValueError(f"unknown shape type: {type_name!r}")
     if cls is Polygon:
-        return Polygon(
-            vertices=tuple(
-                (float(x), float(y))
-                for x, y in data.get("vertices", [])
-            )
-        )
+        return Polygon(vertices=tuple((float(x), float(y)) for x, y in data.get("vertices", [])))
     payload = {k: v for k, v in data.items() if k != "type"}
     return cls(**payload)
 

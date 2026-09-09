@@ -370,9 +370,8 @@ def _render_output_legend(
     """
     bg_name = cat.background.name if cat.background is not None else "<background>"
     final = "UN_<name>_det_1_background_subtracted.txt"
-    plot_line = (
-        f"**Plot `{final}`**"
-        + (" (or its shorter alias `UN_<name>_det_1_bsub.txt`)" if short_name_copy else "")
+    plot_line = f"**Plot `{final}`**" + (
+        " (or its shorter alias `UN_<name>_det_1_bsub.txt`)" if short_name_copy else ""
     )
     lines = [
         "## What the reduced filenames mean",

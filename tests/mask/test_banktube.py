@@ -61,7 +61,8 @@ class TestColToBankTubeKnownExamples:
 
     def test_last_column_is_last_back_bank(self) -> None:
         assert col_to_bank_tube(EQSANS_NTUBES - 1) == (
-            EQSANS_NBANKS - 1, EQSANS_NTUBES_PER_BANK - 1,
+            EQSANS_NBANKS - 1,
+            EQSANS_NTUBES_PER_BANK - 1,
         )
 
 

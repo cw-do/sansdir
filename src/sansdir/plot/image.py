@@ -33,9 +33,7 @@ if TYPE_CHECKING:
 # Extensions matplotlib's ``imread`` can handle out of the box. PDF /
 # SVG aren't here because matplotlib won't read them as raster; for
 # vector formats we'd want an external viewer.
-IMAGE_EXTS: frozenset[str] = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}
-)
+IMAGE_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"})
 
 
 def is_image(path: Path) -> bool:

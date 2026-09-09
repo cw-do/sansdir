@@ -235,8 +235,7 @@ def _make_ui_set_theme(app: AppProtocol) -> Command:
             return ""
         if name not in app.available_themes:
             app.notify_user(
-                f"unknown theme {name!r}. try: "
-                + ", ".join(sorted(app.available_themes)),
+                f"unknown theme {name!r}. try: " + ", ".join(sorted(app.available_themes)),
                 severity="warning",
             )
             return ""
@@ -629,6 +628,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                         severity="warning",
                     )
                     return None
+
                 # Closure that re-fetches bypassing the 24h cache.
                 # The browser binds this to ``r`` / ``ctrl+r`` so the
                 # user can force a refresh when an experiment is
@@ -637,9 +637,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                 # OnCat 23.9 hours after the on-disk cache, which
                 # served the stale 976-entry version).
                 async def _refresh_experiments() -> list:  # type: ignore[type-arg]
-                    return await client.list_experiments(
-                        instrument=instr, use_cache=False
-                    )
+                    return await client.list_experiments(instrument=instr, use_cache=False)
 
                 chosen = await _push_modal(
                     OnCatBrowserScreen(
@@ -1045,8 +1043,7 @@ def _make_ui_mask(app: AppProtocol) -> Command:
             return None
         if not has_display():
             app.notify_user(
-                "no $DISPLAY — use the CLI: "
-                f"sansdir mask {cur} --circle XC,YC,R --output mask.nxs",
+                f"no $DISPLAY — use the CLI: sansdir mask {cur} --circle XC,YC,R --output mask.nxs",
                 severity="warning",
             )
             return None
@@ -1070,6 +1067,7 @@ def _make_ui_mask(app: AppProtocol) -> Command:
         # ``DEVNULL`` swallows tracebacks — exactly what made
         # processed-NeXus failures invisible in the past.
         import tempfile
+
         stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w+", delete=False, prefix="sansdir-mask-", suffix=".log"
         )
@@ -1260,8 +1258,7 @@ def _make_hdf_batch_extract(app: AppProtocol) -> Command:
         if isinstance(written, list):
             # Per-file mode: one output per input.
             app.notify_user(
-                f"wrote {len(written)} per-file table(s) "
-                f"(first: {written[0].name})"
+                f"wrote {len(written)} per-file table(s) (first: {written[0].name})"
                 if written
                 else "no files written"
             )
@@ -1339,8 +1336,7 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
             nexus_files = [
                 p
                 for p in srcs
-                if p.is_file()
-                and (p.name.endswith(".nxs.h5") or p.suffix.lower() == ".nxs")
+                if p.is_file() and (p.name.endswith(".nxs.h5") or p.suffix.lower() == ".nxs")
             ]
         if not nexus_files:
             app.notify_user(
@@ -1407,7 +1403,10 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
         try:
             if mode == "per_file":
                 written_paths = extract_per_file(
-                    nexus_files, keys, out_path, fmt=fmt  # type: ignore[arg-type]
+                    nexus_files,
+                    keys,
+                    out_path,
+                    fmt=fmt,  # type: ignore[arg-type]
                 )
                 if not written_paths:
                     app.notify_user("no files written", severity="warning")
@@ -1420,14 +1419,17 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
                     if panel.cwd in target_dirs:
                         panel.refresh_listing()
                 app.notify_user(
-                    f"wrote {len(written_paths)} per-file table(s) "
-                    f"(first: {written_paths[0].name})"
+                    f"wrote {len(written_paths)} per-file table(s) (first: {written_paths[0].name})"
                 )
                 return ", ".join(str(p) for p in written_paths)
             # Summary mode: one row per file with means.
             rows = extract_many(nexus_files, keys)
             written = write_table(
-                rows, keys, out_path, fmt=fmt, with_stats=with_stats  # type: ignore[arg-type]
+                rows,
+                keys,
+                out_path,
+                fmt=fmt,
+                with_stats=with_stats,  # type: ignore[arg-type]
             )
         except (OSError, ValueError) as exc:
             app.notify_user(f"extract failed: {exc}", severity="error")
@@ -1670,7 +1672,9 @@ def _make_usans_init_table(app: AppProtocol) -> Command:
         if warnings:
             app.notify_user(
                 f"{csv_path.name}: {warnings[0]}"
-                + (f" (+{len(warnings) - 1} more in {note_path.name})" if len(warnings) > 1 else ""),
+                + (
+                    f" (+{len(warnings) - 1} more in {note_path.name})" if len(warnings) > 1 else ""
+                ),
                 severity="warning",
             )
         app.notify_user(
