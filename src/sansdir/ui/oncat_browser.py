@@ -322,7 +322,7 @@ class OnCatBrowserScreen(ModalScreen):  # type: ignore[type-arg]
         """
         if self._on_refresh is None:
             with contextlib.suppress(Exception):
-                self.app.notify(  # type: ignore[attr-defined]
+                self.app.notify(
                     "refresh not available (no client attached)",
                     severity="warning",
                 )

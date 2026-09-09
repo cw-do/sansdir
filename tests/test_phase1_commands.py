@@ -89,6 +89,21 @@ class FakePanel:
     def move_cursor_down(self) -> None:
         self.cursor_advances += 1
 
+    @property
+    def cursor_row(self) -> int:
+        # The fake has no table; report where cursor_path sits in `visible`,
+        # which is what the real panel's row index means.
+        if self.cursor_path is None:
+            return 0
+        try:
+            return self.visible.index(self.cursor_path)
+        except ValueError:
+            return 0
+
+    def move_cursor(self, *, row: int) -> None:
+        if 0 <= row < len(self.visible):
+            self.cursor_path = self.visible[row]
+
     def move_cursor_to_path(self, path: Path) -> bool:
         # The fake has no listing widget; record where the cursor was put
         # so tests can assert the real panel would have landed there.

@@ -81,3 +81,16 @@ python_version = "3.10"
 strict = true
 files = ["src/sansdir"]
 
+# Third-party modules that ship no type information. These are not our
+# errors to fix: h5py and send2trash have no py.typed marker, mantid is only
+# importable inside a Mantid environment, and tomli is a 3.10-only fallback
+# that isn't installed on 3.11+ where tomllib is used instead.
+[[tool.mypy.overrides]]
+module = [
+    "h5py.*",
+    "send2trash.*",
+    "mantid.*",
+    "tomli",
+]
+ignore_missing_imports = true
+

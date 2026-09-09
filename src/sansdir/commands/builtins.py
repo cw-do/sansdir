@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sansdir.commands.registry import Command, CommandParam, CommandRegistry
 from sansdir.core import archive, fileops, mailer
@@ -678,7 +678,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                     chosen.ipts,  # type: ignore[attr-defined]
                     instrument=instr,
                 )
-                app.show_catalog_in_other_pane(  # type: ignore[attr-defined]
+                app.show_catalog_in_other_pane(
                     chosen.ipts,  # type: ignore[attr-defined]
                     files,
                     instrument=instr,
@@ -1345,7 +1345,7 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
             )
             return None
         loop = asyncio.get_running_loop()
-        fut: asyncio.Future[dict | None] = loop.create_future()
+        fut: asyncio.Future[dict[str, Any] | None] = loop.create_future()
 
         def _cb(value: dict | None) -> None:
             if not fut.done():
@@ -1406,7 +1406,7 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
                     nexus_files,
                     keys,
                     out_path,
-                    fmt=fmt,  # type: ignore[arg-type]
+                    fmt=fmt,
                 )
                 if not written_paths:
                     app.notify_user("no files written", severity="warning")
@@ -1429,7 +1429,7 @@ def _make_ui_batch_extract(app: AppProtocol) -> Command:
                 keys,
                 out_path,
                 fmt=fmt,
-                with_stats=with_stats,  # type: ignore[arg-type]
+                with_stats=with_stats,
             )
         except (OSError, ValueError) as exc:
             app.notify_user(f"extract failed: {exc}", severity="error")
@@ -2342,7 +2342,7 @@ def _make_ui_rename(app: AppProtocol) -> Command:
         panel.refresh_listing()
         # Re-anchor the cursor on the renamed file so the user can
         # immediately keep working on it.
-        entries = panel._entries  # type: ignore[attr-defined]
+        entries = panel._entries
         for i, e in enumerate(entries):
             if e.path == target:
                 panel.move_cursor(row=i)
@@ -2437,7 +2437,7 @@ def _make_ui_mail_tagged(app: AppProtocol) -> Command:
             return None  # pragma: no cover
         cfg = load_config()
         loop = asyncio.get_running_loop()
-        fut: asyncio.Future[dict | None] = loop.create_future()
+        fut: asyncio.Future[dict[str, Any] | None] = loop.create_future()
 
         def _cb(value: dict | None) -> None:
             if not fut.done():

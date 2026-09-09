@@ -15,7 +15,7 @@ import contextlib
 import fnmatch
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.binding import Binding, BindingType
@@ -79,7 +79,7 @@ def _kind_style(entry: FileEntry) -> str:
     return ""
 
 
-class FilePanel(DataTable):
+class FilePanel(DataTable[Any]):
     """A file/directory listing pane."""
 
     DEFAULT_CSS = """

@@ -21,7 +21,7 @@ from pathlib import Path
 if sys.version_info >= (3, 11):
     import tomllib as _toml
 else:  # pragma: no cover — exercised only on 3.10 CI
-    import tomli as _toml  # type: ignore[no-redef]
+    import tomli as _toml
 
 
 CONFIG_ENV_VAR: str = "SANSDIR_CONFIG"

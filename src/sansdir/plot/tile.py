@@ -25,13 +25,14 @@ import math
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from sansdir.plot.ascii2d import Iq2D, read_iqxqy
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
 ColorbarMode = Literal["shared", "independent"]
@@ -141,7 +142,7 @@ def make_tile_figure(
 
     cm = _cmap_with_bad(cmap)
     mappable_for_cbar = None
-    tile_axes: list[tuple[object, Iq2D]] = []  # (ax, dataset) in draw order
+    tile_axes: list[tuple[Axes, Iq2D]] = []  # (ax, dataset) in draw order
 
     for i in range(nrows * ncols):
         ax = axes_flat[i]
@@ -285,7 +286,7 @@ def _hide_ticks(ax) -> None:  # type: ignore[no-untyped-def]
 # in-panel rather than falling back to the numbered legend); the fit check
 # below measures at this same size, so lowering it widens what qualifies.
 TAG_FONTSIZE: int = 7
-TAG_BBOX: dict = {"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"}
+TAG_BBOX: dict[str, Any] = {"facecolor": "black", "alpha": 0.5, "pad": 1, "edgecolor": "none"}
 
 # Temporarily disabled while evaluating whether the smaller overlay font lets
 # long names fit in-tile. With this False, every tile shows its full filename
@@ -299,7 +300,7 @@ NUMBERED_FALLBACK: bool = False
 SUFFIX_HOIST_OVER: int = 54
 
 
-def _label_tiles(fig, tile_axes: list) -> None:  # type: ignore[no-untyped-def]
+def _label_tiles(fig: Figure, tile_axes: list[tuple[Axes, Iq2D]]) -> None:
     """Overlay each tile with its filename, or number it and key the names below.
 
     Filenames are drawn inside the tiles (compact, no wasted margin) when

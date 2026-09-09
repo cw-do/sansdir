@@ -439,7 +439,7 @@ def run_editor(
             return base
         return f"{base}  ·  bank={bank} tube_in_bank={tib}"
 
-    ax.format_coord = format_coord  # type: ignore[assignment]
+    ax.format_coord = format_coord
     title = f"{src.name}  →  {out_path.name}"
     ax.set_title(title)
 
@@ -855,8 +855,8 @@ def run_editor(
         edit_state["drag_origin"] = (event.xdata, event.ydata)
         bg = edit_state.get("drag_bg")
         if bg is not None:
-            fig.canvas.restore_region(bg)  # type: ignore[arg-type]
-            ax.draw_artist(controller.patches[idx])  # type: ignore[arg-type]
+            fig.canvas.restore_region(bg)
+            ax.draw_artist(controller.patches[idx])
             fig.canvas.blit(ax.bbox)
         else:
             fig.canvas.draw_idle()
@@ -865,7 +865,7 @@ def run_editor(
         idx = edit_state.get("selected_index")
         if idx is not None and edit_state.get("drag_bg") is not None:
             with contextlib.suppress(Exception):
-                controller.patches[idx].set_animated(False)  # type: ignore[arg-type]
+                controller.patches[idx].set_animated(False)
             # One final full redraw to fold the patch back into the
             # normal layer (otherwise the next zoom / resize could
             # render without it).
@@ -897,7 +897,7 @@ def run_editor(
             # fall back to undo so the keystroke is never a no-op.
             sel = edit_state.get("selected_index")
             if controller.mode == "edit" and sel is not None:
-                controller.delete(int(sel))  # type: ignore[arg-type]
+                controller.delete(int(sel))
                 edit_state["selected_index"] = None
             else:
                 controller.undo()

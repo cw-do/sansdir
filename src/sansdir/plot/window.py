@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 DEFAULT_BACKEND_PRIORITY: tuple[str, ...] = ("QtAgg", "TkAgg", "GTK4Agg")
 
@@ -134,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         from sansdir.plot import ascii1d
 
-        kwargs: dict = {"errorbars": args.errorbars, "title": args.title}
+        kwargs: dict[str, Any] = {"errorbars": args.errorbars, "title": args.title}
         if args.xscale:
             kwargs["xscale"] = args.xscale
         if args.yscale:

@@ -9,7 +9,7 @@ in :class:`~sansdir.ui.command_input.CommandInput`.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 MAX_HISTORY: int = 1000
@@ -148,7 +148,7 @@ class CommandHistory:
     def __len__(self) -> int:
         return len(self._entries)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._entries)
 
     def entries(self) -> list[str]:

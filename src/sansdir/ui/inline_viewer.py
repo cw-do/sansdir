@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
+from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.widgets import Static
@@ -56,7 +57,7 @@ class InlineFileViewer(VerticalScroll):
         self._path: Path | None = None
         self.can_focus = True
 
-    def compose(self):  # type: ignore[override]
+    def compose(self) -> ComposeResult:
         yield self._header
         yield self._body
 

@@ -11,9 +11,10 @@ column, which is reduction-pipeline specific):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from rich.text import Text
+from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.widgets import DataTable, Static
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from sansdir.core.oncat import Datafile
 
 
-class CatalogTable(DataTable):
+class CatalogTable(DataTable[Any]):
     """DataTable subclass that delegates ``p`` / ``Enter`` / ``m`` / ``M``.
 
     Bindings live here (not on the parent ``Vertical``) because the
@@ -50,7 +51,7 @@ class CatalogTable(DataTable):
     def _delegate(self, name: str) -> None:
         node = self.parent
         while node is not None and not isinstance(node, RunCatalogPanel):
-            node = node.parent  # type: ignore[assignment]
+            node = node.parent
         if node is not None:
             getattr(node, name)()
 
@@ -198,7 +199,7 @@ class RunCatalogPanel(Vertical):
         # CatalogTable inside, which handles cursor nav and key bindings.
         self.can_focus = False
 
-    def compose(self):  # type: ignore[override]
+    def compose(self) -> ComposeResult:
         yield self._header
         yield self._meta
         yield self._table
@@ -390,18 +391,18 @@ class RunCatalogPanel(Vertical):
         """Plot the raw NeXus file for the cursor row's run number."""
         run = self.current_run_number
         if run is None:
-            self.app.notify("no run under cursor", severity="warning")  # type: ignore[attr-defined]
+            self.app.notify("no run under cursor", severity="warning")
             return
         path = self.raw_nexus_path(run)
         if not path.exists():
-            self.app.notify(  # type: ignore[attr-defined]
+            self.app.notify(
                 f"raw file not found: {path}",
                 severity="warning",
             )
             return
         # Dispatch through the registry so the LLM layer can call this
         # path too — we deliberately don't reach into matplotlib here.
-        self.app.run_worker(  # type: ignore[attr-defined]
+        self.app.run_worker(
             self.app.registry.dispatch("plot.detector_sum", paths=[str(path)]),  # type: ignore[attr-defined]
             name=f"plot:run{run}",
             exclusive=False,
@@ -411,16 +412,16 @@ class RunCatalogPanel(Vertical):
         """``m`` from the catalog: open the HDF5 tree for the cursor row's run."""
         run = self.current_run_number
         if run is None:
-            self.app.notify("no run under cursor", severity="warning")  # type: ignore[attr-defined]
+            self.app.notify("no run under cursor", severity="warning")
             return
         path = self.raw_nexus_path(run)
         if not path.exists():
-            self.app.notify(  # type: ignore[attr-defined]
+            self.app.notify(
                 f"raw file not found: {path}",
                 severity="warning",
             )
             return
-        self.app.run_worker(  # type: ignore[attr-defined]
+        self.app.run_worker(
             self.app.registry.dispatch("hdf.show_keys", path=str(path)),  # type: ignore[attr-defined]
             name=f"keys:run{run}",
             exclusive=False,
@@ -430,16 +431,16 @@ class RunCatalogPanel(Vertical):
         """``K`` from the catalog: launch the mask editor on the cursor row's run."""
         run = self.current_run_number
         if run is None:
-            self.app.notify("no run under cursor", severity="warning")  # type: ignore[attr-defined]
+            self.app.notify("no run under cursor", severity="warning")
             return
         path = self.raw_nexus_path(run)
         if not path.exists():
-            self.app.notify(  # type: ignore[attr-defined]
+            self.app.notify(
                 f"raw file not found: {path}",
                 severity="warning",
             )
             return
-        self.app.run_worker(  # type: ignore[attr-defined]
+        self.app.run_worker(
             self.app.registry.dispatch("ui.mask", path=str(path)),  # type: ignore[attr-defined]
             name=f"mask:run{run}",
             exclusive=False,
@@ -467,22 +468,22 @@ class RunCatalogPanel(Vertical):
             runs = [f for f in self._files if f.run_number == current] if current else []
             source = f"run {current}" if runs else "(no run under cursor)"
         if not runs:
-            self.app.notify("catalog is empty", severity="warning")  # type: ignore[attr-defined]
+            self.app.notify("catalog is empty", severity="warning")
             return
         paths = [self.raw_nexus_path(r.run_number) for r in runs]
         existing = [p for p in paths if p.exists()]
         missing = len(paths) - len(existing)
         if not existing:
-            self.app.notify(  # type: ignore[attr-defined]
+            self.app.notify(
                 f"no raw NeXus files on disk for {source}",
                 severity="warning",
             )
             return
         if missing:
-            self.app.notify(  # type: ignore[attr-defined]
+            self.app.notify(
                 f"skipping {missing} run(s) without raw NeXus on disk",
             )
-        self.app.run_worker(  # type: ignore[attr-defined]
+        self.app.run_worker(
             self.app.registry.dispatch(  # type: ignore[attr-defined]
                 "ui.batch_extract",
                 paths=[str(p) for p in existing],

@@ -348,7 +348,7 @@ class OnCatResultsDialog(ModalScreen[object]):
         )
         with Vertical():
             yield Static(title, classes="title")
-            table: DataTable = DataTable(id="oncat-table", cursor_type="row", show_header=True)
+            table: DataTable[str] = DataTable(id="oncat-table", cursor_type="row", show_header=True)
             table.add_columns("IPTS", "Title", "PI / Members", "Last activity")
             for e in self._experiments:
                 table.add_row(
@@ -380,7 +380,7 @@ class OnCatResultsDialog(ModalScreen[object]):
         self.dismiss(None)
 
 
-class MailDialog(ModalScreen[dict | None]):
+class MailDialog(ModalScreen["dict[str, Any] | None"]):
     """Recipient + subject + body modal.
 
     Returns ``{"recipient", "subject", "body"}`` on submit, or ``None`` on
@@ -844,7 +844,7 @@ class HdfKeyPickerScreen(ModalScreen[list[str] | None]):
         self.dismiss(None)
 
 
-class BatchExtractDialog(ModalScreen[dict | None]):
+class BatchExtractDialog(ModalScreen["dict[str, Any] | None"]):
     """Output form for the batch metadata extractor.
 
     The picker (:class:`HdfKeyPickerScreen`) is a separate full-screen

@@ -26,6 +26,13 @@ class PanelProtocol(Protocol):
     def cursor_path(self) -> Path | None:
         """Absolute path under the cursor, or ``None`` for an empty pane."""
 
+    @property
+    def cursor_row(self) -> int:
+        """Index of the highlighted row within the current (filtered) listing."""
+
+    def move_cursor(self, *, row: int) -> None:
+        """Move the cursor to ``row`` of the current listing."""
+
     def set_cwd(self, new_cwd: Path) -> None:
         """Change the panel's directory and refresh its listing."""
 
