@@ -10,10 +10,13 @@
 # all of these; a minimal distro TeX install does not.
 
 DOC      := sansdir-report
-PYTHON   := ../.venv/bin/python
+PYTHON   := $(abspath ../.venv/bin/python)
 FIGDIR   := figures
 
 # Figures that are generated from the running application / real data.
+# metadata-workflow.pdf is cluster-only (captured against a real IPTS file);
+# make_figures.py skips it gracefully elsewhere, so it is not listed as a
+# hard prerequisite.
 GENFIGS  := $(FIGDIR)/tui-panes.pdf \
             $(FIGDIR)/hdf-search.pdf \
             $(FIGDIR)/help-overlay.pdf \

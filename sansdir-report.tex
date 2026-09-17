@@ -1095,6 +1095,61 @@ Output is written to the inactive pane's working directory by default, because
 the active pane is typically the read-only proposal directory and defaulting
 there would produce a permission error on every attempt.
 
+\subsection{A WORKED EXAMPLE}
+\label{sec:metadata-example}
+
+Figure~\ref{fig:metadata-workflow} walks through a complete extract-and-plot
+session on a real experiment file, exactly as a user at the terminal would see
+it. The file is a Mantid-processed workspace from an EQ-SANS measurement with an
+in-situ mechanical load frame, and the quantity of interest is the load-cell
+record from that sample environment---a \ac{das} log named
+\texttt{BL6:SE:PsyloTech:SGLC}---which the user wants as a plottable time
+series.
+
+\begin{enumerate}
+  \item Navigate the active pane to the file
+    (\texttt{IPTS-37828/shared/output/.../*\_processed.nxs}) and point the
+    other pane at the directory that should receive the output, here the
+    proposal's writable \texttt{shared/} folder.
+  \item Press \key{M}. The key picker opens on the file's HDF5 tree. Nobody
+    remembers a full \ac{das} log path, so press \key{/} and type a fragment
+    of the name: \texttt{LC}. Three rows match; \key{Space} on
+    \texttt{.../SGLC/time} and \texttt{.../SGLC/value} stars both, and the
+    status line confirms \emph{selected: 2 key(s)}
+    (panel~a).
+  \item Press \key{Ctrl+S}. The picker folds back into the output form with
+    both keys filled in. Per-file mode and the
+    \texttt{<filename>\_extracted} template are already the defaults; switch
+    the format to \ac{csv} and press \key{Ctrl+S} again to run
+    (panel~b).
+  \item The extractor writes
+    \texttt{<filename>\_extracted.csv}---two columns, \texttt{time} and
+    \texttt{value}, 5\,644 rows---into the inactive pane's directory, and
+    that pane refreshes with the cursor ready to move onto the new file
+    (panel~c).
+  \item Press \key{Tab} to switch panes, put the cursor on the new \ac{csv},
+    and press \key{l}. The generic linear plotter reads the header row for
+    axis labels and draws value against time (panel~d): the load ramps
+    during the first 450~seconds of the run and releases sharply---precisely
+    the kind of sanity check that would otherwise require exporting the file
+    and opening a separate analysis tool.
+\end{enumerate}
+
+The four panels were captured from the running program, so fonts, colors, and
+layout are what the terminal actually shows.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{figures/metadata-workflow.pdf}
+  \longcaption{Batch metadata extraction, end to end.}{(a)~The key picker
+  after pressing \key{M} and searching for \texttt{LC}: both datasets under
+  the \texttt{PsyloTech:SGLC} log are selected. (b)~The output form with the
+  chosen keys, per-file mode, and CSV format. (c)~The destination pane after
+  the run: the extracted CSV is under the cursor. (d)~The curve produced by
+  pressing \key{l} on it---the load-cell trace over the course of the run.}
+  \label{fig:metadata-workflow}
+\end{figure}
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 8. ONCAT
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
