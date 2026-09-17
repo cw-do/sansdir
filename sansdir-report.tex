@@ -110,8 +110,8 @@ Small-Angle Neutron Scattering Data}
 This report documents \textbf{sansdir}, a terminal application developed in the
 Neutron Scattering Division at \ac{ornl} to support the day-to-day data-handling
 work of \ac{sans} instrument scientists and users. The software is in production
-use for \ac{sns} \ac{sans} workflows and is installed on the analysis cluster at
-\texttt{/SNS/EQSANS/shared/script/sansdir}.
+use for \ac{sns} \ac{sans} workflows and is installed on the analysis cluster,
+launched as \texttt{/SNS/EQSANS/shared/bin/sansdir}.
 
 The report is written for two audiences. Sections~\ref{sec:intro}
 through~\ref{sec:config} are a user manual: they describe what the program does,
@@ -283,16 +283,18 @@ summarizes the work and states the limitations that bound it.
 
 \subsection{ZERO-INSTALL DEPLOYMENT ON THE ANALYSIS CLUSTER}
 
-The primary deployment target is the \ac{ornl} analysis cluster, where the
-repository is installed at \texttt{/SNS/EQSANS/shared/script/sansdir} together
-with a self-contained Python virtual environment. Every cluster user has read
-access to that path, so no per-user installation step is required. The program
-is launched by running that script from any terminal on the cluster---a login
-node, a web-terminal session, or an \ac{ssh} connection:
+The primary deployment target is the \ac{ornl} analysis cluster, where a
+released, non-editable install lives at
+\texttt{/SNS/EQSANS/shared/script/sansdir-stable} together with a
+self-contained Python virtual environment, and is exposed through the shared
+tools directory as \texttt{/SNS/EQSANS/shared/bin/sansdir}. Every cluster user
+has read access to those paths, so no per-user installation step is required.
+The program is launched by running that command from any terminal on the
+cluster---a login node, a web-terminal session, or an \ac{ssh} connection:
 
 \begin{lstlisting}[language=shellsession]
-/SNS/EQSANS/shared/script/sansdir/bin/sansdir
-/SNS/EQSANS/shared/script/sansdir/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
+/SNS/EQSANS/shared/bin/sansdir
+/SNS/EQSANS/shared/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
 \end{lstlisting}
 
 The first form opens the interface in the current working directory. The optional
@@ -308,7 +310,7 @@ directory already on their \texttt{PATH}. On the analysis nodes both
 
 \begin{lstlisting}[language=shellsession]
 mkdir -p ~/bin
-ln -s /SNS/EQSANS/shared/script/sansdir/bin/sansdir ~/bin/sansdir
+ln -s /SNS/EQSANS/shared/bin/sansdir ~/bin/sansdir
 sansdir --version
 \end{lstlisting}
 
