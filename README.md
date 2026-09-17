@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.10** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.10.2** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -30,14 +30,19 @@ matplotlib plots in their own windows when one *is* available.
 
 ### Option A — Zero-install on the ORNL analysis cluster *(recommended)*
 
-Run the **stable release** at `/SNS/EQSANS/shared/script/sansdir-stable`.
-It ships its own bundled venv, so any cluster user can run it directly with
-no Python or pip steps:
+Run the **stable release** through the shared tools directory. It ships its
+own bundled venv, so any cluster user can run it directly with no Python or
+pip steps:
 
 ```bash
-/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir
-/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
+/SNS/EQSANS/shared/bin/sansdir
+/SNS/EQSANS/shared/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
 ```
+
+(`/SNS/EQSANS/shared/bin/sansdir` is a symlink to the stable release at
+`/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir` — either path works;
+the short one is the one to remember, and it is where future EQ-SANS
+command-line tools will appear too.)
 
 > **Use `sansdir-stable`, not `sansdir`.** The neighbouring `sansdir/`
 > directory is the maintainer's *development* tree — an editable checkout that
@@ -49,7 +54,7 @@ To save typing, drop a symlink (or a copy) into your `PATH`:
 
 ```bash
 mkdir -p ~/bin
-ln -s /SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir ~/bin/sansdir
+ln -s /SNS/EQSANS/shared/bin/sansdir ~/bin/sansdir
 # (~/bin and ~/.local/bin are on your PATH on the analysis nodes by default)
 sansdir --version
 ```
@@ -57,7 +62,7 @@ sansdir --version
 Or prepend the shared bin directory:
 
 ```bash
-echo 'export PATH="/SNS/EQSANS/shared/script/sansdir-stable/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="/SNS/EQSANS/shared/bin:$PATH"' >> ~/.bashrc
 ```
 
 You can also **just copy the script** and run it from anywhere:
@@ -651,11 +656,38 @@ Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
 
+## What's in v0.10.2
+
+A hardening release — no new keys, several things now actually work as
+documented.
+
+- **`mypy --strict` passes and is enforced in CI.** The sweep surfaced
+  two incomplete protocols and a real bug (the help overlay's table
+  cursor was configured with an invalid value).
+- **The two colorbar modes are reachable.** `[ui].colorbar_mode` in
+  `config.toml` sets the default (`shared` / `independent`), and
+  `:plot.iqxqy colorbar_mode=independent` overrides per plot — the
+  parameter existed before but was never passed through.
+- **ruff pinned** (0.15.x) so CI, pre-commit and local runs agree.
+- **Technical report refreshed**: USANS + desmearing sections with
+  references, a photographed metadata-extraction worked example, and a
+  reproducible LaTeX toolchain for the analysis cluster
+  (`docs/README.md`).
+
+## What's in v0.10.1
+
+- **The licence is visible where users are.** `?` (help overlay) and
+  `sansdir version` both show the MIT licence, copyright and project
+  URL; a test keeps them from drifting.
+- **`sansdir-stable/` is the release channel.** Users launch a frozen,
+  non-editable install advanced only by tagging; the development tree
+  next door can no longer break anyone mid-edit.
+
 ## What's in v0.10
 
-The v0.9 → v0.10 jump adds **USANS reduction** (Phase 9.8) and a
+The v0.9 → v0.10 jump adds **USANS reduction** (Phase 9.8), a
 workflow-polish pass driven by using it on real IPTS-37679 data
-(Phase 9.9).
+(Phase 9.9), and **desmearing**.
 
 - **Instrument mode** — one TUI for both families. SANS is the
   default; a `/SNS/USANS/...` launch path auto-switches, and
@@ -681,6 +713,11 @@ workflow-polish pass driven by using it on real IPTS-37679 data
   to the instrument team's `reduceUSANS` in a clean environment, via
   a staging directory of symlinks. **Nothing under `/SNS` is written.**
 - `sansdir usans init` / `sansdir usans reduce` for headless use.
+- **Desmearing on `d`** — the truncated Abel inversion (Huang et al.)
+  of slit-smeared USANS curves, with an optional SANS companion file
+  picked interactively in the other pane; the subtracted curve also
+  gets a short `_bsub.txt` alias.
+- **MIT licence** and a `CITATION.cff` for citing the software.
 - Polish that applies to SANS too: `Enter` previews any text file in
   the other pane; the inline viewer frees its buffer when closed; a
   pane whose directory is deleted re-anchors to the nearest surviving

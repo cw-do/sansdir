@@ -21,8 +21,11 @@
 
 set -e
 
-# Resolve our own location (handles symlinks → still finds the real venv).
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# Resolve our own location. readlink -f first: when launched through a
+# symlink (e.g. from ~/.local/bin), dirname of the *link* would point the
+# venv lookup at the wrong directory.
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SELF")" >/dev/null 2>&1 && pwd -P)"
 SANSDIR_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
 VENV_PY="$SANSDIR_ROOT/.venv/bin/python"
 
