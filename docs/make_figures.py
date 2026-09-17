@@ -149,6 +149,187 @@ async def _capture_hdf_and_help() -> None:
         app.save_screenshot(str(FIG_DIR / "help-overlay.svg"))
 
 
+async def _capture_metadata_workflow() -> None:
+    """Figure: metadata extraction + plot, on a real IPTS-37828 file.
+
+    Unlike every other figure here, this one is *not* reproducible from a
+    committed fixture: it walks the actual keyword-search / extract / plot
+    workflow against a real 147 MB processed NeXus file
+    (``IPTS-37828/shared/output/3_0.1phr/..._processed.nxs``) that lives only
+    on the analysis cluster. On any other host, or if the file has moved,
+    this silently no-ops and the four panels already in ``figures/`` are
+    left untouched --- same convention as the ``EQSANS_172749.nxs.h5``
+    check above.
+
+    The four panels are captured in the exact order a user presses keys:
+    ``M`` -> search "LC" in the key picker and select two datasets ->
+    the extraction form with the format set to CSV -> the destination
+    pane after the CSV lands -> the plotted curve from ``l``.
+    """
+    from sansdir.app import SansdirApp
+    from sansdir.core.history import CommandHistory
+
+    ipts_dir = Path("/SNS/EQSANS/IPTS-37828/shared")
+    source = ipts_dir / "output" / "3_0.1phr" / "70.30PBD_0.1_phr_d10_4m2.5a30hz_processed.nxs"
+    if not source.is_file():
+        print(f"  ! missing {source}; skipping metadata-workflow figure")
+        return
+
+    root = SCRATCH / "metadata_workflow"
+    root.mkdir(parents=True, exist_ok=True)
+    app = SansdirApp(
+        start_path=source.parent,
+        right_path=ipts_dir,
+        history=CommandHistory(path=root / "hist", load=False),
+    )
+    async with app.run_test(size=TERMINAL_SIZE) as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        app.active_panel.move_cursor_to_path(source.resolve())
+        await pilot.pause()
+
+        # -- panel 1: 'M' -> auto-launched picker -> '/' search "LC" ---------
+        # -> Tab onto the results table (search-input has focus after
+        # typing) -> skip the parent group row -> select the two leaves.
+        #
+        # NB: do NOT ``await app.workers.wait_for_complete()`` while the
+        # dialog is open — the batch-extract *command* runs as a worker
+        # that is itself awaiting the dialog's result, so that call
+        # deadlocks. Wait for the search-results table instead.
+        await pilot.press("M")
+        picker = None
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if type(app.screen).__name__ == "HdfKeyPickerScreen":
+                picker = app.screen
+                break
+        if picker is None:
+            print("  ! key picker never opened; aborting workflow figure")
+            return
+        await pilot.press("slash")
+        for ch in "LC":
+            await pilot.press(ch)
+        for _ in range(600):  # the first search walks the HDF5 tree (~3 s)
+            if getattr(picker, "_search_rows", None):
+                break
+            await pilot.pause(0.1)
+        else:
+            print("  ! key search never returned results; aborting workflow figure")
+            return
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.press("down")  # row 0 is the parent group; skip it
+        await pilot.press("space")  # .../SGLC/time
+        await pilot.press("down")
+        await pilot.press("space")  # .../SGLC/value
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "metadata-workflow-1.svg"))
+
+        # -- panel 2: back in the form, format switched to CSV --------------
+        await pilot.press("ctrl+s")
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if type(app.screen).__name__ == "BatchExtractDialog":
+                break
+        else:
+            print("  ! extract form never resurfaced; aborting workflow figure")
+            return
+        from textual.widgets import Select
+
+        app.screen.query_one("#fmt-select", Select).value = "csv"
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "metadata-workflow-2.svg"))
+
+        # -- run the extraction, land on the shared folder -------------------
+        await pilot.press("ctrl+s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        written = ipts_dir / f"{source.stem}_extracted.csv"
+        if not written.is_file():
+            print(f"  ! extraction did not produce {written}; aborting workflow figure")
+            return
+
+        # -- panel 3: the shared folder, cursor on the new CSV ---------------
+        await pilot.press("tab")
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        app.active_panel.move_cursor_to_path(written.resolve())
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "metadata-workflow-3.svg"))
+
+        # -- panel 4: 'l' plots it; headless, so it saves a PNG --------------
+        os.environ["SANSDIR_CACHE_DIR"] = str(root / "plots")
+        await pilot.press("l")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    for stem in ("metadata-workflow-1", "metadata-workflow-2", "metadata-workflow-3"):
+        _svg_to_pdf(stem)
+
+    # sansdir writes to $SANSDIR_CACHE_DIR/plots/<stamp>_<name>.png
+    png_dir = root / "plots"
+    pngs = sorted(png_dir.rglob("*.png")) if png_dir.is_dir() else []
+    if not pngs:
+        print("  ! 'l' did not produce a PNG; workflow figure is missing panel 4")
+        return
+    _tile_workflow_figure(pngs[-1])
+
+
+def _tile_workflow_figure(plot_png: Path) -> None:
+    """Assemble the four workflow panels into one labeled 2x2 figure."""
+    import matplotlib.image as mpimg
+    import matplotlib.pyplot as plt
+
+    panels = [
+        (FIG_DIR / "metadata-workflow-1.pdf", "(a) M, then /LC: search + select keys"),
+        (FIG_DIR / "metadata-workflow-2.pdf", "(b) Ctrl+S: output form, format = CSV"),
+        (FIG_DIR / "metadata-workflow-3.pdf", "(c) the CSV lands in the other pane"),
+        (plot_png, "(d) l: plot of the extracted table"),
+    ]
+    missing = [p for p, _ in panels if not p.is_file()]
+    if missing:
+        print(f"  ! missing panel source(s): {missing}; skipping tiled figure")
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8.2))
+    for ax, (path, caption) in zip(axes.ravel(), panels, strict=True):
+        if path.suffix == ".pdf":
+            # Rasterize the terminal-screenshot PDFs at a fixed DPI so all
+            # four panels share one consistent resolution in the tile.
+            import subprocess as _sp
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as td:
+                png = Path(td) / "panel.png"
+                _sp.run(
+                    [
+                        "pdftoppm",
+                        "-png",
+                        "-r",
+                        "220",
+                        "-singlefile",
+                        str(path),
+                        str(png.with_suffix("")),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                img = mpimg.imread(png)
+        else:
+            img = mpimg.imread(path)
+        ax.imshow(img)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_xlabel(caption, fontsize=11)
+    fig.tight_layout()
+    out = FIG_DIR / "metadata-workflow.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  -> {out.relative_to(REPO_ROOT)}")
+
+
 def _make_plots() -> None:
     """Figures: a reduced I(q) curve and a raw detector heat map."""
     import matplotlib
@@ -181,6 +362,9 @@ def main() -> int:
     for stem in ("tui-panes", "hdf-search", "help-overlay"):
         if (FIG_DIR / f"{stem}.svg").is_file():
             _svg_to_pdf(stem)
+
+    print("Capturing metadata-extraction worked example (cluster-only) ...")
+    asyncio.run(_capture_metadata_workflow())
 
     print("Rendering plots ...")
     _make_plots()

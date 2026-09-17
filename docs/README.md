@@ -19,8 +19,7 @@ ORNL Technical Memorandum describing sansdir, built on the ORNL report template
 ## Building
 
 `sansdir-report.pdf` (49 pp.) is checked in, so you only need to build after
-editing. It currently lags `sansdir-report.tex`, which gained the USANS
-reduction section in v0.10 — see the regression note below.
+editing.
 
 On Overleaf or any `texlive-full` host:
 
@@ -37,33 +36,50 @@ The cluster's stock TeX Live 2020 is missing everything `ornltm.cls` needs
 `seqsplit`), the `newtx` Times fonts, several report dependencies
 (`biblatex-chicago`, `threeparttable`, `multirow`, `xpatch`, `xstring`,
 `hyphenat`, `logreq`), and `biber`. Fedora's `tlmgr` refuses `--usermode`
-installs here, so `fetch-texdeps.sh` downloads them straight from the CTAN
-tlnet archive into a private tree instead. Nothing outside that tree is
-touched:
+installs here, so `fetch-texdeps.sh` downloads them into a private tree
+instead. Nothing outside that tree is touched:
 
 ```bash
-./fetch-texdeps.sh                                    # ~40 MB into /tmp/texdeps/tl
+./fetch-texdeps.sh                                     # ~40 MB into /tmp/texdeps/tl
 export TEXMFHOME=/tmp/texdeps/tl
-export PATH="/tmp/texdeps/tl/bin/x86_64-linux:$PATH"  # biber
+export PATH="/tmp/texdeps/tl/bin/x86_64-linux:$PATH"   # for biber
+eval "$(./fetch-texdeps.sh --libnsl-env)"              # only if biber errors on libnsl.so.1
+make figures    # only needed after `make distclean`, or the first time
 make
 ```
 
-This is the toolchain that produced the checked-in PDF; a clean run finishes
-with no errors, no undefined references or citations, and one overfull hbox.
+This is the toolchain that produces the checked-in PDF; a clean run finishes
+with no errors, no undefined references or citations, and one 2.8pt overfull
+hbox (cosmetic — nothing is clipped).
 
-One caveat, documented in the script: do **not** add `l3kernel`, `l3packages`,
-or `l3backend` to it. Current versions need a newer LaTeX format than the 2020
-one installed here and abort with "Mismatched LaTeX support files detected."
-The system's own `expl3` works with the `acro` release the script fetches.
+Two things worth knowing if this ever breaks again:
 
-**Known regression (2026-08).** The script pulls from the *current* tlnet
-archive, so it now fetches a `tocloft` that requires LaTeX 2023-11-01. On this
-host's 2020 format it throws `Undefined control sequence`
-(`\IfDocumentMetadataTF`, `\DeclareInstance`) and mangles the table of
-contents — `make` still emits a PDF, but a shorter, wrong one. Until the script
-pins versions, **build the report on Overleaf or a `texlive-full` host** and
-treat a PDF produced here as untrustworthy. The `.tex` remains the source of
-truth; the checked-in PDF is only refreshed from a good toolchain.
+**The mirror is a dated snapshot, not the live one, and that is load-bearing.**
+`fetch-texdeps.sh` pins `MIRROR` to a specific date on
+`texlive.info/tlnet-archive` rather than CTAN's live tlnet, because the live
+mirror's packages drift forward in time and eventually stop being compatible
+with this host's TeX Live 2020 format — that happened once already (2026-08:
+the live mirror's `tocloft` required LaTeX format 2023-11-01 and the build
+silently produced a shorter, wrong PDF). Pinning one date keeps every fetched
+package mutually consistent. If a future edit needs a package not in the
+pinned snapshot, bump `SNAPSHOT_DATE` in the script and re-verify the whole
+build — don't add a second mirror for just the new package, or the
+consistency guarantee is gone.
+
+Also do **not** add `l3kernel`, `l3packages`, or `l3backend` to the fetch
+list: current versions need a newer LaTeX format than the 2020 one installed
+here and abort with "Mismatched LaTeX support files detected." The system's
+own `expl3` works with the `acro` release the script fetches.
+
+**`biber` can fail with `libnsl.so.1: cannot open shared object file`.** It
+was built against a glibc old enough to still ship `libnsl` directly; modern
+distros provide the ABI-compatible replacement under a different soname
+(this host's RHEL 9 `libnsl2` package gives `libnsl.so.3`). Rather than hunt
+for a path by hand, `./fetch-texdeps.sh --libnsl-env` asks the dynamic linker
+what is actually installed, symlinks a `libnsl.so.1` shim next to the fetched
+tree, and prints the `export LD_LIBRARY_PATH=...` line to `eval`. If it exits
+with "no libnsl.so.\* found," install `libnsl2` (or your distro's equivalent)
+first.
 
 ## Figures
 
