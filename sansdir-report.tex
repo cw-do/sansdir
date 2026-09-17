@@ -262,11 +262,12 @@ reduction---the output format is defined by what \texttt{drtsans} consumes.
 An earlier tool by the same author, \texttt{eqsanscli} \autocite{eqsanscli},
 provided command-line access to OnCat catalog search. Its \ac{api} endpoints and
 authentication flow informed the OnCat client described in
-Section~\ref{sec:oncat}, which was reimplemented rather than vendored.
+Section~\ref{sec:oncat}; that client was written fresh for this program rather
+than by copying \texttt{eqsanscli}'s source code into it.
 
 \subsection{SCOPE OF THIS REPORT}
 
-This report describes version 0.9.0. Section~\ref{sec:install} covers
+This report describes version 0.10.2. Section~\ref{sec:install} covers
 installation and deployment. Section~\ref{sec:arch} describes the software
 architecture, with emphasis on the command registry. Sections~\ref{sec:ui}
 through~\ref{sec:mask} document the user-facing feature set. Section~\ref{sec:cli}
@@ -474,7 +475,7 @@ implemented. A synchronous convenience wrapper exists for call sites that are no
 already inside an event loop; it raises rather than silently misbehaving if
 invoked from within one.
 
-Version 0.9.0 registers 52 commands. Appendix~\ref{sec:appcommands} lists them
+Version 0.10.2 registers 57 commands. Appendix~\ref{sec:appcommands} lists them
 in full.
 
 \subsection{DISPATCH PATHS}
@@ -539,8 +540,11 @@ keyword arguments the command expects. For example, the resolver bound to
 \key{m} extracts the path under the cursor in the active pane and returns it as
 the \texttt{path} argument to \cmd{hdf.show\_keys}.
 
-Resolvers are named functions rather than anonymous lambdas so that tracebacks
-and the help overlay display meaningful names. The default map contains 48
+Python allows defining a one-line helper function without giving it a name (a
+\emph{lambda}), but a nameless function identifies itself in error messages
+only as \texttt{<lambda>}. Every resolver here is therefore an ordinary
+function with a descriptive name, so an error traceback and the help overlay
+can both say which resolver was involved. The default map contains 48
 bindings, of which 38 are shown in the help overlay; the remainder are duplicate
 encodings of the same key. Duplicates exist because terminals disagree on how to
 report certain keys: the equals sign arrives as \texttt{equals\_sign} on most
@@ -1500,8 +1504,9 @@ than archaeological.
 
 The reduction mathematics belongs to the instrument team's \texttt{usansred}
 package, deployed on the cluster as a pixi environment. The program locates its
-console script and runs it as a subprocess; it does not reimplement, vendor, or
-wrap the physics. Two deployment realities are absorbed on the caller's side.
+console script and runs it as a subprocess; it does not reimplement the
+physics, and no code from \texttt{usansred} is copied into this code base.
+Two deployment realities are absorbed on the caller's side.
 
 First, the console script inherits the invoking user's \texttt{\textasciitilde
 /.local} site packages and aborts on a stale \texttt{pandas}, which is reachable
@@ -1542,6 +1547,51 @@ writes a shorter \texttt{\_bsub.txt} alias beside it after each reduce, keeping
 the original so the engine's own summary spreadsheet and any downstream tooling
 that expects the standard name continue to work. The alias is a copy, not a
 symbolic link, and is controlled by \texttt{[usans].short\_name\_copy}.
+
+\subsection{A WORKED EXAMPLE}
+\label{sec:usans-example}
+
+Figure~\ref{fig:usans-workflow} shows the complete flow on a real proposal
+(IPTS-37679), from an empty working folder to reduced curves, using only the
+\key{r} key and the prompts it raises.
+
+\begin{enumerate}
+  \item Open the program in a writable working folder anywhere under the
+    proposal's path. The \texttt{/SNS/USANS} prefix puts it in \ac{usans} mode
+    automatically.
+  \item Press \key{r}. The folder holds no setup table yet, so the program
+    offers to build one for the \ac{ipts} named by the path
+    (panel~a). Confirm with \key{y}.
+  \item The run list is fetched from the catalog and displayed in the other
+    pane, and a prompt asks for the first run of the experiment---here
+    49434 (panel~b). Blocks recorded before that run---beam-cycle alignment
+    and test scans---are noted but left out of the table.
+  \item The program writes \texttt{IPTS-37679\_setup.csv} and its companion
+    \texttt{NOTE.md}, leaves the cursor on the table, and previews its content
+    in the other pane (panel~c): here one background and 23 sample blocks.
+    This is the review gate---check the background pick and block sizes
+    against the NOTE, editing with \key{F4} if needed.
+  \item Press \key{r} again, now on the table. The data directory defaults to
+    the proposal's \texttt{autoreduce} folder and the output directory to
+    \texttt{output/} beside the table; accepting both runs the engine over
+    every block---seconds, since it works from the pre-processed per-run
+    ASCII. On completion the program offers to show the output folder in
+    the other pane (panel~d), where each sample now has its
+    \texttt{UN\_*\_det\_1\_*} curve family. \key{p} plots any of them, and
+    \key{d} desmears (Section~\ref{sec:desmear}).
+\end{enumerate}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{figures/usans-workflow.pdf}
+  \longcaption{USANS reduction, end to end, on one key.}{(a)~\key{r} in an
+  empty working folder offers to build the setup table for the IPTS named by
+  the path. (b)~The start-of-experiment prompt (run 49434); the fetched run
+  list is visible in the other pane. (c)~The generated table under the
+  cursor, previewed in the other pane for review. (d)~After the second
+  \key{r}: the reduced curves in the output folder.}
+  \label{fig:usans-workflow}
+\end{figure}
 
 \subsection{DESMEARING}
 \label{sec:desmear}
@@ -1823,7 +1873,7 @@ it on production data.
 \section{COMMAND REGISTRY REFERENCE}
 \label{sec:appcommands}
 
-Table~\ref{tab:allcommands} lists every command registered in version 0.9.0.
+Table~\ref{tab:allcommands} lists every command registered in version 0.10.2.
 Any command may be invoked from the \key{:} line by name or alias.
 
 \begin{small}

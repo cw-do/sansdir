@@ -276,16 +276,23 @@ async def _capture_metadata_workflow() -> None:
 
 
 def _tile_workflow_figure(plot_png: Path) -> None:
-    """Assemble the four workflow panels into one labeled 2x2 figure."""
+    """Assemble the four metadata-workflow panels into one labeled figure."""
+    _tile_panels(
+        "metadata-workflow",
+        [
+            (FIG_DIR / "metadata-workflow-1.pdf", "(a) M, then /LC: search + select keys"),
+            (FIG_DIR / "metadata-workflow-2.pdf", "(b) Ctrl+S: output form, format = CSV"),
+            (FIG_DIR / "metadata-workflow-3.pdf", "(c) the CSV lands in the other pane"),
+            (plot_png, "(d) l: plot of the extracted table"),
+        ],
+    )
+
+
+def _tile_panels(out_stem: str, panels: list[tuple[Path, str]]) -> None:
+    """Tile captioned panels into ``FIG_DIR/<out_stem>.pdf`` (2 per row)."""
     import matplotlib.image as mpimg
     import matplotlib.pyplot as plt
 
-    panels = [
-        (FIG_DIR / "metadata-workflow-1.pdf", "(a) M, then /LC: search + select keys"),
-        (FIG_DIR / "metadata-workflow-2.pdf", "(b) Ctrl+S: output form, format = CSV"),
-        (FIG_DIR / "metadata-workflow-3.pdf", "(c) the CSV lands in the other pane"),
-        (plot_png, "(d) l: plot of the extracted table"),
-    ]
     missing = [p for p, _ in panels if not p.is_file()]
     if missing:
         print(f"  ! missing panel source(s): {missing}; skipping tiled figure")
@@ -324,10 +331,132 @@ def _tile_workflow_figure(plot_png: Path) -> None:
             spine.set_visible(False)
         ax.set_xlabel(caption, fontsize=11)
     fig.tight_layout()
-    out = FIG_DIR / "metadata-workflow.pdf"
+    out = FIG_DIR / f"{out_stem}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"  -> {out.relative_to(REPO_ROOT)}")
+
+
+async def _wait_for(pilot, predicate, *, tries: int = 600, delay: float = 0.1) -> bool:  # type: ignore[no-untyped-def]
+    """Poll ``predicate`` between pilot pauses; True when it fires.
+
+    Never ``await app.workers.wait_for_complete()`` while a modal is up:
+    the command that opened the modal is itself a worker awaiting the
+    dialog's answer, so that call deadlocks (learned the hard way).
+    """
+    for _ in range(tries):
+        if predicate():
+            return True
+        await pilot.pause(delay)
+    return False
+
+
+async def _capture_usans_workflow() -> None:
+    """Figure: the single-key USANS reduction flow, on real IPTS-37679 data.
+
+    Cluster-only, like the metadata workflow above: it needs OnCat access,
+    the IPTS-37679 autoreduce ARN files, and the ``usansred`` pixi
+    environment, and silently no-ops when any of those are missing.
+
+    Four panels, in keystroke order: ``r`` in an empty working folder
+    offers to build the setup table; the start-run prompt takes 49434;
+    the generated CSV lands under the cursor with its content previewed
+    in the other pane; a second ``r`` reduces it and the other pane shows
+    the reduced curves. The working folder is wiped and recreated on
+    every run so the capture is reproducible.
+    """
+    from sansdir.app import SansdirApp
+    from sansdir.core.history import CommandHistory
+
+    ipts_shared = Path("/SNS/USANS/IPTS-37679/shared")
+    if not (ipts_shared / "autoreduce").is_dir():
+        print("  ! IPTS-37679/shared/autoreduce not reachable; skipping USANS figure")
+        return
+    work = ipts_shared / "cdo" / "report_demo"
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+
+    root = SCRATCH / "usans_workflow"
+    root.mkdir(parents=True, exist_ok=True)
+    app = SansdirApp(
+        start_path=work,
+        right_path=work,
+        history=CommandHistory(path=root / "hist", load=False),
+    )
+    async with app.run_test(size=TERMINAL_SIZE) as pilot:
+        await pilot.pause()
+
+        def modal_is(name: str) -> bool:
+            return type(app.screen).__name__ == name
+
+        def no_modal() -> bool:
+            return len(app.screen_stack) == 1
+
+        # -- panel 1: `r` with no table under the cursor: the offer ----------
+        await pilot.press("r")
+        if not await _wait_for(pilot, lambda: modal_is("ConfirmDialog")):
+            print("  ! build-table offer never appeared; aborting USANS figure")
+            return
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "usans-workflow-1.svg"))
+
+        # -- panel 2: accept; OnCat fetch, then the start-run prompt ---------
+        await pilot.press("y")
+        if not await _wait_for(pilot, lambda: modal_is("TextPromptDialog")):
+            print("  ! start-run prompt never appeared; aborting USANS figure")
+            return
+        for ch in "49434":
+            await pilot.press(ch)
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "usans-workflow-2.svg"))
+
+        # -- panel 3: table generated, previewed in the other pane -----------
+        await pilot.press("enter")
+        csv_path = work / "IPTS-37679_setup.csv"
+        if not await _wait_for(pilot, lambda: no_modal() and csv_path.is_file()):
+            print("  ! setup CSV was not generated; aborting USANS figure")
+            return
+        await pilot.pause()
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "usans-workflow-3.svg"))
+
+        # -- panel 4: `r` on the CSV -> output prompt -> reduce -> results ---
+        await pilot.press("r")
+        if not await _wait_for(pilot, lambda: modal_is("TextPromptDialog")):
+            print("  ! output-dir prompt never appeared; aborting USANS figure")
+            return
+        await pilot.press("enter")  # accept <csv dir>/output
+        # The engine reduces every block; give it up to ten minutes.
+        if not await _wait_for(pilot, lambda: modal_is("ConfirmDialog"), tries=6000):
+            print("  ! reduction never finished; aborting USANS figure")
+            return
+        await pilot.press("y")  # show the output directory in the other pane
+        if not await _wait_for(pilot, no_modal):
+            return
+        await pilot.pause()
+        app.save_screenshot(str(FIG_DIR / "usans-workflow-4.svg"))
+
+    for stem in ("usans-workflow-1", "usans-workflow-2", "usans-workflow-3", "usans-workflow-4"):
+        _svg_to_pdf(stem)
+    _tile_panels(
+        "usans-workflow",
+        [
+            (
+                FIG_DIR / "usans-workflow-1.pdf",
+                "(a) r in an empty folder: offer to build the table",
+            ),
+            (FIG_DIR / "usans-workflow-2.pdf", "(b) first run of the experiment: 49434"),
+            (
+                FIG_DIR / "usans-workflow-3.pdf",
+                "(c) the generated CSV, previewed in the other pane",
+            ),
+            (
+                FIG_DIR / "usans-workflow-4.pdf",
+                "(d) r on the CSV: reduced curves in the other pane",
+            ),
+        ],
+    )
 
 
 def _make_plots() -> None:
@@ -365,6 +494,9 @@ def main() -> int:
 
     print("Capturing metadata-extraction worked example (cluster-only) ...")
     asyncio.run(_capture_metadata_workflow())
+
+    print("Capturing USANS reduction worked example (cluster-only) ...")
+    asyncio.run(_capture_usans_workflow())
 
     print("Rendering plots ...")
     _make_plots()
