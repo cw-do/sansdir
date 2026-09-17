@@ -275,6 +275,26 @@ async def test_reduce_offers_to_show_the_output_in_the_other_pane(
     assert app.right.cwd == out
 
 
+async def test_reduce_closes_a_stale_preview_before_showing_the_output(
+    app: FakeApp, tmp_path: Path, monkeypatch
+) -> None:
+    """The generate step leaves the CSV previewed in the other pane; showing
+    the reduced output there must dismiss that viewer, or the cwd changes
+    invisibly behind it and the user keeps staring at the setup table."""
+    data_dir = tmp_path / "autoreduce"
+    csv = _good_csv(app, data_dir)
+    _config(tmp_path, monkeypatch, reduce_command=str(_stub_engine(tmp_path)))
+    reg = build_default_registry(app=app)
+    out = tmp_path / "output"
+    app.view_in_other_pane(csv)  # simulate the preview from the generate step
+    assert app.is_other_pane_viewing()
+
+    await reg.dispatch("usans.reduce", path=str(csv), data_dir=str(data_dir), output_dir=str(out))
+
+    assert app.right.cwd == out
+    assert not app.is_other_pane_viewing()
+
+
 async def test_reduce_uses_the_cursor_when_no_path_is_given(
     app: FakeApp, tmp_path: Path, monkeypatch
 ) -> None:

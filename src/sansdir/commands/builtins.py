@@ -1922,6 +1922,11 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
             f"Reduced {len(result.produced)} curves into\n{resolved_out}\n\n"
             "Show that directory in the other pane?"
         ):
+            # The setup-table preview (from the generate step) may still be
+            # covering that pane — close it, or the cwd changes invisibly
+            # behind the viewer and the user keeps staring at the CSV.
+            if app.is_other_pane_viewing():
+                app.close_inline_viewer(str(app.inactive_panel.id))
             app.inactive_panel.set_cwd(resolved_out)
         return str(resolved_out)
 

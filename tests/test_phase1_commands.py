@@ -19,6 +19,7 @@ from sansdir.commands.registry import UnknownCommandError
 @dataclass
 class FakePanel:
     cwd: Path
+    id: str | None = None
     show_hidden: bool = False
     sort_key: str = "name"
     sort_reverse: bool = False

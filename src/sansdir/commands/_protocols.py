@@ -30,6 +30,10 @@ class PanelProtocol(Protocol):
     def cursor_row(self) -> int:
         """Index of the highlighted row within the current (filtered) listing."""
 
+    @property
+    def id(self) -> str | None:
+        """The pane's widget id — ``"left"`` or ``"right"`` for file panes."""
+
     def move_cursor(self, *, row: int) -> None:
         """Move the cursor to ``row`` of the current listing."""
 
