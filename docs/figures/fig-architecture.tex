@@ -7,8 +7,8 @@
     ui/.style={box, fill=blue!8},
     reg/.style={box, fill=orange!18, very thick},
     svc/.style={box, fill=green!8},
-    ext/.style={box, fill=gray!10, dashed},
-    lbl/.style={font=\scriptsize\sffamily\itshape, text=black!60},
+    ext/.style={box, fill=gray!10, dashed, thick},
+    lbl/.style={font=\scriptsize\sffamily\itshape, text=black},
     flow/.style={-{Latex[length=2mm]}, thick},
   ]
 
@@ -22,7 +22,7 @@
 
   % --- Registry -----------------------------------------------------------
   \node[reg, minimum width=15.4cm, minimum height=11mm] (registry) at (0.2, 3.3)
-    {\textbf{CommandRegistry} \;---\; 52 typed \texttt{Command} objects, one dispatch path\\
+    {\textbf{CommandRegistry} \;---\; 57 typed \texttt{Command} objects, one dispatch path\\
      \scriptsize\ttfamily commands/registry.py \textbullet\ commands/builtins.py \textbullet\ commands/schema.py};
 
   \node[lbl, anchor=east] at (-8.0, 3.3) {\begin{tabular}{r}single\\source of\\truth\end{tabular}};
