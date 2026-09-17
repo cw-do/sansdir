@@ -28,79 +28,27 @@ matplotlib plots in their own windows when one *is* available.
 
 ## Install
 
-### Option A — Zero-install on the ORNL analysis cluster *(recommended)*
+### Option A — On the ORNL analysis cluster *(recommended)*
 
-Run the **stable release** through the shared tools directory. It ships its
-own bundled venv, so any cluster user can run it directly with no Python or
-pip steps:
-
-```bash
-/SNS/EQSANS/shared/bin/sansdir
-/SNS/EQSANS/shared/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
-```
-
-(`/SNS/EQSANS/shared/bin/sansdir` is a symlink to the stable release at
-`/SNS/EQSANS/shared/script/sansdir-stable/bin/sansdir` — either path works;
-the short one is the one to remember, and it is where future EQ-SANS
-command-line tools will appear too.)
-
-> **Use `sansdir-stable`, not `sansdir`.** The neighbouring `sansdir/`
-> directory is the maintainer's *development* tree — an editable checkout that
-> changes mid-edit. `sansdir-stable/` holds a non-editable install frozen at a
-> released tag (see its `VERSION` file), so a half-finished change can never
-> reach you. The maintainer advances it with `./update.sh <tag>`.
-
-To save typing, drop a symlink (or a copy) into your `PATH`:
+sansdir is installed cluster-wide. From any terminal on an analysis node —
+SSH or the analysis.sns.gov web terminal — just run:
 
 ```bash
-mkdir -p ~/bin
-ln -s /SNS/EQSANS/shared/bin/sansdir ~/bin/sansdir
-# (~/bin and ~/.local/bin are on your PATH on the analysis nodes by default)
-sansdir --version
+sansdir
+sansdir /SNS/EQSANS/IPTS-12345/shared
 ```
 
-Or prepend the shared bin directory:
+The optional argument is the directory the left pane opens in, so you can
+jump straight to a proposal's `shared` folder. A path under `/SNS/USANS`
+also starts the program in USANS mode.
 
-```bash
-echo 'export PATH="/SNS/EQSANS/shared/bin:$PATH"' >> ~/.bashrc
-```
+If `sansdir` is not found on a particular node, the same command is always
+available at `/SNS/EQSANS/shared/bin/sansdir`.
 
-You can also **just copy the script** and run it from anywhere:
-
-```bash
-cp /SNS/EQSANS/shared/script/sansdir-stable/.venv/bin/sansdir ~/bin/
-~/bin/sansdir
-```
-
-This works because the script's shebang is the *absolute* path
-`#!/gpfs/.../sansdir/.venv/bin/python` — the kernel always exec's the
-original bundled Python regardless of where the script file itself
-lives. The chain when you run the copy:
-
-```
-[your copy of the script]
-  → /gpfs/.../sansdir-stable/.venv/bin/python        (via absolute shebang)
-    → .../site-packages/sansdir/cli.py               (installed, not linked)
-```
-
-A **symlink is preferable to a copy** in practice: when I refresh the
-shared venv, every user with a symlink picks up the new build for free,
-no re-copying.
-
-What still has to live on the shared mount (don't move these):
-
-- `/SNS/EQSANS/shared/script/sansdir-stable/.venv/` — the bundled Python,
-  dependencies **and** the installed sansdir package. Self-contained: nothing
-  in it refers back to the development tree.
-
-What's portable (copy / symlink wherever):
-
-- `.venv/bin/sansdir` — the Python entry-point script. Shebang stays absolute.
-- `bin/sansdir` — the bash launcher; self-locates relative to the shared root.
-
-Either uses absolute paths internally, so it doesn't care about your
-conda env, current working directory, or whichever Python you have on
-PATH.
+What you run is a **frozen stable release** with its own bundled Python —
+no pip, no conda env, no setup. It only changes when the maintainer tags a
+new version, so a half-finished edit can never reach you; `sansdir version`
+prints the release you have.
 
 ### Option B — Local development install
 
@@ -679,9 +627,9 @@ documented.
 - **The licence is visible where users are.** `?` (help overlay) and
   `sansdir version` both show the MIT licence, copyright and project
   URL; a test keeps them from drifting.
-- **`sansdir-stable/` is the release channel.** Users launch a frozen,
-  non-editable install advanced only by tagging; the development tree
-  next door can no longer break anyone mid-edit.
+- **A frozen release channel.** What users launch is a non-editable
+  install advanced only by tagging; the development tree can no longer
+  break anyone mid-edit.
 
 ## What's in v0.10
 

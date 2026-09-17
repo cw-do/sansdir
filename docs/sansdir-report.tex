@@ -110,8 +110,8 @@ Small-Angle Neutron Scattering Data}
 This report documents \textbf{sansdir}, a terminal application developed in the
 Neutron Scattering Division at \ac{ornl} to support the day-to-day data-handling
 work of \ac{sans} instrument scientists and users. The software is in production
-use for \ac{sns} \ac{sans} workflows and is installed on the analysis cluster,
-launched as \texttt{/SNS/EQSANS/shared/bin/sansdir}.
+use for \ac{sns} \ac{sans} workflows and is installed cluster-wide on the
+analysis cluster, launched simply as \texttt{sansdir}.
 
 The report is written for two audiences. Sections~\ref{sec:intro}
 through~\ref{sec:config} are a user manual: they describe what the program does,
@@ -284,52 +284,41 @@ summarizes the work and states the limitations that bound it.
 
 \subsection{ZERO-INSTALL DEPLOYMENT ON THE ANALYSIS CLUSTER}
 
-The primary deployment target is the \ac{ornl} analysis cluster, where a
-released, non-editable install lives at
-\texttt{/SNS/EQSANS/shared/script/sansdir-stable} together with a
-self-contained Python virtual environment, and is exposed through the shared
-tools directory as \texttt{/SNS/EQSANS/shared/bin/sansdir}. Every cluster user
-has read access to those paths, so no per-user installation step is required.
-The program is launched by running that command from any terminal on the
-cluster---a login node, a web-terminal session, or an \ac{ssh} connection:
+The primary deployment target is the \ac{ornl} analysis cluster, where the
+program is installed cluster-wide as the command \texttt{sansdir}: a released,
+non-editable install with its own self-contained Python environment, so no
+per-user installation step is required. It is launched from any terminal on
+the cluster---a login node, a web-terminal session, or an \ac{ssh}
+connection:
 
 \begin{lstlisting}[language=shellsession]
-/SNS/EQSANS/shared/bin/sansdir
-/SNS/EQSANS/shared/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
+sansdir
+sansdir /SNS/EQSANS/IPTS-12345/shared
 \end{lstlisting}
 
 The first form opens the interface in the current working directory. The optional
-second argument is a starting path: the directory the left pane opens into, so a
+argument is a starting path: the directory the left pane opens into, so a
 user can jump straight to a proposal's \texttt{shared} folder without navigating
 there by hand. The right pane mirrors it initially. Any readable directory is
 accepted; a path under \texttt{/SNS/USANS} additionally starts the program in
 \ac{usans} mode (Section~\ref{sec:usans}).
 
-To avoid typing the full path, users are advised to create a symbolic link in a
-directory already on their \texttt{PATH}. On the analysis nodes both
-\texttt{\hme/bin} and \texttt{\hme/.local/bin} are on the default \texttt{PATH}:
-
-\begin{lstlisting}[language=shellsession]
-mkdir -p ~/bin
-ln -s /SNS/EQSANS/shared/bin/sansdir ~/bin/sansdir
-sansdir --version
-\end{lstlisting}
-
-Alternatively, the shared \texttt{bin} directory can be prepended to
-\texttt{PATH} in the user's shell profile.
+Should \texttt{sansdir} not be on \texttt{PATH} on a particular machine, the
+same launcher is always reachable as
+\texttt{/SNS/EQSANS/shared/bin/sansdir}.
 
 \subsection{PORTABILITY OF THE LAUNCHER}
 
-The entry-point script may also simply be copied anywhere on the filesystem and
-executed from there. This works because the script's shebang line names an
-\emph{absolute} interpreter path inside the shared virtual environment, so the
-kernel executes the bundled Python regardless of where the script file itself
-resides. The resulting execution chain is:
+The entry-point script may also simply be copied or symlinked anywhere on the
+filesystem and executed from there. This works because the script's shebang
+line names an \emph{absolute} interpreter path inside the shared virtual
+environment, so the kernel executes the bundled Python regardless of where
+the script file itself resides. The resulting execution chain is:
 
 \begin{lstlisting}
 [user's copy of the script]
-  -> /gpfs/.../sansdir/.venv/bin/python      (via absolute shebang)
-     -> /gpfs/.../sansdir/src/sansdir/cli.py  (via the venv's editable install)
+  -> <install>/.venv/bin/python        (via absolute shebang)
+     -> the installed sansdir package  (inside that venv)
 \end{lstlisting}
 
 Two consequences follow. First, the copy is independent of the user's active
