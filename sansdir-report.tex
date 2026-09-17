@@ -1093,7 +1093,7 @@ there would produce a permission error on every attempt.
 \subsection{A WORKED EXAMPLE}
 \label{sec:metadata-example}
 
-Figure~\ref{fig:metadata-workflow} walks through a complete extract-and-plot
+Figures~\ref{fig:metadata-workflow} and~\ref{fig:metadata-workflow-2} walk through a complete extract-and-plot
 session on a real experiment file, exactly as a user at the terminal would see
 it. The file is a Mantid-processed workspace from an EQ-SANS measurement with an
 in-situ mechanical load frame, and the quantity of interest is the load-cell
@@ -1133,16 +1133,30 @@ series.
 The four panels were captured from the running program, so fonts, colors, and
 layout are what the terminal actually shows.
 
-\begin{figure}[ht]
+\begin{figure}[p]
   \centering
-  \includegraphics[width=\textwidth]{figures/metadata-workflow.pdf}
-  \longcaption{Batch metadata extraction, end to end.}{(a)~The key picker
+  \includegraphics[width=\textwidth]{figures/metadata-workflow-1.pdf}\\[1pt]
+  {\small (a) \key{M}, then \key{/}~\texttt{LC}: search and select keys}\\[8pt]
+  \includegraphics[width=\textwidth]{figures/metadata-workflow-2.pdf}\\[1pt]
+  {\small (b) \key{Ctrl+S}: the output form, format set to CSV}
+  \longcaption{Batch metadata extraction (1 of 2).}{(a)~The key picker
   after pressing \key{M} and searching for \texttt{LC}: both datasets under
   the \texttt{PsyloTech:SGLC} log are selected. (b)~The output form with the
-  chosen keys, per-file mode, and CSV format. (c)~The destination pane after
-  the run: the extracted CSV is under the cursor. (d)~The curve produced by
-  pressing \key{l} on it---the load-cell trace over the course of the run.}
+  chosen keys, per-file mode, and CSV format.}
   \label{fig:metadata-workflow}
+\end{figure}
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\textwidth]{figures/metadata-workflow-3.pdf}\\[1pt]
+  {\small (c) the extracted CSV lands in the other pane}\\[8pt]
+  \includegraphics[width=0.62\textwidth]{figures/metadata-workflow-4.pdf}\\[1pt]
+  {\small (d) \key{l}: plot of the extracted table}
+  \longcaption{Batch metadata extraction (2 of 2).}{(c)~The destination pane
+  after the run: the extracted CSV is under the cursor. (d)~The curve
+  produced by pressing \key{l} on it---the load-cell trace over the course
+  of the run.}
+  \label{fig:metadata-workflow-2}
 \end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1540,7 +1554,7 @@ symbolic link, and is controlled by \texttt{[usans].short\_name\_copy}.
 \subsection{A WORKED EXAMPLE}
 \label{sec:usans-example}
 
-Figure~\ref{fig:usans-workflow} shows the complete flow on a real proposal
+Figures~\ref{fig:usans-workflow} and~\ref{fig:usans-workflow-2} show the complete flow on a real proposal
 (IPTS-37679), from an empty working folder to reduced curves, using only the
 \key{r} key and the prompts it raises.
 
@@ -1570,16 +1584,29 @@ Figure~\ref{fig:usans-workflow} shows the complete flow on a real proposal
     \key{d} desmears (Section~\ref{sec:desmear}).
 \end{enumerate}
 
-\begin{figure}[ht]
+\begin{figure}[p]
   \centering
-  \includegraphics[width=\textwidth]{figures/usans-workflow.pdf}
-  \longcaption{USANS reduction, end to end, on one key.}{(a)~\key{r} in an
-  empty working folder offers to build the setup table for the IPTS named by
-  the path. (b)~The start-of-experiment prompt (run 49434); the fetched run
-  list is visible in the other pane. (c)~The generated table under the
-  cursor, previewed in the other pane for review. (d)~After the second
-  \key{r}: the reduced curves in the output folder.}
+  \includegraphics[width=\textwidth]{figures/usans-workflow-1.pdf}\\[1pt]
+  {\small (a) \key{r} in an empty working folder: offer to build the setup table}\\[8pt]
+  \includegraphics[width=\textwidth]{figures/usans-workflow-2.pdf}\\[1pt]
+  {\small (b) the start-of-experiment prompt: run 49434}
+  \longcaption{USANS reduction, end to end, on one key (1 of 2).}{(a)~\key{r}
+  in an empty working folder offers to build the setup table for the IPTS
+  named by the path. (b)~The start-of-experiment prompt (run 49434); the
+  fetched run list is visible in the other pane.}
   \label{fig:usans-workflow}
+\end{figure}
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\textwidth]{figures/usans-workflow-3.pdf}\\[1pt]
+  {\small (c) the generated setup CSV, previewed in the other pane}\\[8pt]
+  \includegraphics[width=\textwidth]{figures/usans-workflow-4.pdf}\\[1pt]
+  {\small (d) after the second \key{r}: the reduced curves in the other pane}
+  \longcaption{USANS reduction, end to end, on one key (2 of 2).}{(c)~The
+  generated table under the cursor, previewed in the other pane for review.
+  (d)~After the second \key{r}: the reduced curves in the output folder.}
+  \label{fig:usans-workflow-2}
 \end{figure}
 
 \subsection{DESMEARING}
