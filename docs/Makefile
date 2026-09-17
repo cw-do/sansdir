@@ -14,9 +14,9 @@ PYTHON   := $(abspath ../.venv/bin/python)
 FIGDIR   := figures
 
 # Figures that are generated from the running application / real data.
-# metadata-workflow.pdf is cluster-only (captured against a real IPTS file);
-# make_figures.py skips it gracefully elsewhere, so it is not listed as a
-# hard prerequisite.
+# The metadata-workflow-* and usans-workflow-* panels are cluster-only
+# (captured against real IPTS data); make_figures.py skips them gracefully
+# elsewhere, so they are not listed as hard prerequisites.
 GENFIGS  := $(FIGDIR)/tui-panes.pdf \
             $(FIGDIR)/hdf-search.pdf \
             $(FIGDIR)/help-overlay.pdf \

@@ -266,75 +266,24 @@ async def _capture_metadata_workflow() -> None:
     for stem in ("metadata-workflow-1", "metadata-workflow-2", "metadata-workflow-3"):
         _svg_to_pdf(stem)
 
-    # sansdir writes to $SANSDIR_CACHE_DIR/plots/<stamp>_<name>.png
+    # Confirm the in-app 'l' really produced a plot (flow validation) …
     png_dir = root / "plots"
     pngs = sorted(png_dir.rglob("*.png")) if png_dir.is_dir() else []
     if not pngs:
         print("  ! 'l' did not produce a PNG; workflow figure is missing panel 4")
         return
-    _tile_workflow_figure(pngs[-1])
+    # … then render panel 4 as vector through the same factory the key
+    # uses, so the figure stays sharp at any zoom. The report composes
+    # the four panel PDFs directly in LaTeX — no raster tiling step,
+    # which would resample the terminal text into mush.
+    import matplotlib
 
+    matplotlib.use("Agg")
+    from sansdir.plot.generic import make_generic_figure
 
-def _tile_workflow_figure(plot_png: Path) -> None:
-    """Assemble the four metadata-workflow panels into one labeled figure."""
-    _tile_panels(
-        "metadata-workflow",
-        [
-            (FIG_DIR / "metadata-workflow-1.pdf", "(a) M, then /LC: search + select keys"),
-            (FIG_DIR / "metadata-workflow-2.pdf", "(b) Ctrl+S: output form, format = CSV"),
-            (FIG_DIR / "metadata-workflow-3.pdf", "(c) the CSV lands in the other pane"),
-            (plot_png, "(d) l: plot of the extracted table"),
-        ],
-    )
-
-
-def _tile_panels(out_stem: str, panels: list[tuple[Path, str]]) -> None:
-    """Tile captioned panels into ``FIG_DIR/<out_stem>.pdf`` (2 per row)."""
-    import matplotlib.image as mpimg
-    import matplotlib.pyplot as plt
-
-    missing = [p for p, _ in panels if not p.is_file()]
-    if missing:
-        print(f"  ! missing panel source(s): {missing}; skipping tiled figure")
-        return
-
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8.2))
-    for ax, (path, caption) in zip(axes.ravel(), panels, strict=True):
-        if path.suffix == ".pdf":
-            # Rasterize the terminal-screenshot PDFs at a fixed DPI so all
-            # four panels share one consistent resolution in the tile.
-            import subprocess as _sp
-            import tempfile
-
-            with tempfile.TemporaryDirectory() as td:
-                png = Path(td) / "panel.png"
-                _sp.run(
-                    [
-                        "pdftoppm",
-                        "-png",
-                        "-r",
-                        "220",
-                        "-singlefile",
-                        str(path),
-                        str(png.with_suffix("")),
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-                img = mpimg.imread(png)
-        else:
-            img = mpimg.imread(path)
-        ax.imshow(img)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.set_xlabel(caption, fontsize=11)
-    fig.tight_layout()
-    out = FIG_DIR / f"{out_stem}.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  -> {out.relative_to(REPO_ROOT)}")
+    fig = make_generic_figure([written])
+    fig.savefig(FIG_DIR / "metadata-workflow-4.pdf", bbox_inches="tight")
+    print(f"  -> {(FIG_DIR / 'metadata-workflow-4.pdf').relative_to(REPO_ROOT)}")
 
 
 async def _wait_for(pilot, predicate, *, tries: int = 600, delay: float = 0.1) -> bool:  # type: ignore[no-untyped-def]
@@ -437,26 +386,10 @@ async def _capture_usans_workflow() -> None:
         await pilot.pause()
         app.save_screenshot(str(FIG_DIR / "usans-workflow-4.svg"))
 
+    # The report composes these four vector PDFs directly in LaTeX with
+    # its own panel labels — no raster tiling, so the text stays sharp.
     for stem in ("usans-workflow-1", "usans-workflow-2", "usans-workflow-3", "usans-workflow-4"):
         _svg_to_pdf(stem)
-    _tile_panels(
-        "usans-workflow",
-        [
-            (
-                FIG_DIR / "usans-workflow-1.pdf",
-                "(a) r in an empty folder: offer to build the table",
-            ),
-            (FIG_DIR / "usans-workflow-2.pdf", "(b) first run of the experiment: 49434"),
-            (
-                FIG_DIR / "usans-workflow-3.pdf",
-                "(c) the generated CSV, previewed in the other pane",
-            ),
-            (
-                FIG_DIR / "usans-workflow-4.pdf",
-                "(d) r on the CSV: reduced curves in the other pane",
-            ),
-        ],
-    )
 
 
 def _make_plots() -> None:
