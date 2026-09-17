@@ -39,6 +39,13 @@ class UiConfig:
     # typo never blocks startup.
     theme: str = "textual-dark"
 
+    # Default color-bar mode for tiled 2-D (Iqxqy) plots. "shared" gives
+    # every panel one common scale so intensities compare directly;
+    # "independent" scales each panel to itself so weak patterns stay
+    # visible. The `p` key uses this; `:plot.iqxqy colorbar_mode=...`
+    # overrides it per plot. Unknown values fall back to "shared".
+    colorbar_mode: str = "shared"
+
 
 @dataclass(frozen=True)
 class KeysConfig:
@@ -185,7 +192,15 @@ def load_config(path: Path | None = None) -> Config:
     instrument_section = data.get("instrument", {}) if isinstance(data, dict) else {}
     usans_section = data.get("usans", {}) if isinstance(data, dict) else {}
     return Config(
-        ui=UiConfig(theme=str(ui_section.get("theme", UiConfig.theme))),
+        ui=UiConfig(
+            theme=str(ui_section.get("theme", UiConfig.theme)),
+            colorbar_mode=(
+                str(ui_section.get("colorbar_mode", UiConfig.colorbar_mode)).lower()
+                if str(ui_section.get("colorbar_mode", UiConfig.colorbar_mode)).lower()
+                in ("shared", "independent")
+                else UiConfig.colorbar_mode
+            ),
+        ),
         keys=KeysConfig(
             # Drop non-string values defensively (e.g. user wrote
             # `f5 = 123`); the rest are normalised to lowercase keys.

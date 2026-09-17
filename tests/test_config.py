@@ -155,3 +155,21 @@ def test_declared_licence_matches_the_license_file() -> None:
     assert __copyright__ in text, "copyright line differs from LICENSE"
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
     assert f'"{__license__}"' in pyproject, "pyproject declares a different licence"
+
+
+def test_ui_colorbar_mode_default_and_override(tmp_path: Path) -> None:
+    from sansdir.config import UiConfig, load_config
+
+    assert UiConfig().colorbar_mode == "shared"
+    p = tmp_path / "c.toml"
+    p.write_text('[ui]\ncolorbar_mode = "independent"\n', encoding="utf-8")
+    assert load_config(p).ui.colorbar_mode == "independent"
+
+
+def test_ui_colorbar_mode_rejects_garbage(tmp_path: Path) -> None:
+    """An unknown value falls back to the safe default rather than propagating."""
+    from sansdir.config import load_config
+
+    p = tmp_path / "c.toml"
+    p.write_text('[ui]\ncolorbar_mode = "rainbow"\n', encoding="utf-8")
+    assert load_config(p).ui.colorbar_mode == "shared"

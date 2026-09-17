@@ -369,3 +369,15 @@ def test_detect_kind_iqxqy_for_real_grid(tmp_path: Path) -> None:
     _write_iqxqy(f, nx=5, ny=4)
     d = detect.detect_kind(f)
     assert d.kind == detect.KIND_IQXQY
+
+
+def test_plot_iqxqy_command_exposes_colorbar_mode(tmp_path: Path) -> None:
+    """The toggle the report documents must be a real, discoverable parameter."""
+    from sansdir.commands.builtins import build_default_registry
+    from tests.test_phase1_commands import FakeApp, FakePanel
+
+    app = FakeApp(left=FakePanel(cwd=tmp_path), right=FakePanel(cwd=tmp_path))
+    cmd = build_default_registry(app=app).get("plot.iqxqy")
+    param = {p.name: p for p in cmd.params}["colorbar_mode"]
+    assert param.choices == ["shared", "independent"]
+    assert not param.required

@@ -863,7 +863,11 @@ def _plot_user_message(png: Path | None, info, paths: list[str]) -> str:  # type
 
 
 def _make_plot_iqxqy(app: AppProtocol) -> Command:
-    def handler(paths: list[str]) -> str:
+    from sansdir.config import load_config as _load_config
+
+    _default_mode = _load_config().ui.colorbar_mode
+
+    def handler(paths: list[str], colorbar_mode: str = _default_mode) -> str:
         from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
         from sansdir.plot.tile import make_iqxqy_figure, make_tile_figure
 
@@ -871,14 +875,14 @@ def _make_plot_iqxqy(app: AppProtocol) -> Command:
         if not path_list:
             raise ValueError("plot.iqxqy: at least one file required")
         if has_display():
-            info = spawn_plot_window("iqxqy", path_list)
+            info = spawn_plot_window("iqxqy", path_list, colorbar_mode=colorbar_mode)
             return f"plot opened ({info.name})"
         # Headless: build inline + save PNG.
         if len(path_list) == 1:
             fig = make_iqxqy_figure(path_list[0])
             title = path_list[0].stem
         else:
-            fig = make_tile_figure(path_list)
+            fig = make_tile_figure(path_list, colorbar_mode=colorbar_mode)  # type: ignore[arg-type]
             title = f"tile_{len(path_list)}files"
         png, _info = save_figure_to_png(fig, title=title)
         return f"plot saved → {png}"
@@ -886,7 +890,20 @@ def _make_plot_iqxqy(app: AppProtocol) -> Command:
     return Command(
         name="plot.iqxqy",
         description="Plot 4/6-col Iqxqy ASCII files (single pcolormesh or tile).",
-        params=(CommandParam(name="paths", type="files", description="File(s) to plot."),),
+        params=(
+            CommandParam(name="paths", type="files", description="File(s) to plot."),
+            CommandParam(
+                name="colorbar_mode",
+                type="enum",
+                description=(
+                    "Tile color scale: 'shared' (one scale, intensities compare) "
+                    "or 'independent' (per-panel, weak patterns stay visible)."
+                ),
+                required=False,
+                default=_default_mode,
+                choices=["shared", "independent"],
+            ),
+        ),
         handler=handler,
     )
 
@@ -895,6 +912,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
     """Dispatch a plot for the active selection based on detected file kind."""
 
     def handler() -> str | None:
+        from sansdir.config import load_config
         from sansdir.plot import ascii1d, detect
         from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
         from sansdir.plot.hdf5_detector import make_detector_figure
@@ -957,8 +975,11 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
             png, info = ascii1d.plot_transmission(trans)
             result_msgs.append(_plot_user_message(png, info, [str(p) for p in trans]))
         if iqxqy:
+            # The `p` key honours the standing [ui].colorbar_mode preference;
+            # per-plot override lives on the :plot.iqxqy command.
+            cbar_mode = load_config().ui.colorbar_mode
             if has_display():
-                info = spawn_plot_window("iqxqy", iqxqy)
+                info = spawn_plot_window("iqxqy", iqxqy, colorbar_mode=cbar_mode)
                 result_msgs.append(f"Iqxqy plot opened ({info.name})")
             else:
                 # Headless: build inline + save PNG.
@@ -966,7 +987,7 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
                     fig = make_iqxqy_figure(iqxqy[0])
                     title = iqxqy[0].stem
                 else:
-                    fig = make_tile_figure(iqxqy)
+                    fig = make_tile_figure(iqxqy, colorbar_mode=cbar_mode)  # type: ignore[arg-type]
                     title = f"tile_{len(iqxqy)}files"
                 png, info = save_figure_to_png(fig, title=title)
                 result_msgs.append(f"Iqxqy plot saved → {png}")

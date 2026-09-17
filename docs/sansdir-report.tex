@@ -156,8 +156,9 @@ command in a single registry. Key bindings, the interactive command line, and
 the non-interactive \ac{cli} are all thin callers of that registry, which makes
 the interaction surface uniform, self-documenting, and testable, and which
 positions a future natural-language layer as an additional caller rather than a
-rewrite. The implementation is approximately 14,100 lines of Python across 56
-modules, covered by 530 automated tests, and starts in about 54~ms.
+rewrite. The implementation is approximately 18,400 lines of Python across 58
+modules, covered by 799 automated tests, and starts in well under the
+300~ms budget.
 
 \end{abstract}
 
@@ -285,12 +286,21 @@ summarizes the work and states the limitations that bound it.
 The primary deployment target is the \ac{ornl} analysis cluster, where the
 repository is installed at \texttt{/SNS/EQSANS/shared/script/sansdir} together
 with a self-contained Python virtual environment. Every cluster user has read
-access to that path, so no per-user installation step is required:
+access to that path, so no per-user installation step is required. The program
+is launched by running that script from any terminal on the cluster---a login
+node, a web-terminal session, or an \ac{ssh} connection:
 
 \begin{lstlisting}[language=shellsession]
 /SNS/EQSANS/shared/script/sansdir/bin/sansdir
 /SNS/EQSANS/shared/script/sansdir/bin/sansdir /SNS/EQSANS/IPTS-12345/shared
 \end{lstlisting}
+
+The first form opens the interface in the current working directory. The optional
+second argument is a starting path: the directory the left pane opens into, so a
+user can jump straight to a proposal's \texttt{shared} folder without navigating
+there by hand. The right pane mirrors it initially. Any readable directory is
+accepted; a path under \texttt{/SNS/USANS} additionally starts the program in
+\ac{usans} mode (Section~\ref{sec:usans}).
 
 To avoid typing the full path, users are advised to create a symbolic link in a
 directory already on their \texttt{PATH}. On the analysis nodes both
@@ -558,8 +568,15 @@ Command history persists across sessions.
 \subsection{STARTUP BUDGET AND LAZY IMPORTS}
 \label{sec:startup}
 
-The design budget is 300~ms from invocation to first paint. The measured cold
-start for \texttt{sansdir --help} is approximately 54~ms.
+The design budget is 300~ms from invocation to first paint. Re-measured after
+the interface grew the \ac{usans} reduction and desmearing features, the cold
+start for \texttt{sansdir --help} remains well inside that budget: the median
+end-to-end wall-clock time on an analysis node is about 120~ms, of which roughly
+40~ms is Python interpreter start-up and about 40~ms is importing the command
+module; the best case is near 60~ms. The figure did not grow with the new
+features because the fast path imports none of them---a check confirms that
+\texttt{numpy}, \texttt{h5py}, \texttt{matplotlib}, Textual, and \texttt{httpx}
+are all absent from \texttt{sys.modules} after \texttt{import sansdir.cli}.
 
 This is achieved by importing only \texttt{click} and the version constant at
 module scope in the \ac{cli}. Textual, matplotlib, \texttt{h5py}, \texttt{httpx},
@@ -593,7 +610,7 @@ Three mechanisms keep the interface responsive:
 \subsection{REPOSITORY LAYOUT}
 
 Table~\ref{tab:layout} lists the package structure. The implementation totals
-approximately 14,100 lines across 56 modules.
+approximately 18,400 lines across 58 modules.
 
 \begin{table}[ht]
   \centering
@@ -607,7 +624,9 @@ approximately 14,100 lines across 56 modules.
     \texttt{cli.py} & Click entry point; \texttt{tui}, \texttt{extract},
       \texttt{mask}, \texttt{usans}, and \texttt{version} subcommands. \\
     \texttt{app.py} & The Textual application shell. \\
-    \texttt{config.py} & \Ac{toml} configuration loader. \\
+    \texttt{config.py} & Configuration loader for \ac{toml}
+      \autocite{toml} (``Tom's Obvious Minimal Language,'' the format's real
+      name), read with the standard-library \texttt{tomllib}. \\
     \texttt{commands/} & \texttt{registry.py} (the \texttt{Command} model and
       dispatch), \texttt{builtins.py} (all 56 registrations),
       \texttt{parser.py} (the \key{:} line), \texttt{schema.py} (\ac{json} tool
@@ -625,7 +644,9 @@ approximately 14,100 lines across 56 modules.
     \texttt{usans/} & \texttt{grouping.py} (title blocks), \texttt{reconcile.py}
       (scan counts derived from disk), \texttt{table.py} (the setup \ac{csv}),
       \texttt{catalog.py} (table and notes), \texttt{runner.py} (invoking the
-      external engine). Pure; imports no interface or network module. \\
+      external engine), \texttt{desmear.py} (truncated Abel inversion) and
+      \texttt{desmear\_io.py} (reading and writing curves). Pure; imports no
+      interface or network module. \\
     \texttt{mask/} & \texttt{core.py} (shapes and the mask builder),
       \texttt{detector.py}, \texttt{banktube.py}, \texttt{writers.py},
       \texttt{mantid\_writer.py}, \texttt{gui.py}, \texttt{api.py}. \\
@@ -634,7 +655,7 @@ approximately 14,100 lines across 56 modules.
       \texttt{hdf\_tree.py}, \texttt{run\_catalog.py},
       \texttt{oncat\_browser.py}, \texttt{help.py}, \texttt{statusbar.py},
       \texttt{titlebar.py}, \texttt{pathbar.py}, \texttt{key\_hint\_bar.py},
-      \texttt{inline\_viewer.py}. \\
+      \texttt{inline\_viewer.py}, \texttt{prompt\_panel.py}. \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -941,10 +962,15 @@ and $q_y$ axes. A logarithmic color scale is the default, which for scattering
 data is almost always what is wanted.
 
 Tagging more than one two-dimensional file tiles them into a single window with
-the filename as each subplot title. Two color bar modes are available: shared,
-using common limits across all panels so that intensities are directly
-comparable, and independent, using per-panel limits so that weak patterns
-remain visible.
+the filename as each subplot title. Two color-bar modes are available. In
+\emph{shared} mode a single scale spans all panels, so intensities are directly
+comparable; in \emph{independent} mode each panel is scaled to itself, so weak
+patterns remain visible. Shared is the default, on the reasoning that
+side-by-side panels are usually being compared. The choice is made through the
+\texttt{[ui].colorbar\_mode} configuration key, which the \key{p} key reads as a
+standing preference; a single plot can override it from the command line with
+\texttt{:plot.iqxqy colorbar\_mode=independent}, whose argument tab-completes to
+the two valid values.
 
 \subsection{DETECTOR HEAT MAPS FROM NEXUS}
 
@@ -1308,6 +1334,7 @@ program runs correctly with no configuration file at all.
 \begin{lstlisting}
 [ui]
 theme = "monokai"       # any Textual theme name
+colorbar_mode = "shared"   # tiled 2-D scale: "shared" or "independent\"
 
 [keys]
 "ctrl+y" = "view.toggle_hidden"   # rebind any key to any command
@@ -1351,9 +1378,11 @@ Themes may also be changed at runtime with \texttt{:theme <name>}; issuing
 
 \Ac{usans} overlaps almost entirely with what the program already does: the same
 proposal catalog, the same file manager, the same one-dimensional plotting, the
-same editor. What it adds is a short reduction workflow. Rather than ship a
-second application, the program carries an \emph{instrument mode} and a small,
-self-contained module.
+same editor. What it adds is a short reduction workflow and, downstream of it, a
+desmearing step. The reduction itself is delegated to the instrument team's
+\texttt{usansred} package; the desmearing implements the truncated Abel inversion
+of Huang \autocite{huang2026abel}. Rather than ship a second application, the
+program carries an \emph{instrument mode} and a small, self-contained module.
 
 \subsection{INSTRUMENT MODE}
 
@@ -1457,6 +1486,72 @@ the original so the engine's own summary spreadsheet and any downstream tooling
 that expects the standard name continue to work. The alias is a copy, not a
 symbolic link, and is controlled by \texttt{[usans].short\_name\_copy}.
 
+\subsection{DESMEARING}
+\label{sec:desmear}
+
+\Ac{usans} instruments use slit rather than pinhole collimation: the larger
+illuminated area buys the flux that the very high angular resolution of the
+Bonse--Hart crystal optics demands. The cost is that the recorded intensity at a
+nominal momentum transfer $Q$ is an average of the true intensity over a tall
+vertical acceptance,
+%
+\begin{equation}
+  I_\text{exp}(Q) = \frac{1}{\sigma_y}\int_0^{\sigma_y}
+    I\!\left(\sqrt{Q^2 + s^2}\,\right)\,\mathrm{d}s,
+  \label{eq:smear}
+\end{equation}
+%
+where $\sigma_y$ is the vertical resolution half-width. For the \ac{sns}
+instrument $\sigma_y \simeq 0.13~\text{\AA}^{-1}$, two decades above the top of
+the measured window. Recovering $I(Q)$ from $I_\text{exp}(Q)$ is the desmearing
+problem, and it is ill-posed: the slit average couples each measured point to
+scattering at much higher $Q$.
+
+The \key{d} key desmears the selected reduced curves. The implementation is the
+non-iterative truncated Abel inversion of Huang \autocite{huang2026abel}, which
+expresses the intrinsic intensity in closed form as
+%
+\begin{equation}
+  I(Q) = I(Q_m) - \frac{2\sigma_y}{\pi}
+    \int_Q^{Q_m}\frac{I_\text{exp}'(Q_x)}{\sqrt{Q_x^2 - Q^2}}\,\mathrm{d}Q_x,
+  \qquad Q_m = \sqrt{Q^2 + \sigma_y^2}.
+  \label{eq:abel}
+\end{equation}
+%
+Being closed-form, it propagates uncertainty through a single linear operator
+rather than accumulating it over iterations, which is the principal weakness of
+the widely used Lake algorithm \autocite{lake1967} it replaces. Every integral
+is evaluated with the substitution $Q_x = \sqrt{Q^2 + s^2}$, which removes the
+$1/\sqrt{Q_x^2 - Q^2}$ singularity at the lower limit. A Bayesian Gaussian-process
+alternative to the same inversion has been developed by Tung
+\autocite{tung2026gpr}; the program implements the Abel method for its
+determinism and its closed-form error propagation.
+
+Equation~\eqref{eq:abel} evaluates $I$ at $Q_m \simeq \sigma_y$ and integrates
+out to there, so it requires the scattering far beyond the \ac{usans} window.
+This drives the one interactive decision in the workflow. When a single curve is
+selected, the program asks---in the pane the user is already in, while the other
+pane stays a live, filterable file list---whether a companion pinhole \ac{sans}
+measurement of the same sample is available. If one is chosen, the two are put on
+a common smearing basis, scale-matched, joined across the instrument gap, and
+inverted over the full range. If the user declines, or when several curves are
+desmeared at once, the high-$Q$ side is instead extrapolated as a power law out
+to $\sigma_y$---the approach taken by the \ac{nist} \textsc{Igor}/\textsc{Irena}
+package \autocite{kline2006}---and the result is truncated to the measured
+\ac{usans} range, with the extrapolation recorded in the output file's header.
+Huang \autocite{huang2026abel} show that without genuine high-$Q$ data the
+reconstruction is reliable only at low $Q$; the truncation and the header note
+make that limitation explicit rather than silent.
+
+The desmeared curve is written as an ordinary three-column
+$Q$, $I$, $\mathrm{d}I$ text file that the \key{p} key plots like any other. The
+inversion is pure \texttt{numpy}, with no new dependency, and was validated by a
+smear--desmear round trip against analytic power laws: over the core of the
+\ac{usans} window the recovered log--log slope is within half a percent and the
+median intensity error is below one percent, while the reported uncertainty
+widens toward the top of the range where the high-$Q$ extrapolation loses
+authority.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 12. DATA FORMATS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1524,9 +1619,10 @@ than trusting the name.
 
 \subsection{TEST SUITE}
 
-The suite comprises 530 tests across 40 modules, of which 529 pass and one is
-skipped as environment-dependent. It runs in approximately 160~s. Five tests are
-interface snapshot comparisons.
+The suite comprises approximately 800 tests across 40 test modules, of which
+all pass and two are skipped as environment-dependent (they require a real
+NeXus file or the installed reduction engine). It runs in about 140~s. Five
+tests are interface snapshot comparisons.
 
 The suite is layered to match the architecture:
 
@@ -1583,7 +1679,7 @@ profiling is performed with \texttt{pyinstrument} when one is missed.
     \toprule
     Operation & Budget & Status \\
     \midrule
-    Cold start to first paint & 300~ms & 54~ms measured\tnote{a} \\
+    Cold start to first paint & 300~ms & $\sim$120~ms median\tnote{a} \\
     Render a directory of 1,000 entries & 100~ms & Met \\
     OnCat search, first call & 2~s & Met \\
     OnCat search, cached & 100~ms & Met \\
@@ -1592,9 +1688,11 @@ profiling is performed with \texttt{pyinstrument} when one is missed.
     \bottomrule
   \end{tabular}
   \begin{tablenotes}
-    \item[a] Measured for \texttt{sansdir --help} on an analysis node. The
-    figure reflects the lazy-import discipline of Section~\ref{sec:startup}: the
-    scientific stack is not imported on this path.
+    \item[a] Median end-to-end wall-clock time for \texttt{sansdir --help} on
+    an analysis node, re-measured after the \ac{usans} reduction and desmearing
+    features were added; the best case is near 60~ms. The figure did not grow
+    with those features because the fast path imports none of the scientific
+    stack (Section~\ref{sec:startup}).
   \end{tablenotes}
   \end{threeparttable}
 \end{table}
@@ -1736,8 +1834,9 @@ Any command may be invoked from the \key{:} line by name or alias.
     Open image files in matplotlib. \\
   \texttt{plot.iq} & \texttt{paths} & Overlay 2-, 3-, or 4-column $I(q)$
     files. \\
-  \texttt{plot.iqxqy} & \texttt{paths} & Plot 4- or 6-column
-    $I(q_x,q_y)$ files. \\
+  \texttt{plot.iqxqy} & \texttt{paths}, \texttt{colorbar\_mode?} & Plot 4-
+    or 6-column $I(q_x,q_y)$ files; \texttt{colorbar\_mode} is \texttt{shared}
+    or \texttt{independent}. \\
   \texttt{plot.transmission} & \texttt{paths} & Plot $T(\lambda)$ on linear
     axes. \\
   \texttt{shell.run} (\texttt{!}) & \texttt{cmd} & Run a shell command with the
@@ -1764,6 +1863,9 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{usans.reduce} (\texttt{usans-reduce}) & \texttt{path?},
     \texttt{output\_dir?}, \texttt{data\_dir?}, \texttt{logbin?} & Reduce a
     setup \ac{csv}, or offer to build one. \\
+  \texttt{usans.desmear} (\texttt{desmear}) & \texttt{paths?},
+    \texttt{sans?}, \texttt{out\_dir?}, \texttt{sigma\_y?} & Desmear
+    reduced \ac{usans} curves by truncated Abel inversion. \\
   \texttt{view.in\_other\_pane} & \texttt{path} & Show a file in the other pane
     (open, not toggle). \\
   \texttt{ui.plot\_generic} & --- & Linear plot of the selection. \\
@@ -1846,6 +1948,8 @@ from help.
   \key{?} & Help overlay & \texttt{app.help} \\
   \key{r} & Reduce a \ac{usans} setup table (\ac{usans} mode only) &
     \texttt{usans.reduce} \\
+  \key{d} & Desmear the selected \ac{usans} curves (\ac{usans} mode only) &
+    \texttt{usans.desmear} \\
   \key{q} & Quit & \texttt{app.quit} \\
 \end{longtable}
 \end{small}
