@@ -412,6 +412,22 @@ def _make_plots() -> None:
         fig.savefig(FIG_DIR / "plot-detector.pdf", bbox_inches="tight")
         print(f"  -> {(FIG_DIR / 'plot-detector.pdf').relative_to(REPO_ROOT)}")
 
+    # Cluster-only, like the workflow captures: a 2x4 Iqxqy tile from a
+    # real temperature series (IPTS-36552, 20-55C), one shared colorbar.
+    from sansdir.plot.tile import make_tile_figure
+
+    series_dir = Path("/SNS/EQSANS/IPTS-36552/shared/output")
+    series = [series_dir / f"L121_0_{t}C_conf1_Iqxqy.dat" for t in (20, 25, 30, 35, 40, 45, 50, 55)]
+    if all(p.is_file() for p in series):
+        fig = make_tile_figure(series)
+        # PNG rather than PDF: vector QuadMesh output shows hairline white
+        # seams between quads in PDF viewers, and 300 dpi is print-quality
+        # for a heat map anyway.
+        fig.savefig(FIG_DIR / "plot-iqxqy-tile.png", bbox_inches="tight", dpi=300)
+        print(f"  -> {(FIG_DIR / 'plot-iqxqy-tile.png').relative_to(REPO_ROOT)}")
+    else:
+        print("  ! IPTS-36552 Iqxqy series not reachable; skipping tile figure")
+
 
 def main() -> int:
     # Force the headless plot path so no code here tries to open a window.

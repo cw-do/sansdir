@@ -967,6 +967,25 @@ standing preference; a single plot can override it from the command line with
 \texttt{:plot.iqxqy colorbar\_mode=independent}, whose argument tab-completes to
 the two valid values.
 
+Figure~\ref{fig:iqxqy-tile} shows the tiled view on a real temperature series:
+eight reduced $I(q_x,q_y)$ files from one sample measured from 20 to
+55\,$^{\circ}$C. In the file pane the whole series is selected with one glob
+tag---\key{+}, then \texttt{*C\_conf1\_Iqxqy.dat}---and \key{p} does the rest:
+the files sort in natural order, tile four across, and share one logarithmic
+color scale, so the evolution of the scattering ring with temperature reads
+directly across the panels.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{figures/plot-iqxqy-tile.png}
+  \longcaption{Tiled two-dimensional plot of a temperature series.}{Eight
+  reduced $I(q_x,q_y)$ files (IPTS-36552, 20--55\,$^{\circ}$C) tagged with
+  one glob and plotted with \key{p}. The shared logarithmic color bar makes
+  the panels directly comparable; the isotropic scattering ring contracts
+  and the low-$q$ intensity grows as the sample is heated.}
+  \label{fig:iqxqy-tile}
+\end{figure}
+
 \subsection{DETECTOR HEAT MAPS FROM NEXUS}
 
 Raw EQ-SANS \autocite{eqsans} event files are rendered as a
