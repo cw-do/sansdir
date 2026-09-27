@@ -76,7 +76,7 @@ def test_build_catalog_without_a_data_dir_falls_back_to_title_counts(
 def test_build_catalog_never_touches_the_network(
     runs_5x: list[FakeRun], data_dir_5x: Path, monkeypatch
 ) -> None:
-    """Guards the 'pure core' rule: no httpx import path may be exercised."""
+    """Guards the 'pure core' rule: no network path may be exercised."""
     import socket
 
     def _boom(*args: object, **kwargs: object) -> None:

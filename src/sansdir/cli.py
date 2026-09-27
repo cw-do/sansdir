@@ -1,6 +1,6 @@
 """Click-based command-line entry point.
 
-Heavy modules (Textual, matplotlib, h5py, httpx, the command registry)
+Heavy modules (Textual, matplotlib, h5py, pyoncat, the command registry)
 are imported lazily inside subcommand bodies so that bare invocations
 like ``sansdir version`` and ``sansdir --help`` stay under the 300 ms
 cold-start budget defined in CLAUDE.md / PLANNING.md.
@@ -582,6 +582,59 @@ def usans_desmear(
             click.echo(f"# warning: {warning}", err=True)
     if failures:
         raise click.ClickException(f"{failures} of {len(curves)} curve(s) could not be desmeared")
+
+
+@main.group()
+def oncat() -> None:
+    """Per-user OnCat sign-in (Device Authorization Grant)."""
+
+
+@oncat.command("login")
+def oncat_login() -> None:
+    """Sign in to OnCat as yourself (one-time browser approval; works over SSH).
+
+    Prints a verification URL to approve in a browser and caches a personal
+    token, which sansdir then reuses silently. Run once before first use, or
+    again after the session expires.
+    """
+    from sansdir.config import load_config
+    from sansdir.core import oncat as oncat_mod
+    from sansdir.core.oncat import OnCatError
+
+    cfg = load_config()
+    try:
+        me = oncat_mod.login(cfg.oncat)
+    except OnCatError as exc:
+        raise click.ClickException(f"OnCat sign-in failed: {exc}") from exc
+    name = me.get("name") or me.get("id") or "you"
+    click.echo(f"Signed in to OnCat as {name}.")
+    click.echo(f"  token cached at {oncat_mod.token_path(cfg.oncat)} (reused automatically).")
+
+
+@oncat.command("status")
+def oncat_status() -> None:
+    """Show whether you are signed in to OnCat."""
+    from sansdir.config import load_config
+    from sansdir.core import oncat as oncat_mod
+
+    cfg = load_config()
+    if oncat_mod.is_signed_in(cfg.oncat):
+        click.echo(f"OnCat: signed in (token at {oncat_mod.token_path(cfg.oncat)}).")
+    else:
+        click.echo("OnCat: not signed in. Run 'sansdir oncat login'.")
+
+
+@oncat.command("logout")
+def oncat_logout() -> None:
+    """Remove your cached OnCat token."""
+    from sansdir.config import load_config
+    from sansdir.core import oncat as oncat_mod
+
+    cfg = load_config()
+    if oncat_mod.sign_out(cfg.oncat):
+        click.echo("OnCat: signed out.")
+    else:
+        click.echo("OnCat: no cached token to remove.")
 
 
 @main.command()

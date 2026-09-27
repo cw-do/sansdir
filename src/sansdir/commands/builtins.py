@@ -714,6 +714,147 @@ def _make_oncat_search(app: AppProtocol) -> Command:
     )
 
 
+def _make_oncat_login(app: AppProtocol) -> Command:
+    """``:oncat login`` — one-time per-user OnCat sign-in (device flow).
+
+    The device grant blocks while polling for browser approval, so the sign-in
+    runs in a worker thread; the verification URL is surfaced as a
+    notification (with the code, if the URL doesn't already embed it).
+    """
+
+    async def handler() -> str | None:
+        from sansdir.app import SansdirApp as _RealApp
+        from sansdir.config import load_config
+        from sansdir.core import oncat
+        from sansdir.core.oncat import OnCatError
+
+        cfg = load_config()
+
+        def _show_challenge(challenge: object) -> None:
+            link = getattr(challenge, "verification_uri_complete", None) or getattr(
+                challenge, "verification_uri", ""
+            )
+            code = getattr(challenge, "user_code", "")
+            msg = f"OnCat sign-in: open {link} in a browser and approve."
+            if not getattr(challenge, "verification_uri_complete", None) and code:
+                msg += f"  Code: {code}"
+            # Called from the worker thread — hop back to the UI thread.
+            if isinstance(app, _RealApp):
+                app.call_from_thread(app.notify, msg, severity="information", timeout=120.0)
+            else:  # pragma: no cover - non-Textual dispatch
+                app.notify_user(msg)
+
+        oncat.set_verification_handler(_show_challenge)
+        try:
+            me = await asyncio.to_thread(oncat.login, cfg.oncat)
+        except OnCatError as exc:
+            app.notify_user(f"OnCat sign-in failed: {exc}", severity="error")
+            return None
+        finally:
+            oncat.set_verification_handler(None)
+        name = me.get("name") or me.get("id") or "you"
+        app.notify_user(f"Signed in to OnCat as {name}.")
+        return str(name)
+
+    return Command(
+        name="oncat.login",
+        description="Sign in to OnCat as yourself (one-time browser approval; works over SSH).",
+        params=(),
+        handler=handler,
+        aliases=("oncat-login",),
+        examples=("oncat login",),
+    )
+
+
+def _make_oncat_status(app: AppProtocol) -> Command:
+    def handler() -> str:
+        from sansdir.config import load_config
+        from sansdir.core import oncat
+
+        cfg = load_config()
+        if oncat.is_signed_in(cfg.oncat):
+            where = oncat.token_path(cfg.oncat)
+            msg = f"OnCat: signed in (token at {where})."
+        else:
+            msg = "OnCat: not signed in. Run :oncat login."
+        app.notify_user(msg)
+        return msg
+
+    return Command(
+        name="oncat.status",
+        description="Show whether you are signed in to OnCat.",
+        params=(),
+        handler=handler,
+        aliases=("oncat-status",),
+        examples=("oncat status",),
+    )
+
+
+def _make_oncat_logout(app: AppProtocol) -> Command:
+    def handler() -> str:
+        from sansdir.config import load_config
+        from sansdir.core import oncat
+
+        cfg = load_config()
+        removed = oncat.sign_out(cfg.oncat)
+        msg = "OnCat: signed out." if removed else "OnCat: no cached token to remove."
+        app.notify_user(msg)
+        return msg
+
+    return Command(
+        name="oncat.logout",
+        description="Remove your cached OnCat token.",
+        params=(),
+        handler=handler,
+        aliases=("oncat-logout",),
+        examples=("oncat logout",),
+    )
+
+
+def _make_oncat_router(app: AppProtocol) -> Command:
+    """``:oncat <action>`` — sugar so ``:oncat login`` reaches ``oncat.login``.
+
+    The ``:``-line takes the first token as the command name, so a bare
+    ``oncat`` verb is needed for the ``oncat login`` / ``status`` / ``logout``
+    phrasing users are told to type. It just delegates to the real dotted
+    commands, which remain the single source of truth.
+    """
+
+    actions = {
+        "login": "oncat.login",
+        "status": "oncat.status",
+        "logout": "oncat.logout",
+    }
+
+    async def handler(action: str = "status") -> object:
+        key = action.strip().lower()
+        target = actions.get(key)
+        if target is None:
+            app.notify_user(
+                f"oncat: unknown action {action!r} (use login | status | logout)",
+                severity="warning",
+            )
+            return None
+        return await app.registry.dispatch(target)
+
+    return Command(
+        name="oncat",
+        description="OnCat sign-in: 'oncat login' | 'oncat status' | 'oncat logout'.",
+        params=(
+            CommandParam(
+                name="action",
+                type="enum",
+                description="login, status, or logout.",
+                required=False,
+                default="status",
+                choices=["login", "status", "logout"],
+            ),
+        ),
+        handler=handler,
+        examples=("oncat login", "oncat status", "oncat logout"),
+    )
+
+
 def _make_plot_iq(app: AppProtocol) -> Command:
     def handler(paths: list[str]) -> str:
         from sansdir.plot.ascii1d import plot_iq
@@ -2737,6 +2878,10 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_edit_file(app),
         _make_app_browse_tree(app),
         _make_oncat_search(app),
+        _make_oncat_login(app),
+        _make_oncat_status(app),
+        _make_oncat_logout(app),
+        _make_oncat_router(app),
         _make_pane_toggle_catalog(app),
         _make_instrument_set(app),
         _make_usans_init_table(app),

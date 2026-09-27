@@ -1,22 +1,30 @@
-"""End-to-end Pilot tests for Phase 4 — `i` IPTS browser → catalog flow."""
+"""End-to-end Pilot tests for Phase 4 — `i` IPTS browser → catalog flow.
+
+OnCat access is mocked by patching ``sansdir.core.oncat._make_client`` to return
+a fake pyoncat client (see :class:`tests.test_oncat.FakeONCat`); no real HTTP or
+device sign-in is exercised.
+"""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from sansdir.app import SansdirApp
 from sansdir.core.history import CommandHistory
-
-EXPERIMENTS_RE = re.compile(r"https://oncat\.test/api/experiments\b.*")
-DATAFILES_RE = re.compile(r"https://oncat\.test/api/datafiles\b.*")
+from tests.test_oncat import FakeONCat
 
 
 @pytest.fixture(autouse=True)
 def isolate_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANSDIR_CACHE_DIR", str(tmp_path / "cache"))
+    # Isolate the per-user token so a real ~/.config token can't leak in, and
+    # clear any password-grant env so the "not signed in" path is deterministic.
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(tmp_path / "token.json"))
+    for var in ("ONCAT_USERNAME", "ONCAT_PASSWORD", "ONCAT_CLIENT_ID", "ONCAT_CLIENT_SECRET"):
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
@@ -26,8 +34,6 @@ def fake_oncat_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         """
         [oncat]
         endpoint = "https://oncat.test"
-        client_id = "id"
-        client_secret = "secret"
         default_instrument = "EQSANS"
         cache_ttl_seconds = 3600
         """,
@@ -35,6 +41,20 @@ def fake_oncat_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setenv("SANSDIR_CONFIG", str(cfg))
     return cfg
+
+
+def _patch_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    experiments: list[dict[str, Any]],
+    datafiles: list[dict[str, Any]] | None = None,
+) -> FakeONCat:
+    """Make every OnCatClient in the app talk to a fake pyoncat client."""
+    from sansdir.core import oncat as oncat_mod
+
+    fake = FakeONCat(experiments=experiments, datafiles=datafiles or [])
+    monkeypatch.setattr(oncat_mod, "_make_client", lambda config, *, interactive: fake)
+    return fake
 
 
 def _scratch(tmp_path: Path) -> tuple[Path, Path]:
@@ -106,15 +126,6 @@ SAMPLE_DATAFILES = [
 ]
 
 
-def _stub_oauth_and_experiments(httpx_mock, rows: list[dict]) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_response(
-        method="POST",
-        url="https://oncat.test/oauth/token",
-        json={"access_token": "tk", "expires_in": 3600},
-    )
-    httpx_mock.add_response(method="GET", url=EXPERIMENTS_RE, json=rows)
-
-
 # ---------------------------------------------------------------------------
 # DoD: `i` opens browser, `/` filter, Enter selects, confirm cd + catalog.
 # ---------------------------------------------------------------------------
@@ -122,7 +133,6 @@ def _stub_oauth_and_experiments(httpx_mock, rows: list[dict]) -> None:  # type: 
 
 async def test_phase4_dod_i_browse_filter_select_catalog(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -138,8 +148,7 @@ async def test_phase4_dod_i_browse_filter_select_catalog(
 
     monkeypatch.setattr(oncat_mod.Experiment, "cluster_path", fake_cluster_path)
 
-    _stub_oauth_and_experiments(httpx_mock, SAMPLE_EXPERIMENTS)
-    httpx_mock.add_response(method="GET", url=DATAFILES_RE, json=SAMPLE_DATAFILES)
+    _patch_client(monkeypatch, experiments=SAMPLE_EXPERIMENTS, datafiles=SAMPLE_DATAFILES)
 
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
@@ -223,11 +232,11 @@ async def test_phase4_dod_i_browse_filter_select_catalog(
 
 async def test_no_matches_notifies_and_skips_browser(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Empty instrument listing → notify and don't open the modal."""
-    _stub_oauth_and_experiments(httpx_mock, [])
+    _patch_client(monkeypatch, experiments=[])
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -240,21 +249,13 @@ async def test_no_matches_notifies_and_skips_browser(
 
 async def test_oncat_auth_error_surfaces_clean_message(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    fake_oncat_config: Path,
 ) -> None:
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        """
-        [oncat]
-        endpoint = "https://oncat.test"
-        client_id = ""
-        client_secret = ""
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("SANSDIR_CONFIG", str(cfg))
-    monkeypatch.delenv("ONCAT_CLIENT_ID", raising=False)
-    monkeypatch.delenv("ONCAT_CLIENT_SECRET", raising=False)
+    """Not signed in (no token, no env creds) → notify, no browser, no crash.
+
+    The autouse fixture points the token at a nonexistent path, so the real
+    ``_make_client`` raises OnCatAuthError; the ``i`` handler catches it.
+    """
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -279,8 +280,8 @@ async def test_c_without_loaded_catalog_notifies(tmp_path: Path, fake_oncat_conf
 
 async def test_browser_default_sort_is_ipts_descending(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Browser opens with the highest IPTS number on top."""
     rows = [
@@ -288,7 +289,7 @@ async def test_browser_default_sort_is_ipts_descending(
         {"id": "IPTS-300", "rank": 300, "title": "newest", "size": 3},
         {"id": "IPTS-200", "rank": 200, "title": "middle", "size": 2},
     ]
-    _stub_oauth_and_experiments(httpx_mock, rows)
+    _patch_client(monkeypatch, experiments=rows)
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -306,8 +307,8 @@ async def test_browser_default_sort_is_ipts_descending(
 
 async def test_browser_s_cycles_sort_mode(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pressing `s` switches IPTS-sort → date-sort and reorders the list."""
     rows = [
@@ -326,7 +327,7 @@ async def test_browser_s_cycles_sort_mode(
             "activity": {"acquisition": ["2026-04-01", "2026-04-03"]},
         },
     ]
-    _stub_oauth_and_experiments(httpx_mock, rows)
+    _patch_client(monkeypatch, experiments=rows)
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -355,8 +356,8 @@ async def test_browser_s_cycles_sort_mode(
 
 async def test_browser_caps_visible_rows_with_overflow_hint(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A 250-row catalog mounts only ``MAX_VISIBLE`` items; hint shows overflow.
 
@@ -374,7 +375,7 @@ async def test_browser_caps_visible_rows_with_overflow_hint(
         }
         for i in range(250)
     ]
-    _stub_oauth_and_experiments(httpx_mock, rows)
+    _patch_client(monkeypatch, experiments=rows)
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -398,8 +399,8 @@ async def test_browser_caps_visible_rows_with_overflow_hint(
 
 async def test_browser_filter_is_debounced(
     tmp_path: Path,
-    httpx_mock,  # type: ignore[no-untyped-def]
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Several quick keystrokes in the filter trigger only one rebuild.
 
@@ -410,7 +411,7 @@ async def test_browser_filter_is_debounced(
     rows = [
         {"id": f"IPTS-{200 + i}", "rank": 200 + i, "title": f"r{i}", "size": 1} for i in range(20)
     ]
-    _stub_oauth_and_experiments(httpx_mock, rows)
+    _patch_client(monkeypatch, experiments=rows)
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()

@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.10.2** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.11.0** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -201,6 +201,24 @@ fast typist gets one rebuild instead of one per keystroke) and
 capping the rendered window at the first 200 matches — an overflow
 hint at the bottom (`+N more — narrow your filter`) tells you when
 to keep typing.
+
+#### Signing in to OnCat
+
+OnCat access is **per-user**: you sign in once as yourself, and the catalog
+shows exactly the experiments you're entitled to. The first time you press `i`
+(or use any OnCat feature) without a session, sansdir tells you to sign in.
+
+- In the TUI: `:oncat login` — a URL and short code appear; open the URL in any
+  browser (it works over SSH — copy the URL to your laptop), sign in with your
+  UCAMS/XCAMS, and approve. `:oncat status` and `:oncat logout` are there too.
+- From the shell: `sansdir oncat login` (also `status` / `logout`).
+
+The personal token is cached at `~/.config/sansdir/oncat_token.json` and reused
+silently until it expires, when you just sign in again. Nothing secret lives in
+the config or the code — sign-in uses OnCat's public device-authorization flow.
+Unattended services with no browser can instead set `ONCAT_USERNAME`,
+`ONCAT_PASSWORD`, `ONCAT_CLIENT_ID`, and `ONCAT_CLIENT_SECRET` in the
+environment.
 
 ---
 
@@ -581,6 +599,8 @@ f5 = "ui.move_tagged"             # are silently dropped at startup
 [oncat]
 default_instrument = "EQSANS"
 cache_ttl_seconds  = 86400
+# Per-user sign-in (device flow); no secret here. Sign in with `:oncat login`.
+# token_path = ""          # blank → ~/.config/sansdir/oncat_token.json
 
 [instrument]
 default     = "EQSANS"   # "" → fall back to [oncat].default_instrument
@@ -603,6 +623,28 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.11.0
+
+Per-user OnCat sign-in. sansdir now authenticates to OnCat **as you**,
+through the OAuth device-authorization flow, instead of a shared machine
+account with a committed secret (the posture ORNL flagged).
+
+- **Sign in once, as yourself.** `:oncat login` (or `sansdir oncat login`)
+  shows a URL + code to approve in a browser — works over SSH. Your token
+  is cached at `~/.config/sansdir/oncat_token.json` and reused silently;
+  the catalog shows exactly the experiments you're entitled to.
+- **`:oncat status` / `:oncat logout`** (and the `sansdir oncat` CLI
+  equivalents) to check or clear your session.
+- **No secret in the code or config.** Sign-in uses OnCat's *public*
+  client id via the `pyoncat` library. The old committed
+  `client_id`/`client_secret` are gone. Data calls are token-first: they
+  never pop a browser and say "run `:oncat login`" when you're not signed
+  in.
+- **Headless fallback** for browserless services: set `ONCAT_USERNAME`,
+  `ONCAT_PASSWORD`, `ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET` in the
+  environment.
+- Dependency: `pyoncat>=2.6` replaces `httpx`.
 
 ## What's in v0.10.2
 

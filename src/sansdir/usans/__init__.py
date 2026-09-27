@@ -1,6 +1,6 @@
 """USANS reduction support — pure, UI-free helpers plus the engine runner.
 
-Nothing in this subpackage imports ``textual``, ``httpx``, ``scipy``,
+Nothing in this subpackage imports ``textual``, ``pyoncat``, ``scipy``,
 ``pandas`` or ``mantid``: the grouping / reconciliation / table code is
 plain stdlib so it can be unit-tested offline and driven equally from the
 TUI, the ``sansdir usans`` CLI, or (later) the LLM layer.

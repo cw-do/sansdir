@@ -71,24 +71,37 @@ class MailConfig:
 
 @dataclass(frozen=True)
 class OnCatConfig:
-    """``[oncat]`` section.
+    """``[oncat]`` section — per-user OnCat access via device sign-in.
 
-    Defaults reuse the public OAuth client identifiers that the same
-    author's ``cw-do/eqsanscli`` ships with — they're application IDs
-    for an OnCat read-only catalog client, not user secrets, so anyone
-    running sansdir on the ORNL cluster gets a working out-of-the-box
-    experience.
+    OnCat is queried as *you*: a one-time browser approval caches a personal
+    token and every result is scoped to the experiments you are entitled to.
+    No machine account or secret lives in the code. This replaces the earlier
+    shared ``client_credentials`` machine login, which ORNL does not
+    recommend (a committed secret; results not scoped to the real user).
 
-    Override per host via ``[oncat]`` in
-    ``~/.config/sansdir/config.toml`` or the ``ONCAT_CLIENT_ID`` /
-    ``ONCAT_CLIENT_SECRET`` env vars.
+    Attributes:
+        endpoint: OnCat base URL.
+        client_id: The *public* OAuth client id OnCat publishes for human
+            sign-in. Not a secret and carries no access on its own — each user
+            authenticates as themselves. Override only to target a staging IdP.
+        token_path: Where the personal token is cached. Blank means
+            ``~/.config/sansdir/oncat_token.json``; ``$SANSDIR_ONCAT_TOKEN``
+            overrides both.
+        default_instrument: Instrument used when a call doesn't name one.
+        cache_ttl_seconds: How long the on-disk experiment listing is reused.
+        request_timeout_seconds: Per-request network timeout.
+
+    Unattended/headless callers with no browser (cron, NDIP/Galaxy) can set
+    ``ONCAT_USERNAME`` / ``ONCAT_PASSWORD`` / ``ONCAT_CLIENT_ID`` /
+    ``ONCAT_CLIENT_SECRET`` in the environment to use the deprecated Password
+    Grant instead — nothing secret is committed.
     """
 
     endpoint: str = "https://oncat.ornl.gov"
-    # Public OAuth client_credentials for the EQSANS catalog tooling.
-    # Source: cw-do/eqsanscli/src/eqsanscli/integrations/oncat.py.
-    client_id: str = "17ddcb3e-a727-41a2-aec5-43533988ab69"
-    client_secret: str = "3027a2b1-da09-4e13-bf97-f389ff1a747f"
+    # Public human-sign-in client id published by OnCat (not a secret; the
+    # same public id eqsanscli uses). Each user authenticates as themselves.
+    client_id: str = "eaeb036a-2602-4bb9-8530-0bb5812da7a1"
+    token_path: str = ""
     default_instrument: str = "EQSANS"
     cache_ttl_seconds: int = 86400
     request_timeout_seconds: float = 30.0
@@ -212,19 +225,12 @@ def load_config(path: Path | None = None) -> Config:
         ),
         oncat=OnCatConfig(
             endpoint=str(oncat_section.get("endpoint", OnCatConfig.endpoint)),
-            # Override chain: [oncat] section → env var → built-in default.
-            client_id=str(
-                oncat_section.get(
-                    "client_id",
-                    os.environ.get("ONCAT_CLIENT_ID", OnCatConfig.client_id),
-                )
-            ),
-            client_secret=str(
-                oncat_section.get(
-                    "client_secret",
-                    os.environ.get("ONCAT_CLIENT_SECRET", OnCatConfig.client_secret),
-                )
-            ),
+            # The public device-flow client id. Overridable from the [oncat]
+            # section for a staging IdP only; there is no env override, since
+            # ONCAT_CLIENT_ID belongs to the headless Password-Grant fallback
+            # (handled in core/oncat.py), not to device sign-in.
+            client_id=str(oncat_section.get("client_id", OnCatConfig.client_id)),
+            token_path=str(oncat_section.get("token_path", OnCatConfig.token_path)),
             default_instrument=str(
                 oncat_section.get("default_instrument", OnCatConfig.default_instrument)
             ),

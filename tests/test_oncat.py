@@ -1,52 +1,127 @@
-"""Tests for sansdir.core.oncat — pytest-httpx mocks all OnCat traffic."""
+"""Tests for sansdir.core.oncat.
+
+Network access is mocked by injecting a fake pyoncat client into
+``OnCatClient(client=...)``; no real HTTP or browser flow is exercised. The
+per-user device-flow helpers (login/status/logout/token_path) are tested
+against the filesystem with an isolated token path.
+"""
 
 from __future__ import annotations
 
 import json
-import re
 import time
 from pathlib import Path
+from typing import Any
 
-import httpx
 import pytest
 
 from sansdir.config import OnCatConfig
 from sansdir.core import oncat
 
-EXPERIMENTS_RE = re.compile(r"https://oncat\.test/api/experiments\b.*")
-DATAFILES_RE = re.compile(r"https://oncat\.test/api/datafiles\b.*")
-
 
 @pytest.fixture(autouse=True)
 def isolate_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANSDIR_CACHE_DIR", str(tmp_path / "cache"))
+    # Point the personal token at a path that does not exist by default, and
+    # clear any real password-grant env so tests are hermetic.
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(tmp_path / "token.json"))
+    for var in ("ONCAT_USERNAME", "ONCAT_PASSWORD", "ONCAT_CLIENT_ID", "ONCAT_CLIENT_SECRET"):
+        monkeypatch.delenv(var, raising=False)
 
 
-def _config(client_id: str = "id", client_secret: str = "secret") -> OnCatConfig:
+def _config() -> OnCatConfig:
     return OnCatConfig(
         endpoint="https://oncat.test",
-        client_id=client_id,
-        client_secret=client_secret,
         default_instrument="EQSANS",
         cache_ttl_seconds=3600,
         request_timeout_seconds=5.0,
     )
 
 
-def _stub_token(httpx_mock, *, expires_in: int = 3600) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_response(
-        method="POST",
-        url="https://oncat.test/oauth/token",
-        json={"access_token": "tk", "expires_in": expires_in, "token_type": "Bearer"},
-    )
+# ---------------------------------------------------------------------------
+# Fake pyoncat client
+# ---------------------------------------------------------------------------
 
 
-def _stub_experiments(httpx_mock, rows: list[dict]) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_response(
-        method="GET",
-        url=re.compile(r"https://oncat\.test/api/experiments\b.*"),
-        json=rows,
-    )
+class _FakeObj:
+    """Stands in for a pyoncat ONCatObject: carries a nested dict, to_dict()."""
+
+    def __init__(self, content: dict[str, Any]) -> None:
+        self._content = content
+
+    def to_dict(self) -> dict[str, Any]:
+        return self._content
+
+
+class _Endpoint:
+    def __init__(self, rows: list[dict[str, Any]], counter: dict[str, int], key: str) -> None:
+        self._rows = rows
+        self._counter = counter
+        self._key = key
+
+    def list(self, **_kwargs: Any) -> list[_FakeObj]:
+        self._counter[self._key] += 1
+        return [_FakeObj(r) for r in self._rows]
+
+
+class FakeONCat:
+    """Minimal stand-in for ``pyoncat.ONCat`` used by OnCatClient."""
+
+    def __init__(
+        self,
+        *,
+        experiments: list[dict[str, Any]] | None = None,
+        datafiles: list[dict[str, Any]] | None = None,
+        login_error: Exception | None = None,
+        list_error: Exception | None = None,
+    ) -> None:
+        self._experiments = experiments or []
+        self._datafiles = datafiles or []
+        self._login_error = login_error
+        self._list_error = list_error
+        self.calls = {"login": 0, "experiments": 0, "datafiles": 0}
+
+    def login(self) -> None:
+        self.calls["login"] += 1
+        if self._login_error is not None:
+            raise self._login_error
+
+    @property
+    def Experiment(self) -> _Endpoint:  # noqa: N802 - mirrors pyoncat's attribute name
+        if self._list_error is not None:
+            raise self._list_error
+        return _Endpoint(self._experiments, self.calls, "experiments")
+
+    @property
+    def Datafile(self) -> _Endpoint:  # noqa: N802 - mirrors pyoncat's attribute name
+        if self._list_error is not None:
+            raise self._list_error
+        return _Endpoint(self._datafiles, self.calls, "datafiles")
+
+
+SAMPLE_ROWS = [
+    {
+        "id": "IPTS-12345",
+        "rank": 12345,
+        "title": "Bio-membrane assembly under shear",
+        "members": ["Alice", "Bob"],
+        "activity": "2024-04-01",
+    },
+    {
+        "id": "IPTS-22222",
+        "rank": 22222,
+        "title": "Polymer micelle structure",
+        "members": ["Carol"],
+        "activity": "2024-03-15",
+    },
+    {
+        "id": "IPTS-33333",
+        "rank": 33333,
+        "title": "Membrane protein refolding",
+        "members": ["Bob"],
+        "activity": "2024-02-01",
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -247,41 +322,6 @@ def test_experiment_sort_date_key_prefers_end_then_start() -> None:
     assert e3.sort_date_key == ""
 
 
-async def test_cache_with_old_schema_version_is_discarded(
-    httpx_mock,  # type: ignore[no-untyped-def]
-    tmp_path: Path,
-) -> None:
-    """A pre-fix cache (no `version` field, or wrong version) is ignored."""
-    cache_file = tmp_path / "cache" / "oncat" / "SNS-EQSANS-experiments.json"
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(
-        json.dumps(
-            {
-                # No version key — counts as version 0.
-                "fetched_at": time.time(),  # current — would otherwise hit
-                "experiments": [
-                    {
-                        "ipts": "IPTS-STALE",
-                        "title": "stringified-dict garbage",
-                        "pi": "x",
-                        "members": ["{'name': 'X'}"],  # the bug we fixed
-                        "activity": "",
-                        "instrument": "EQSANS",
-                        "facility": "SNS",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(method="GET", url=EXPERIMENTS_RE, json=SAMPLE_ROWS)
-    async with oncat.OnCatClient(_config()) as client:
-        hits = await client.search_experiments("")
-    # Stale entry rejected; fresh OnCat fetch happened instead.
-    assert "IPTS-STALE" not in {h.ipts for h in hits}
-
-
 def test_normalise_datafile_extracts_daslogs() -> None:
     """detectorz from OnCat is in mm; the dataclass keeps it raw and
     exposes ``detector_distance_m`` for the m unit."""
@@ -321,124 +361,88 @@ def test_datafile_detector_distance_m_property() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OAuth token flow
+# _to_plain: pyoncat ONCatObject → nested plain dicts
 # ---------------------------------------------------------------------------
 
 
-async def test_missing_credentials_raises_auth_error(tmp_path: Path) -> None:
-    cfg = _config(client_id="", client_secret="")
-    async with oncat.OnCatClient(cfg) as client:
-        with pytest.raises(oncat.OnCatAuthError, match="no OnCat credentials"):
-            await client.search_experiments("anything")
-
-
-async def test_token_fetched_once_and_reused(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=[],
+def test_to_plain_recurses_into_nested_oncatobjects() -> None:
+    """Nested ONCatObjects (not just the top level) must become plain dicts, or
+    _normalise_datafile's isinstance(daslogs, dict) check silently fails."""
+    nested = _FakeObj(
+        {
+            "indexed": _FakeObj({"run_number": 5}),
+            "metadata": _FakeObj(
+                {"entry": _FakeObj({"daslogs": _FakeObj({"detectorz": {"average_value": 2000.0}})})}
+            ),
+        }
     )
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=[],
-    )
-    async with oncat.OnCatClient(_config()) as client:
-        await client.search_experiments("x", instrument="A")
-        await client.search_experiments("x", instrument="B")
-    # One POST to /oauth/token total, even across two GETs (different
-    # instruments → different cache keys → both hit the network).
-    posts = [r for r in httpx_mock.get_requests() if r.method == "POST"]
-    assert len(posts) == 1
-
-
-async def test_oauth_failure_surfaces_clean_error(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_response(
-        method="POST",
-        url="https://oncat.test/oauth/token",
-        status_code=401,
-        text="bad credentials",
-    )
-    async with oncat.OnCatClient(_config()) as client:
-        with pytest.raises(oncat.OnCatAuthError, match="oauth failed"):
-            await client.search_experiments("x")
-
-
-async def test_network_error_wraps_to_oncat_error(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    httpx_mock.add_exception(
-        httpx.ConnectError("boom"),
-        method="POST",
-        url="https://oncat.test/oauth/token",
-    )
-    async with oncat.OnCatClient(_config()) as client:
-        with pytest.raises(oncat.OnCatNetworkError, match="oauth request failed"):
-            await client.search_experiments("x")
+    plain = oncat._to_plain(nested)
+    assert plain["indexed"]["run_number"] == 5
+    d = oncat._normalise_datafile(plain)
+    assert d.detector_distance_mm == 2000.0
 
 
 # ---------------------------------------------------------------------------
-# Listing + searching
+# Listing + searching (via injected fake pyoncat client)
 # ---------------------------------------------------------------------------
 
 
-SAMPLE_ROWS = [
-    {
-        "id": "IPTS-12345",
-        "title": "Bio-membrane assembly under shear",
-        "members": ["Alice", "Bob"],
-        "activity": "2024-04-01",
-    },
-    {
-        "id": "IPTS-22222",
-        "title": "Polymer micelle structure",
-        "members": ["Carol"],
-        "activity": "2024-03-15",
-    },
-    {
-        "id": "IPTS-33333",
-        "title": "Membrane protein refolding",
-        "members": ["Bob"],
-        "activity": "2024-02-01",
-    },
-]
-
-
-async def test_search_filters_by_keyword(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
-    async with oncat.OnCatClient(_config()) as client:
+async def test_search_filters_by_keyword() -> None:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         hits = await client.search_experiments("membrane")
-    ids = {h.ipts for h in hits}
-    assert ids == {"IPTS-12345", "IPTS-33333"}
+    assert {h.ipts for h in hits} == {"IPTS-12345", "IPTS-33333"}
 
 
-async def test_search_matches_pi_or_member(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
-    async with oncat.OnCatClient(_config()) as client:
+async def test_search_matches_pi_or_member() -> None:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         hits = await client.search_experiments("bob")
-    ids = {h.ipts for h in hits}
-    assert ids == {"IPTS-12345", "IPTS-33333"}
+    assert {h.ipts for h in hits} == {"IPTS-12345", "IPTS-33333"}
 
 
-async def test_search_respects_limit(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
-    async with oncat.OnCatClient(_config()) as client:
+async def test_search_respects_limit() -> None:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         hits = await client.search_experiments("", limit=2)
     assert len(hits) == 2
+
+
+async def test_login_called_before_listing() -> None:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
+        await client.search_experiments("")
+    assert fake.calls["login"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Error translation
+# ---------------------------------------------------------------------------
+
+
+async def test_auth_error_from_pyoncat_maps_to_oncat_auth_error() -> None:
+    import pyoncat
+
+    fake = FakeONCat(login_error=pyoncat.LoginRequiredError("expired"))
+    async with oncat.OnCatClient(_config(), client=fake) as client:
+        with pytest.raises(oncat.OnCatAuthError):
+            await client.search_experiments("x")
+
+
+async def test_generic_error_maps_to_network_error() -> None:
+    fake = FakeONCat(list_error=RuntimeError("boom"))
+    async with oncat.OnCatClient(_config(), client=fake) as client:
+        with pytest.raises(oncat.OnCatNetworkError):
+            await client.search_experiments("x")
+
+
+async def test_not_signed_in_raises_auth_error(tmp_path: Path) -> None:
+    """With no injected client, no token file, and no env creds, a data call
+    raises a clear 'not signed in' error instead of silently using a shared
+    account."""
+    async with oncat.OnCatClient(_config()) as client:
+        with pytest.raises(oncat.OnCatAuthError, match="Not signed in"):
+            await client.search_experiments("x")
 
 
 # ---------------------------------------------------------------------------
@@ -446,43 +450,61 @@ async def test_search_respects_limit(httpx_mock) -> None:  # type: ignore[no-unt
 # ---------------------------------------------------------------------------
 
 
-async def test_in_memory_cache_skips_network_on_repeat(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
-    async with oncat.OnCatClient(_config()) as client:
+async def test_in_memory_cache_skips_network_on_repeat() -> None:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         await client.search_experiments("a")
         await client.search_experiments("b")
-    # Only one GET to /api/experiments — the second search reuses cache.
-    gets = [r for r in httpx_mock.get_requests() if r.method == "GET"]
-    assert len(gets) == 1
+    # Only one listing call — the second search reuses the in-memory cache.
+    assert fake.calls["experiments"] == 1
 
 
-async def test_disk_cache_survives_new_client(httpx_mock, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
+async def test_disk_cache_survives_new_client(tmp_path: Path) -> None:
     cfg = _config()
-    async with oncat.OnCatClient(cfg) as client1:
+    fake1 = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(cfg, client=fake1) as client1:
         await client1.search_experiments("a")
-    # New client with empty in-memory cache reads the disk JSON written above.
-    async with oncat.OnCatClient(cfg) as client2:
+    # New client with a fresh in-memory cache reads the disk JSON written above;
+    # its fake would report a listing call if the network were hit.
+    fake2 = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(cfg, client=fake2) as client2:
         hits = await client2.search_experiments("polymer")
     assert {h.ipts for h in hits} == {"IPTS-22222"}
-    # Disk cache file exists under the configured cache dir.
+    assert fake2.calls["experiments"] == 0
     assert (tmp_path / "cache" / "oncat").exists()
 
 
-async def test_expired_disk_cache_triggers_refetch(
-    httpx_mock,  # type: ignore[no-untyped-def]
-    tmp_path: Path,
-) -> None:
+async def test_cache_with_old_schema_version_is_discarded(tmp_path: Path) -> None:
+    """A pre-fix cache (no `version` field) is ignored and refetched."""
+    cache_file = tmp_path / "cache" / "oncat" / "SNS-EQSANS-experiments.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(
+            {
+                "fetched_at": time.time(),  # current — would otherwise hit
+                "experiments": [
+                    {
+                        "ipts": "IPTS-STALE",
+                        "title": "stringified-dict garbage",
+                        "pi": "x",
+                        "members": ["{'name': 'X'}"],
+                        "activity": "",
+                        "instrument": "EQSANS",
+                        "facility": "SNS",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
+        hits = await client.search_experiments("")
+    assert "IPTS-STALE" not in {h.ipts for h in hits}
+    assert fake.calls["experiments"] == 1
+
+
+async def test_expired_disk_cache_triggers_refetch(tmp_path: Path) -> None:
     cache_file = tmp_path / "cache" / "oncat" / "SNS-EQSANS-experiments.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     cache_file.write_text(
@@ -505,16 +527,10 @@ async def test_expired_disk_cache_triggers_refetch(
         ),
         encoding="utf-8",
     )
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=EXPERIMENTS_RE,
-        json=SAMPLE_ROWS,
-    )
-    async with oncat.OnCatClient(_config()) as client:
+    fake = FakeONCat(experiments=SAMPLE_ROWS)
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         hits = await client.search_experiments("")
-    ids = {h.ipts for h in hits}
-    assert "IPTS-OLD" not in ids
+    assert "IPTS-OLD" not in {h.ipts for h in hits}
 
 
 # ---------------------------------------------------------------------------
@@ -522,12 +538,9 @@ async def test_expired_disk_cache_triggers_refetch(
 # ---------------------------------------------------------------------------
 
 
-async def test_list_datafiles_normalises_rows(httpx_mock) -> None:  # type: ignore[no-untyped-def]
-    _stub_token(httpx_mock)
-    httpx_mock.add_response(
-        method="GET",
-        url=DATAFILES_RE,
-        json=[
+async def test_list_datafiles_normalises_rows() -> None:
+    fake = FakeONCat(
+        datafiles=[
             {
                 "indexed": {"run_number": 12001},
                 "metadata": {
@@ -548,10 +561,101 @@ async def test_list_datafiles_normalises_rows(httpx_mock) -> None:  # type: igno
                     }
                 },
             },
-        ],
+        ]
     )
-    async with oncat.OnCatClient(_config()) as client:
+    async with oncat.OnCatClient(_config(), client=fake) as client:
         files = await client.list_datafiles("12345")
     assert [f.run_number for f in files] == [12001, 12002]
     assert files[1].title == "sample A"
     assert files[0].duration_s == 600.0
+
+
+# ---------------------------------------------------------------------------
+# Per-user sign-in helpers
+# ---------------------------------------------------------------------------
+
+
+def test_token_path_honours_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(tmp_path / "custom.json"))
+    assert oncat.token_path(_config()) == tmp_path / "custom.json"
+
+
+def test_token_path_falls_back_to_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("SANSDIR_ONCAT_TOKEN", raising=False)
+    cfg = OnCatConfig(token_path=str(tmp_path / "cfg.json"))
+    assert oncat.token_path(cfg) == tmp_path / "cfg.json"
+
+
+def test_is_signed_in_reflects_token_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(token))
+    cfg = _config()
+    assert not oncat.is_signed_in(cfg)
+    token.write_text("{}", encoding="utf-8")
+    assert oncat.is_signed_in(cfg)
+
+
+def test_is_signed_in_true_with_env_password_grant(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var, val in (
+        ("ONCAT_USERNAME", "u"),
+        ("ONCAT_PASSWORD", "p"),
+        ("ONCAT_CLIENT_ID", "c"),
+        ("ONCAT_CLIENT_SECRET", "s"),
+    ):
+        monkeypatch.setenv(var, val)
+    assert oncat.is_signed_in(_config())
+
+
+def test_sign_out_removes_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(token))
+    token.write_text("{}", encoding="utf-8")
+    cfg = _config()
+    assert oncat.sign_out(cfg) is True
+    assert not token.exists()
+    # Second call: nothing to remove.
+    assert oncat.sign_out(cfg) is False
+
+
+# ---------------------------------------------------------------------------
+# Command registry: oncat status / logout / router
+# ---------------------------------------------------------------------------
+
+
+async def test_oncat_status_and_logout_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_phase1_commands import FakeApp, FakePanel, bind_registry
+
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(token))
+    monkeypatch.setenv("SANSDIR_CONFIG", str(tmp_path / "nope.toml"))  # defaults
+    app = FakeApp(left=FakePanel(cwd=tmp_path), right=FakePanel(cwd=tmp_path))
+    reg = bind_registry(app)
+
+    await reg.dispatch("oncat.status")
+    assert "not signed in" in app.notifications[-1]
+
+    token.write_text("{}", encoding="utf-8")
+    await reg.dispatch("oncat.status")
+    assert "signed in" in app.notifications[-1]
+
+    await reg.dispatch("oncat.logout")
+    assert "signed out" in app.notifications[-1]
+    assert not token.exists()
+
+
+async def test_oncat_router_delegates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_phase1_commands import FakeApp, FakePanel, bind_registry
+
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(tmp_path / "tok.json"))
+    monkeypatch.setenv("SANSDIR_CONFIG", str(tmp_path / "nope.toml"))
+    app = FakeApp(left=FakePanel(cwd=tmp_path), right=FakePanel(cwd=tmp_path))
+    reg = bind_registry(app)
+
+    # Bare 'oncat' defaults to status.
+    await reg.dispatch("oncat")
+    assert "OnCat:" in app.notifications[-1]
+    # Explicit logout routes through to oncat.logout.
+    await reg.dispatch("oncat", action="logout")
+    assert "token" in app.notifications[-1].lower()

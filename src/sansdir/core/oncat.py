@@ -1,36 +1,49 @@
-"""Async OnCat client.
+"""Async OnCat client — per-user access via the Device Authorization Grant.
 
-Cross-checked against the ``pyoncat`` usage in ``cw-do/eqsanscli``
-(``src/eqsanscli/integrations/oncat.py``); re-implemented in plain
-``httpx.AsyncClient`` so we don't take on a Mantid/PyORNL dependency.
+Authentication mirrors ``cw-do/eqsanscli``
+(``src/eqsanscli/integrations/oncat.py``) and the ORNL OnCat guidance:
 
-Auth flow: OAuth2 ``client_credentials`` grant against
-``/oauth/token``; the resulting bearer token is cached until just
-before its ``expires_in`` window closes. Endpoints, credentials, and
-the cache TTL all come from :class:`sansdir.config.OnCatConfig` so a
-user can point at a staging instance or paste their own ``client_id``
-without touching code.
+  * **Device Authorization Grant** (default). A *public* client id, no secret.
+    The user approves sign-in once in a browser (works over SSH — a URL and
+    code are shown); a personal token is cached under their home and reused
+    silently, so OnCat returns only the experiments *that user* may access.
+    :func:`login` performs the sign-in; data calls never open a browser
+    themselves (token-first) and raise :class:`OnCatAuthError` when no token
+    exists, which the front ends turn into "run :oncat login first".
+  * **Password Grant** (deprecated, browser-free fallback for unattended
+    services). Used only when the deployment sets ``ONCAT_USERNAME`` /
+    ``ONCAT_PASSWORD`` / ``ONCAT_CLIENT_ID`` / ``ONCAT_CLIENT_SECRET`` in the
+    environment — nothing secret is committed.
 
-OnCat doesn't expose a fuzzy "search by keyword" endpoint — instead we
-list every experiment for the configured instrument (cheap on the
-server, big-but-rare from our side) and filter client-side. The full
-listing is cached on disk for the configured TTL so subsequent
-searches are sub-second.
+The public async surface (:class:`OnCatClient`, :class:`Experiment`,
+:class:`Datafile`) is unchanged; ``pyoncat`` is synchronous, so its calls run
+in :func:`asyncio.to_thread`. OnCat has no fuzzy keyword endpoint — we list
+every experiment for the instrument (cheap server-side) and filter locally,
+caching the listing on disk for the configured TTL.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import os
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
-
-from sansdir.config import OnCatConfig
+from sansdir.config import OnCatConfig, default_config_path
 from sansdir.core.history import default_history_path
+
+if TYPE_CHECKING:
+    import pyoncat
+
+# Personal token cache override (tests / NDIP). Path, not a secret.
+TOKEN_ENV: str = "SANSDIR_ONCAT_TOKEN"
+# Scopes requested for human sign-in. Read-only catalog + data access.
+SCOPES: tuple[str, ...] = ("api:read", "data:read", "openid")
 
 DEFAULT_PROJECTION_EXPERIMENT: tuple[str, ...] = (
     "id",
@@ -253,29 +266,225 @@ def _promote_members(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Authentication (module-level; per-user device flow via pyoncat)
+# ---------------------------------------------------------------------------
+
+# A front end (the TUI) registers how the device-flow verification URL/code is
+# shown. The default prints to stderr, right for a plain terminal and the
+# standalone `sansdir oncat login` step.
+_verification_handler: Callable[[Any], None] | None = None
+
+
+def set_verification_handler(handler: Callable[[Any], None] | None) -> None:
+    """Register (or clear) how the device-flow sign-in prompt is displayed."""
+    global _verification_handler
+    _verification_handler = handler
+
+
+def _default_verification_handler(challenge: Any) -> None:
+    import sys
+
+    link = getattr(challenge, "verification_uri_complete", None) or challenge.verification_uri
+    print("\n" + "=" * 70, file=sys.stderr)
+    print("  OnCat sign-in required — open this URL in a browser:", file=sys.stderr)
+    print(f"    {link}", file=sys.stderr)
+    if not getattr(challenge, "verification_uri_complete", None):
+        print(f"  and enter the code: {challenge.user_code}", file=sys.stderr)
+    print("  Sign in with your UCAMS/XCAMS and approve. Waiting...", file=sys.stderr)
+    print("=" * 70 + "\n", file=sys.stderr)
+
+
+def token_path(config: OnCatConfig) -> Path:
+    """Where the per-user token is cached.
+
+    ``$SANSDIR_ONCAT_TOKEN`` wins, then ``[oncat].token_path``, else
+    ``<config dir>/oncat_token.json`` next to ``config.toml``.
+    """
+    env = os.environ.get(TOKEN_ENV)
+    if env:
+        return Path(env).expanduser()
+    if config.token_path:
+        return Path(config.token_path).expanduser()
+    return default_config_path().parent / "oncat_token.json"
+
+
+def _token_store(config: OnCatConfig) -> pyoncat.FileSystemTokenStore:
+    import pyoncat
+
+    path = token_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        os.chmod(path.parent, 0o700)
+    return pyoncat.FileSystemTokenStore(str(path))
+
+
+def _env_password_credentials() -> tuple[str, str, str, str] | None:
+    """``(user, password, client_id, client_secret)`` if the deployment set all
+    four, else ``None`` — the browserless Password-Grant fallback. Nothing
+    secret lives in the code; a service opts in via the environment."""
+    user = os.environ.get("ONCAT_USERNAME")
+    pw = os.environ.get("ONCAT_PASSWORD")
+    cid = os.environ.get("ONCAT_CLIENT_ID")
+    secret = os.environ.get("ONCAT_CLIENT_SECRET")
+    if user and pw and cid and secret:
+        return user, pw, cid, secret
+    return None
+
+
+def _make_client(config: OnCatConfig, *, interactive: bool) -> pyoncat.ONCat:
+    """Build a pyoncat client.
+
+    ``interactive=False`` (data calls): token-first, never prompts. Uses the
+    env Password Grant if configured; otherwise a device-flow client pinned to
+    ``REAUTH_NEVER`` so an expired/absent token raises instead of popping a
+    browser. ``interactive=True`` (:func:`login`): allows the browser flow.
+    """
+    try:
+        import pyoncat
+    except ImportError as exc:  # pragma: no cover - dependency is declared
+        raise OnCatError(
+            "pyoncat is required for OnCat access — install it with 'pip install pyoncat>=2.6'"
+        ) from exc
+
+    store = _token_store(config)
+    creds = _env_password_credentials()
+    if creds:
+        user, pw, cid, secret = creds
+        return pyoncat.ONCat(
+            config.endpoint,
+            client_id=cid,
+            client_secret=secret,
+            token_getter=store.read_token,
+            token_setter=store.write_token,
+            login_prompt=lambda: (user, pw),
+            flow=pyoncat.RESOURCE_OWNER_CREDENTIALS_FLOW,
+            timeout=config.request_timeout_seconds,
+        )
+
+    if not interactive and not token_path(config).exists():
+        raise OnCatAuthError(
+            "Not signed in to OnCat. Run the one-time sign-in "
+            "(in the TUI: :oncat login; or the terminal: sansdir oncat login), "
+            "approve in your browser, then retry. Unattended services can set "
+            "ONCAT_USERNAME / ONCAT_PASSWORD / ONCAT_CLIENT_ID / ONCAT_CLIENT_SECRET."
+        )
+
+    return pyoncat.ONCat(
+        config.endpoint,
+        client_id=config.client_id,
+        scopes=list(SCOPES),
+        token_getter=store.read_token,
+        token_setter=store.write_token,
+        flow=pyoncat.DEVICE_AUTHORIZATION_FLOW,
+        verification_handler=_verification_handler or _default_verification_handler,
+        reauth_on_expired=(pyoncat.REAUTH_PROMPT if interactive else pyoncat.REAUTH_NEVER),
+        timeout=config.request_timeout_seconds,
+    )
+
+
+def login(config: OnCatConfig) -> dict[str, Any]:
+    """Perform an interactive OnCat sign-in and cache the token.
+
+    Returns the signed-in user's summary (id/name/entitlements). Safe to call
+    when already signed in — it validates/refreshes and returns the summary.
+    Blocks while polling for browser approval, so callers on an event loop
+    should run it in a worker thread.
+    """
+    import getpass
+
+    client = _make_client(config, interactive=True)
+    try:
+        client.login()
+        me: dict[str, Any] = dict(client.User.retrieve(getpass.getuser()).to_dict())
+    except OnCatError:
+        raise
+    except Exception as exc:
+        # If the token was obtained but the identity lookup failed, still
+        # report success with the local username.
+        if token_path(config).exists():
+            return {"id": getpass.getuser()}
+        raise _translate_auth_error(exc) from exc
+    return me
+
+
+def is_signed_in(config: OnCatConfig) -> bool:
+    """True if a cached token exists or env credentials are configured. Does
+    not hit the network (a stored token may still prove expired on use)."""
+    return _env_password_credentials() is not None or token_path(config).exists()
+
+
+def sign_out(config: OnCatConfig) -> bool:
+    """Delete the cached token. Returns True if one was removed."""
+    path = token_path(config)
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _translate_auth_error(exc: Exception) -> OnCatError:
+    """Map a pyoncat failure to an actionable OnCat error."""
+    try:
+        import pyoncat
+    except ImportError:  # pragma: no cover
+        return OnCatNetworkError(str(exc))
+    auth_types = tuple(
+        t
+        for t in (
+            getattr(pyoncat, "InvalidRefreshTokenError", None),
+            getattr(pyoncat, "LoginRequiredError", None),
+            getattr(pyoncat, "InteractionRequiredError", None),
+            getattr(pyoncat, "UnauthorizedError", None),
+            getattr(pyoncat, "InvalidUserCredentialsError", None),
+            getattr(pyoncat, "InvalidClientCredentialsError", None),
+        )
+        if isinstance(t, type)
+    )
+    if auth_types and isinstance(exc, auth_types):
+        return OnCatAuthError(
+            "OnCat session expired or not signed in. Sign in again "
+            "(:oncat login, or sansdir oncat login), then retry."
+        )
+    return OnCatNetworkError(f"OnCat request failed: {exc}")
+
+
+def _to_plain(obj: Any) -> Any:
+    """Recursively convert pyoncat ONCatObjects into plain nested dicts/lists,
+    so the ``_normalise_*`` helpers (which use dict access) work unchanged."""
+    if hasattr(obj, "to_dict"):
+        obj = obj.to_dict()
+    if isinstance(obj, dict):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_plain(v) for v in obj]
+    return obj
+
+
+# ---------------------------------------------------------------------------
 # OnCat client
 # ---------------------------------------------------------------------------
 
 
 class OnCatClient:
-    """Thin async wrapper around OnCat's REST API."""
+    """Async wrapper over pyoncat's per-user catalog access.
+
+    pyoncat is synchronous; each network call runs in :func:`asyncio.to_thread`
+    so the public interface stays async. A pre-built pyoncat client may be
+    injected via ``client=`` (tests); otherwise one is created per call,
+    token-first, from the cached personal token.
+    """
 
     def __init__(
         self,
         config: OnCatConfig,
         *,
-        client: httpx.AsyncClient | None = None,
+        client: pyoncat.ONCat | None = None,
         in_memory_cache: dict[str, _CacheEntry] | None = None,
     ) -> None:
         self._config = config
-        self._client = client or httpx.AsyncClient(
-            base_url=config.endpoint,
-            timeout=config.request_timeout_seconds,
-        )
-        self._owns_client = client is None
+        self._client = client
         self._mem: dict[str, _CacheEntry] = in_memory_cache if in_memory_cache is not None else {}
-        self._token: str | None = None
-        self._token_expires_at: float = 0.0
 
     async def __aenter__(self) -> OnCatClient:
         return self
@@ -284,67 +493,15 @@ class OnCatClient:
         await self.aclose()
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        # pyoncat manages its own requests session; nothing to close.
+        return None
 
-    # ---- auth -----------------------------------------------------------
-
-    async def _get_token(self) -> str:
-        if self._token and time.time() < self._token_expires_at - 30:
-            return self._token
-        if not self._config.client_id or not self._config.client_secret:
-            raise OnCatAuthError(
-                "no OnCat credentials configured — set [oncat].client_id / "
-                "client_secret in ~/.config/sansdir/config.toml or the "
-                "ONCAT_CLIENT_ID / ONCAT_CLIENT_SECRET env vars"
-            )
-        try:
-            resp = await self._client.post(
-                "/oauth/token",
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self._config.client_id,
-                    "client_secret": self._config.client_secret,
-                },
-            )
-        except httpx.RequestError as exc:
-            raise OnCatNetworkError(f"oauth request failed: {exc}") from exc
-        if resp.status_code != 200:
-            raise OnCatAuthError(f"oauth failed: HTTP {resp.status_code} — {resp.text[:200]}")
-        body = resp.json()
-        token = str(body.get("access_token") or "")
-        if not token:
-            raise OnCatAuthError("oauth response missing access_token")
-        self._token = token
-        # Refresh slightly before the server-stated expiry.
-        self._token_expires_at = time.time() + float(body.get("expires_in", 3600))
-        return token
-
-    async def _get(self, path: str, params: dict[str, Any]) -> Any:
-        token = await self._get_token()
-        try:
-            resp = await self._client.get(
-                path,
-                params=params,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-        except httpx.RequestError as exc:
-            raise OnCatNetworkError(f"GET {path} failed: {exc}") from exc
-        if resp.status_code == 401:
-            # Maybe the token expired between check and use; retry once.
-            self._token = None
-            token = await self._get_token()
-            try:
-                resp = await self._client.get(
-                    path,
-                    params=params,
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            except httpx.RequestError as exc:
-                raise OnCatNetworkError(f"GET {path} retry failed: {exc}") from exc
-        if resp.status_code >= 400:
-            raise OnCatNetworkError(f"GET {path}: HTTP {resp.status_code} — {resp.text[:200]}")
-        return resp.json()
+    def _sync_client(self) -> pyoncat.ONCat:
+        return (
+            self._client
+            if self._client is not None
+            else _make_client(self._config, interactive=False)
+        )
 
     # ---- experiments ----------------------------------------------------
 
@@ -368,18 +525,27 @@ class OnCatClient:
             if on_disk is not None:
                 self._mem[cache_key] = _CacheEntry(fetched_at=time.time(), experiments=on_disk)
                 return on_disk
-        rows = await self._get(
-            "/api/experiments",
-            {
-                "facility": facility,
-                "instrument": instrument,
-                "projection": list(DEFAULT_PROJECTION_EXPERIMENT),
-            },
-        )
+        rows = await asyncio.to_thread(self._fetch_experiments, instrument, facility)
         experiments = [_normalise_experiment(r, instrument, facility) for r in rows]
         self._mem[cache_key] = _CacheEntry(fetched_at=time.time(), experiments=experiments)
         _save_disk_cache(experiments, instrument, facility)
         return experiments
+
+    def _fetch_experiments(self, instrument: str, facility: str) -> list[dict[str, Any]]:
+        """Blocking pyoncat experiment listing (runs in a worker thread)."""
+        client = self._sync_client()
+        try:
+            client.login()  # token-first; no browser (REAUTH_NEVER)
+            objs = client.Experiment.list(
+                facility=facility,
+                instrument=instrument,
+                projection=list(DEFAULT_PROJECTION_EXPERIMENT),
+            )
+        except OnCatError:
+            raise
+        except Exception as exc:
+            raise _translate_auth_error(exc) from exc
+        return [_to_plain(o) for o in objs]
 
     async def search_experiments(
         self,
@@ -407,17 +573,30 @@ class OnCatClient:
         instrument = instrument or self._config.default_instrument
         if not ipts.startswith("IPTS-"):
             ipts = f"IPTS-{ipts}"
-        rows = await self._get(
-            "/api/datafiles",
-            {
-                "facility": facility,
-                "instrument": instrument,
-                "experiment": ipts,
-                "projection": list(DEFAULT_PROJECTION_DATAFILE),
-                "exts": list(exts),
-            },
+        rows = await asyncio.to_thread(
+            self._fetch_datafiles, ipts, instrument, facility, tuple(exts)
         )
         return [_normalise_datafile(r) for r in rows]
+
+    def _fetch_datafiles(
+        self, ipts: str, instrument: str, facility: str, exts: tuple[str, ...]
+    ) -> list[dict[str, Any]]:
+        """Blocking pyoncat datafile listing (runs in a worker thread)."""
+        client = self._sync_client()
+        try:
+            client.login()  # token-first; no browser (REAUTH_NEVER)
+            objs = client.Datafile.list(
+                facility=facility,
+                instrument=instrument,
+                experiment=ipts,
+                projection=list(DEFAULT_PROJECTION_DATAFILE),
+                exts=list(exts),
+            )
+        except OnCatError:
+            raise
+        except Exception as exc:
+            raise _translate_auth_error(exc) from exc
+        return [_to_plain(o) for o in objs]
 
 
 # ---------------------------------------------------------------------------
