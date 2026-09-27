@@ -267,7 +267,7 @@ than by copying \texttt{eqsanscli}'s source code into it.
 
 \subsection{SCOPE OF THIS REPORT}
 
-This report describes version 0.10.2. Section~\ref{sec:install} covers
+This report describes version 0.11.0. Section~\ref{sec:install} covers
 installation and deployment. Section~\ref{sec:arch} describes the software
 architecture, with emphasis on the command registry. Sections~\ref{sec:ui}
 through~\ref{sec:mask} document the user-facing feature set. Section~\ref{sec:cli}
@@ -376,7 +376,7 @@ budget of Section~\ref{sec:startup}.
     \texttt{numpy}      & 1.24  & Array input/output for ASCII and NeXus data
       \autocite{numpy}. \\
     \texttt{h5py}       & 3.9   & NeXus and \ac{hdf} access \autocite{h5py}. \\
-    \texttt{httpx}      & 0.27  & Asynchronous \ac{rest} client for OnCat. \\
+    \texttt{pyoncat}    & 2.6   & Per-user OnCat catalog access (device sign-in). \\
     \texttt{send2trash} & 1.8   & Recoverable delete, with a fallback for
       cluster filesystems that provide no trash directory. \\
     \texttt{tomli}      & 2.0   & \Ac{toml} parsing on Python 3.10 only;
@@ -464,7 +464,7 @@ implemented. A synchronous convenience wrapper exists for call sites that are no
 already inside an event loop; it raises rather than silently misbehaving if
 invoked from within one.
 
-Version 0.10.2 registers 57 commands. Appendix~\ref{sec:appcommands} lists them
+Version 0.11.0 registers 61 commands. Appendix~\ref{sec:appcommands} lists them
 in full.
 
 \subsection{DISPATCH PATHS}
@@ -1186,13 +1186,33 @@ layout are what the terminal actually shows.
 
 \subsection{AUTHENTICATION}
 
-OnCat requires an \ac{oauth} bearer token even for read-only endpoints. The
-client obtains one through the client-credentials grant and caches it until
-shortly before expiry. Credentials come from the \texttt{[oncat]} configuration
-section or from the \texttt{ONCAT\_CLIENT\_ID} and \texttt{ONCAT\_CLIENT\_SECRET}
-environment variables, with working defaults so that a cluster user gets a
-functioning search without configuration. The endpoint is likewise configurable,
-so the client can be pointed at a staging instance.
+OnCat requires an \ac{oauth} bearer token even for read-only endpoints, and it
+scopes results to the signed-in user. sansdir therefore signs in \emph{as the
+user}, through the OAuth Device Authorization Grant: a one-time browser approval
+that works over \ac{ssh} (a verification \ac{url} and short code are shown; the
+user opens the \ac{url}, signs in with their UCAMS/XCAMS, and approves). A
+personal token is then cached under the user's home directory and reused
+silently, so the catalog shows exactly the experiments that user is entitled to.
+The sign-in is driven with the ORNL \texttt{pyoncat} library using a
+\emph{public} client identifier, which carries no access on its own; no secret
+is stored in the source or the configuration.
+
+This replaces an earlier machine-to-machine \texttt{client\_credentials} login
+whose shared identifier and secret were committed to the source tree. That
+posture is not recommended by ORNL: a committed secret is a leak risk, and every
+user shared one identity rather than seeing their own entitlements.
+
+Sign-in is exposed as \texttt{:oncat login} in the \ac{tui} and
+\texttt{sansdir oncat login} on the command line, with \texttt{:oncat status}
+and \texttt{:oncat logout} alongside. Data calls are \emph{token-first}: they
+never open a browser themselves, and when no token is present they report
+``not signed in --- run :oncat login'' rather than failing obscurely. For
+unattended, browserless services (cron jobs, gateway deployments) a deprecated
+Password Grant is available only when \texttt{ONCAT\_USERNAME},
+\texttt{ONCAT\_PASSWORD}, \texttt{ONCAT\_CLIENT\_ID}, and
+\texttt{ONCAT\_CLIENT\_SECRET} are all set in the environment --- again, nothing
+secret lives in the code. The endpoint and token path are configurable so the
+client can be pointed at a staging instance.
 
 \subsection{SEARCH MODEL AND CACHING}
 
@@ -1784,10 +1804,10 @@ The suite is layered to match the architecture:
     references to catch unintended layout regressions.
 \end{itemize}
 
-Two testing constraints are enforced. OnCat tests mock \ac{rest} responses and
-never contact the real service. No test touches a real cluster data path;
-fixtures are generated synthetically or drawn from a small set of committed
-files.
+Two testing constraints are enforced. OnCat tests inject a fake catalog client
+and never contact the real service or trigger a browser sign-in. No test touches
+a real cluster data path; fixtures are generated synthetically or drawn from a
+small set of committed files.
 
 \subsection{STATIC ANALYSIS AND STYLE}
 
@@ -1908,7 +1928,7 @@ it on production data.
 \section{COMMAND REGISTRY REFERENCE}
 \label{sec:appcommands}
 
-Table~\ref{tab:allcommands} lists every command registered in version 0.10.2.
+Table~\ref{tab:allcommands} lists every command registered in version 0.11.0.
 Any command may be invoked from the \key{:} line by name or alias.
 
 \begin{small}
@@ -1962,6 +1982,13 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{nav.up} & --- & Ascend one directory. \\
   \texttt{oncat.search} (\texttt{ipts}) & \texttt{keyword?},
     \texttt{instrument?} & Browse OnCat experiments. \\
+  \texttt{oncat} & \texttt{action?} & Sign-in router: login / status / logout. \\
+  \texttt{oncat.login} (\texttt{oncat-login}) & --- & Per-user OnCat sign-in
+    (device flow). \\
+  \texttt{oncat.status} (\texttt{oncat-status}) & --- & Show OnCat sign-in
+    state. \\
+  \texttt{oncat.logout} (\texttt{oncat-logout}) & --- & Remove the cached OnCat
+    token. \\
   \texttt{pane.activate} & \texttt{panel\_id} & Activate the named pane. \\
   \texttt{pane.swap} & --- & Swap the two panes. \\
   \texttt{pane.sync} & --- & Match the inactive pane to the active one. \\
