@@ -54,9 +54,28 @@ async def test_q_quits_via_registry(tmp_path: Path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("q")
-        await pilot.pause()
+        # Quit paints a notice then exits on a short timer; wait past it.
+        await pilot.pause(0.1)
     # If we exit cleanly the test reaches here; assert the app's return code.
     assert app.return_code == 0
+
+
+async def test_quit_shows_quitting_notice(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`q` paints a 'Quitting…' message before teardown, so the user sees that
+    the keystroke registered even if closing plots takes a beat."""
+    left, right = _scratch(tmp_path)
+    app = SansdirApp(start_path=left, right_path=right)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Stop the real exit so we can inspect the notice the quit painted.
+        exited: list[int] = []
+        monkeypatch.setattr(app, "exit", lambda code=0: exited.append(code))
+        app.quit_app()
+        await pilot.pause()
+        assert "Quitting" in str(app._statusbar._middle.render())
+        # The deferred finisher still runs (on the timer) and calls exit.
+        await pilot.pause(0.1)
+        assert exited == [0]
 
 
 async def test_pane_sync_copies_active_to_inactive(tmp_path: Path) -> None:

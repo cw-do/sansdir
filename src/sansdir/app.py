@@ -16,6 +16,7 @@ returns focus to the active pane, ``Enter`` parses + dispatches via
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shlex
 import subprocess
 from pathlib import Path
@@ -306,6 +307,19 @@ class SansdirApp(App[int]):
         self.push_screen(HelpScreen(self.registry, self.keymap))
 
     def quit_app(self) -> None:
+        # Paint a "quitting" notice and let it render before the teardown.
+        # Closing matplotlib windows and settling workers can take a beat, so
+        # the user gets immediate confirmation that `q` registered rather than
+        # staring at a frozen screen. A short timer (not call_after_refresh)
+        # does the actual exit, so it fires even if nothing else triggers a
+        # repaint — the app can never hang here.
+        with contextlib.suppress(Exception):  # a cosmetic notice must never block quit
+            self._statusbar.set_message("[b yellow]Quitting…[/]")
+        self.notify("Quitting…")
+        self.refresh()
+        self.set_timer(0.05, self._finish_quit)
+
+    def _finish_quit(self) -> None:
         # Best-effort: close any matplotlib figures the user opened during
         # the session so they don't outlive the TUI process.
         try:

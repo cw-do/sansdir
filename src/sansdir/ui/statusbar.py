@@ -84,3 +84,11 @@ class StatusBar(Horizontal):
         self._left.update("  ·  ".join(bits))
         self._middle.update(catalog_summary)
         self._right.update(llm_status)
+
+    def set_message(self, text: str) -> None:
+        """Overwrite the centre zone with a one-off status message.
+
+        Used for transient notices (e.g. ``Quitting…``) that should be visible
+        immediately without recomputing the pane summary. Rich markup allowed.
+        """
+        self._middle.update(text)

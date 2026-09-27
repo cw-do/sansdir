@@ -645,6 +645,9 @@ account with a committed secret (the posture ORNL flagged).
   `ONCAT_PASSWORD`, `ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET` in the
   environment.
 - Dependency: `pyoncat>=2.6` replaces `httpx`.
+- Small polish: pressing `q` now paints a **Quitting…** notice before
+  teardown, so you can see the keystroke registered even if closing plot
+  windows takes a beat.
 
 ## What's in v0.10.2
 
