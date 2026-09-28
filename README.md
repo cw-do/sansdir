@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.11.0** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.11.1** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -627,6 +627,17 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.11.1
+
+- Declare `oauthlib` / `requests-oauthlib` explicitly: `pyoncat` imports
+  them for the device flow but doesn't list them, so a fresh install could
+  hit `ModuleNotFoundError: oauthlib` at sign-in. Now they come in with
+  sansdir.
+- Sign-in polish from testing: keyboard focus returns to the file pane
+  after the login dialog closes (so the next `i` isn't dropped), and a
+  "loading OnCat experiments…" notice covers the first catalog fetch after
+  sign-in.
 
 ## What's in v0.11.0
 
