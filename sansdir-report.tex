@@ -648,9 +648,10 @@ approximately 18,400 lines across 58 modules.
     \texttt{ui/} & \texttt{panel.py}, \texttt{pane\_slot.py},
       \texttt{keys.py}, \texttt{command\_input.py}, \texttt{dialogs.py},
       \texttt{hdf\_tree.py}, \texttt{run\_catalog.py},
-      \texttt{oncat\_browser.py}, \texttt{help.py}, \texttt{statusbar.py},
-      \texttt{titlebar.py}, \texttt{pathbar.py}, \texttt{key\_hint\_bar.py},
-      \texttt{inline\_viewer.py}, \texttt{prompt\_panel.py}. \\
+      \texttt{oncat\_browser.py}, \texttt{oncat\_login.py}, \texttt{help.py},
+      \texttt{statusbar.py}, \texttt{titlebar.py}, \texttt{pathbar.py},
+      \texttt{key\_hint\_bar.py}, \texttt{inline\_viewer.py},
+      \texttt{prompt\_panel.py}. \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -1204,9 +1205,14 @@ user shared one identity rather than seeing their own entitlements.
 
 Sign-in is exposed as \texttt{:oncat login} in the \ac{tui} and
 \texttt{sansdir oncat login} on the command line, with \texttt{:oncat status}
-and \texttt{:oncat logout} alongside. Data calls are \emph{token-first}: they
-never open a browser themselves, and when no token is present they report
-``not signed in --- run :oncat login'' rather than failing obscurely. For
+and \texttt{:oncat logout} alongside. In the \ac{tui} the verification
+\ac{url} is shown in a \emph{centered modal} that stays up until sign-in
+completes, with explicit copy-paste guidance (a terminal click typically does
+nothing over \ac{ssh}), because a transient corner notification proved too easy
+to miss. Pressing \key{i} while signed out opens that same modal automatically
+and resumes the catalog search once sign-in succeeds. Data calls are
+\emph{token-first}: they never open a browser themselves, and when no token is
+present they raise ``not signed in'' rather than failing obscurely. For
 unattended, browserless services (cron jobs, gateway deployments) a deprecated
 Password Grant is available only when \texttt{ONCAT\_USERNAME},
 \texttt{ONCAT\_PASSWORD}, \texttt{ONCAT\_CLIENT\_ID}, and
