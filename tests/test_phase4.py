@@ -247,22 +247,107 @@ async def test_no_matches_notifies_and_skips_browser(
         await pilot.press("q")
 
 
-async def test_oncat_auth_error_surfaces_clean_message(
+async def test_i_when_not_signed_in_launches_login(
     tmp_path: Path,
     fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Not signed in (no token, no env creds) → notify, no browser, no crash.
+    """Pressing `i` while signed out opens the centered sign-in modal, rather
+    than failing silently. The token path is isolated (autouse), so the data
+    call raises OnCatAuthError before any network, which triggers login."""
+    from sansdir.core import oncat as oncat_mod
+    from sansdir.core.oncat import OnCatError
 
-    The autouse fixture points the token at a nonexistent path, so the real
-    ``_make_client`` raises OnCatAuthError; the ``i`` handler catches it.
-    """
+    calls = {"login": 0}
+
+    def fake_login(cfg: object) -> dict[str, str]:
+        calls["login"] += 1
+        # Surface the challenge as the real flow would, then simulate the user
+        # not finishing sign-in (so there's no retry network).
+        handler = oncat_mod._verification_handler
+        if handler is not None:
+
+            class _Ch:
+                verification_uri = "https://oncat.example/activate"
+                verification_uri_complete = None
+                user_code = "AB-12"
+
+            handler(_Ch())
+        raise OnCatError("cancelled")
+
+    monkeypatch.setattr(oncat_mod, "login", fake_login)
+
+    app = _real_app(tmp_path)
+    pushed: list[str] = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        orig_push = app.push_screen
+        monkeypatch.setattr(
+            app,
+            "push_screen",
+            lambda s, *a, **k: (pushed.append(type(s).__name__), orig_push(s, *a, **k))[1],
+        )
+        await pilot.press("i")
+        await pilot.pause(0.15)
+        assert "OnCatLoginScreen" in pushed
+        assert calls["login"] == 1
+        await pilot.press("q")
+
+
+async def test_oncat_login_modal_dismisses_on_success(
+    tmp_path: Path,
+    fake_oncat_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`:oncat login` shows the modal and closes it once sign-in succeeds."""
+    from sansdir.core import oncat as oncat_mod
+
+    def fake_login(cfg: object) -> dict[str, str]:
+        handler = oncat_mod._verification_handler
+        if handler is not None:
+
+            class _Ch:
+                verification_uri = "https://oncat.example/activate"
+                verification_uri_complete = None
+                user_code = "AB-12"
+
+            handler(_Ch())
+        return {"name": "Tester"}
+
+    monkeypatch.setattr(oncat_mod, "login", fake_login)
+
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("i")
+        result = await app.registry.dispatch("oncat.login")
         await pilot.pause()
-        # No browser opened; the app is still responsive.
-        assert len(app.screen_stack) == 1
+        assert result == "Tester"
+        assert type(app.screen).__name__ != "OnCatLoginScreen"
+        await pilot.press("q")
+
+
+async def test_login_screen_shows_url_and_instructions(tmp_path: Path) -> None:
+    """The modal renders the URL prominently, with code and copy-paste text."""
+    from textual.widgets import Static
+
+    from sansdir.ui.oncat_login import OnCatLoginScreen
+
+    app = _real_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = OnCatLoginScreen()
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.show_challenge("https://oncat.example/activate", "AB-12")
+        await pilot.pause()
+        url = screen.query_one("#oncat-login-url", Static)
+        assert url.display
+        assert "oncat.example/activate" in str(url.render())
+        body = str(screen.query_one("#oncat-login-body", Static).render())
+        assert "copy-paste" in body.lower()
+        hint = str(screen.query_one("#oncat-login-hint", Static).render())
+        assert "AB-12" in hint
+        await pilot.press("escape")
         await pilot.press("q")
 
 

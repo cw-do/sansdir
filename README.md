@@ -206,11 +206,15 @@ to keep typing.
 
 OnCat access is **per-user**: you sign in once as yourself, and the catalog
 shows exactly the experiments you're entitled to. The first time you press `i`
-(or use any OnCat feature) without a session, sansdir tells you to sign in.
+(or use any OnCat feature) without a session, sansdir opens the sign-in dialog
+for you automatically.
 
-- In the TUI: `:oncat login` — a URL and short code appear; open the URL in any
-  browser (it works over SSH — copy the URL to your laptop), sign in with your
-  UCAMS/XCAMS, and approve. `:oncat status` and `:oncat logout` are there too.
+- In the TUI: `:oncat login` (or just press `i`) pops a **centered dialog** with
+  a verification URL. **Copy the URL into a browser on your own computer** —
+  clicking it in the terminal usually won't work over SSH (in many terminals
+  `Ctrl+Click`, or `Cmd+Click` on macOS, opens it too). Sign in with your
+  UCAMS/XCAMS and approve; the dialog closes itself once you're in. `:oncat
+  status` and `:oncat logout` are there too.
 - From the shell: `sansdir oncat login` (also `status` / `logout`).
 
 The personal token is cached at `~/.config/sansdir/oncat_token.json` and reused
@@ -630,10 +634,10 @@ Per-user OnCat sign-in. sansdir now authenticates to OnCat **as you**,
 through the OAuth device-authorization flow, instead of a shared machine
 account with a committed secret (the posture ORNL flagged).
 
-- **Sign in once, as yourself.** `:oncat login` (or `sansdir oncat login`)
-  shows a URL + code to approve in a browser — works over SSH. Your token
-  is cached at `~/.config/sansdir/oncat_token.json` and reused silently;
-  the catalog shows exactly the experiments you're entitled to.
+- **Sign in once, as yourself.** `:oncat login` (or just press `i`) opens a
+  centered dialog with a URL to copy into a browser — works over SSH. Your
+  token is cached at `~/.config/sansdir/oncat_token.json` and reused
+  silently; the catalog shows exactly the experiments you're entitled to.
 - **`:oncat status` / `:oncat logout`** (and the `sansdir oncat` CLI
   equivalents) to check or clear your session.
 - **No secret in the code or config.** Sign-in uses OnCat's *public*

@@ -17,6 +17,7 @@ through :meth:`CommandRegistry.dispatch` — handlers never bypass it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -593,7 +594,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
     async def handler(keyword: str = "", instrument: str = "") -> None:
         from sansdir.app import SansdirApp as _RealApp
         from sansdir.config import load_config
-        from sansdir.core.oncat import OnCatClient, OnCatError
+        from sansdir.core.oncat import OnCatAuthError, OnCatClient, OnCatError
         from sansdir.ui.dialogs import ConfirmDialog
         from sansdir.ui.oncat_browser import OnCatBrowserScreen
 
@@ -616,7 +617,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
             app.push_screen(screen, _cb)
             return await fut
 
-        try:
+        async def _run_search() -> None:
             async with OnCatClient(cfg.oncat) as client:
                 # Pull the full instrument listing once — the browser
                 # filters client-side via its own `/` input.
@@ -627,7 +628,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                         f"OnCat: no experiments registered for {instr}",
                         severity="warning",
                     )
-                    return None
+                    return
 
                 # Closure that re-fetches bypassing the 24h cache.
                 # The browser binds this to ``r`` / ``ctrl+r`` so the
@@ -647,7 +648,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                     )
                 )
                 if chosen is None:
-                    return None
+                    return
                 # `chosen` is a sansdir.core.oncat.Experiment.
                 ipts_root = chosen.cluster_path()  # type: ignore[attr-defined]
                 # Most users want the per-experiment ``shared/`` folder
@@ -663,7 +664,7 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                     )
                 )
                 if not ok:
-                    return None
+                    return
                 if not target.is_dir():
                     app.notify_user(
                         f"OnCat: {target} doesn't exist on this host",
@@ -684,9 +685,21 @@ def _make_oncat_search(app: AppProtocol) -> Command:
                     instrument=instr,
                     facility=chosen.facility,  # type: ignore[attr-defined]
                 )
+
+        try:
+            await _run_search()
+        except OnCatAuthError:
+            # Not signed in (or the token expired). Guide the user through the
+            # centered sign-in modal, then retry the search exactly once.
+            signed = await app.registry.dispatch("oncat.login")
+            if not signed:
+                return None
+            try:
+                await _run_search()
+            except OnCatError as exc:
+                app.notify_user(f"OnCat: {exc}", severity="error")
         except OnCatError as exc:
             app.notify_user(f"OnCat: {exc}", severity="error")
-            return None
         return None
 
     return Command(
@@ -718,8 +731,9 @@ def _make_oncat_login(app: AppProtocol) -> Command:
     """``:oncat login`` — one-time per-user OnCat sign-in (device flow).
 
     The device grant blocks while polling for browser approval, so the sign-in
-    runs in a worker thread; the verification URL is surfaced as a
-    notification (with the code, if the URL doesn't already embed it).
+    runs in a worker thread. The verification URL is shown in a centered modal
+    (:class:`OnCatLoginScreen`) with copy-paste instructions, which stays up
+    until the worker finishes — a transient toast was too easy to miss.
     """
 
     async def handler() -> str | None:
@@ -727,31 +741,52 @@ def _make_oncat_login(app: AppProtocol) -> Command:
         from sansdir.config import load_config
         from sansdir.core import oncat
         from sansdir.core.oncat import OnCatError
+        from sansdir.ui.oncat_login import OnCatLoginScreen
 
         cfg = load_config()
+
+        # Headless / non-Textual dispatch (tests, LLM layer): no modal to show.
+        if not isinstance(app, _RealApp):  # pragma: no cover - non-Textual path
+            try:
+                me = await asyncio.to_thread(oncat.login, cfg.oncat)
+            except OnCatError as exc:
+                app.notify_user(f"OnCat sign-in failed: {exc}", severity="error")
+                return None
+            name = me.get("name") or me.get("id") or "you"
+            app.notify_user(f"Signed in to OnCat as {name}.")
+            return str(name)
+
+        screen = OnCatLoginScreen()
+        app.push_screen(screen)
+        # Let the modal mount before the worker can call back into it.
+        await asyncio.sleep(0)
 
         def _show_challenge(challenge: object) -> None:
             link = getattr(challenge, "verification_uri_complete", None) or getattr(
                 challenge, "verification_uri", ""
             )
-            code = getattr(challenge, "user_code", "")
-            msg = f"OnCat sign-in: open {link} in a browser and approve."
-            if not getattr(challenge, "verification_uri_complete", None) and code:
-                msg += f"  Code: {code}"
+            code = "" if getattr(challenge, "verification_uri_complete", None) else getattr(
+                challenge, "user_code", ""
+            )
             # Called from the worker thread — hop back to the UI thread.
-            if isinstance(app, _RealApp):
-                app.call_from_thread(app.notify, msg, severity="information", timeout=120.0)
-            else:  # pragma: no cover - non-Textual dispatch
-                app.notify_user(msg)
+            app.call_from_thread(screen.show_challenge, str(link), str(code))
+
+        def _dismiss(result: bool) -> None:
+            # The user may have already cancelled with Esc; ignore if gone.
+            with contextlib.suppress(Exception):
+                if screen.is_running:
+                    screen.dismiss(result)
 
         oncat.set_verification_handler(_show_challenge)
         try:
             me = await asyncio.to_thread(oncat.login, cfg.oncat)
         except OnCatError as exc:
+            _dismiss(False)
             app.notify_user(f"OnCat sign-in failed: {exc}", severity="error")
             return None
         finally:
             oncat.set_verification_handler(None)
+        _dismiss(True)
         name = me.get("name") or me.get("id") or "you"
         app.notify_user(f"Signed in to OnCat as {name}.")
         return str(name)
