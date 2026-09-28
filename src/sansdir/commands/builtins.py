@@ -690,10 +690,14 @@ def _make_oncat_search(app: AppProtocol) -> Command:
             await _run_search()
         except OnCatAuthError:
             # Not signed in (or the token expired). Guide the user through the
-            # centered sign-in modal, then retry the search exactly once.
+            # centered sign-in modal, then reopen the browser automatically.
             signed = await app.registry.dispatch("oncat.login")
             if not signed:
                 return None
+            # The first catalog fetch after sign-in is a real network round
+            # trip; tell the user it's coming so the brief pause doesn't read
+            # as "nothing happened".
+            app.notify_user("Signed in — loading OnCat experiments…")
             try:
                 await _run_search()
             except OnCatError as exc:
@@ -776,6 +780,11 @@ def _make_oncat_login(app: AppProtocol) -> Command:
             with contextlib.suppress(Exception):
                 if screen.is_running:
                     screen.dismiss(result)
+            # Popping a modal doesn't always land keyboard focus back on the
+            # file pane, so the next keystroke (e.g. `i`) would be dropped until
+            # the user nudged the cursor. Restore it explicitly.
+            with contextlib.suppress(Exception):
+                app.focus_active_surface()
 
         oncat.set_verification_handler(_show_challenge)
         try:
