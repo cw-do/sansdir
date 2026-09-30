@@ -295,6 +295,43 @@ async def test_reduce_closes_a_stale_preview_before_showing_the_output(
     assert not app.is_other_pane_viewing()
 
 
+async def test_reduce_swaps_the_catalog_out_to_show_the_output(
+    app: FakeApp, tmp_path: Path, monkeypatch
+) -> None:
+    """The catalog sits on the right pane through the whole r-flow; the
+    output listing must replace it, not change the cwd hidden behind it."""
+    data_dir = tmp_path / "autoreduce"
+    csv = _good_csv(app, data_dir)
+    _config(tmp_path, monkeypatch, reduce_command=str(_stub_engine(tmp_path)))
+    reg = build_default_registry(app=app)
+    out = tmp_path / "output"
+    app.show_catalog_in_other_pane("IPTS-1", [FakeRun(100, "E")], instrument="USANS")
+    assert app.other_pane_shows_catalog
+
+    await reg.dispatch("usans.reduce", path=str(csv), data_dir=str(data_dir), output_dir=str(out))
+
+    assert app.right.cwd == out
+    assert not app.other_pane_shows_catalog
+    assert app.catalog is not None, "hidden, not dropped — `c` brings it back"
+
+
+async def test_reduce_leaves_the_catalog_up_when_the_user_declines(
+    app: FakeApp, tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = tmp_path / "autoreduce"
+    csv = _good_csv(app, data_dir)
+    _config(tmp_path, monkeypatch, reduce_command=str(_stub_engine(tmp_path)))
+    reg = build_default_registry(app=app)
+    app.show_catalog_in_other_pane("IPTS-1", [FakeRun(100, "E")], instrument="USANS")
+    app.confirm_response = False
+
+    await reg.dispatch(
+        "usans.reduce", path=str(csv), data_dir=str(data_dir), output_dir=str(tmp_path / "o")
+    )
+
+    assert app.other_pane_shows_catalog
+
+
 async def test_reduce_uses_the_cursor_when_no_path_is_given(
     app: FakeApp, tmp_path: Path, monkeypatch
 ) -> None:

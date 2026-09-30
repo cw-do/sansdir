@@ -419,3 +419,91 @@ def test_generated_csv_ends_up_under_the_cursor(tmp_path: Path, monkeypatch) -> 
             assert app.active_panel.cursor_path == shared / "IPTS-1_setup.csv"
 
     _run(_drive())
+
+
+def _catalog_runs(n: int = 40) -> list:  # type: ignore[type-arg]
+    from sansdir.core.oncat import Datafile
+
+    return [
+        Datafile(run_number=100 + i, title="S0" if i else "Blank", start_time="", duration_s=1.0)
+        for i in range(n)
+    ]
+
+
+def test_run_number_prompt_sits_beside_the_catalog(tmp_path: Path, monkeypatch) -> None:
+    """The start-run question must not cover the catalog the answer is read from."""
+    from sansdir.app import SansdirApp
+    from sansdir.commands.builtins import _prompt_text
+    from sansdir.ui.dialogs import TextPromptDialog
+
+    monkeypatch.setenv("SANSDIR_CONFIG", str(tmp_path / "absent.toml"))
+
+    async def _drive() -> None:
+        app = SansdirApp(start_path=tmp_path)
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            app.show_catalog_in_other_pane("IPTS-1", _catalog_runs(), instrument="USANS")
+            await pilot.pause()
+            table = app.visible_catalog_table()
+            assert table is not None
+            task = asyncio.create_task(_prompt_text(app, "First run:", title="t"))
+            await pilot.pause()
+            dialog = app.screen
+            assert isinstance(dialog, TextPromptDialog)
+            assert dialog.has_class("-beside")
+            box = dialog.query_one("Vertical").region
+            assert box.right <= 60, f"dialog spills into the right pane: {box}"
+
+            # Arrows scroll the catalog; the typed answer still lands in the input.
+            start = table.cursor_row
+            await pilot.press("down", "down", "pagedown")
+            await pilot.pause()
+            assert table.cursor_row > start + 2
+            await pilot.press("1", "0", "4", "enter")
+            assert await task == "104"
+
+    _run(_drive())
+
+
+def test_prompt_stays_centred_without_a_catalog(tmp_path: Path, monkeypatch) -> None:
+    from sansdir.app import SansdirApp
+    from sansdir.commands.builtins import _prompt_text
+    from sansdir.ui.dialogs import TextPromptDialog
+
+    monkeypatch.setenv("SANSDIR_CONFIG", str(tmp_path / "absent.toml"))
+
+    async def _drive() -> None:
+        app = SansdirApp(start_path=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.visible_catalog_table() is None
+            task = asyncio.create_task(_prompt_text(app, "q?", default="x"))
+            await pilot.pause()
+            assert isinstance(app.screen, TextPromptDialog)
+            assert not app.screen.has_class("-beside")
+            await pilot.press("escape")
+            assert await task is None
+
+    _run(_drive())
+
+
+def test_show_dir_in_other_pane_replaces_the_catalog(tmp_path: Path, monkeypatch) -> None:
+    from sansdir.app import SansdirApp
+
+    monkeypatch.setenv("SANSDIR_CONFIG", str(tmp_path / "absent.toml"))
+    out = tmp_path / "output"
+    out.mkdir()
+
+    async def _drive() -> None:
+        app = SansdirApp(start_path=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.show_catalog_in_other_pane("IPTS-1", _catalog_runs(3), instrument="USANS")
+            await pilot.pause()
+            app.show_dir_in_other_pane(out)
+            await pilot.pause()
+            assert app.visible_catalog_table() is None
+            assert app.inactive_panel.cwd == out
+            assert app.loaded_catalog() is not None, "`c` can still bring it back"
+
+    _run(_drive())

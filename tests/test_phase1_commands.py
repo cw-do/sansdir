@@ -139,6 +139,7 @@ class FakeApp:
     catalog_instrument: str = ""
     catalog: tuple[str, list] = None  # type: ignore[assignment]
     active_slot_is_catalog: bool = False
+    other_pane_shows_catalog: bool = False
     registry: object = None
     revalidations: int = 0
 
@@ -224,6 +225,13 @@ class FakeApp:
     def is_other_pane_viewing(self) -> bool:
         return self._other_pane_viewing
 
+    def show_dir_in_other_pane(self, path: Path) -> None:
+        # Mirrors the real app: whatever covered the other pane (viewer or
+        # catalog) is swapped out for its file list.
+        self._other_pane_viewing = False
+        self.other_pane_shows_catalog = False
+        self.inactive_panel.set_cwd(Path(path))
+
     def revalidate_panes(self) -> None:
         self.revalidations += 1
         self.left.refresh_listing()
@@ -256,6 +264,8 @@ class FakeApp:
     ) -> None:
         self.catalog = (ipts, list(files))
         self.catalog_instrument = instrument
+        if self.active_id == "left":
+            self.other_pane_shows_catalog = True
 
 
 def bind_registry(app: FakeApp):  # type: ignore[no-untyped-def]

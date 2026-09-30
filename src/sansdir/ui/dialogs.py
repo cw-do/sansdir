@@ -109,6 +109,12 @@ class TextPromptDialog(ModalScreen[str | None]):
     ``help_text`` (optional) renders below the input as muted multi-line text.
     Useful for showing concrete examples — see :func:`_make_ui_zip_tagged` for
     the path-resolution examples shown in the zip flow.
+
+    ``beside`` (optional) is a widget in the *right* pane the user needs to
+    read while answering — typically the run catalog's table when the
+    question is "which run?". The dialog then sits in the left half with no
+    dimming, so the right pane stays fully legible, and ``Up``/``Down``/
+    ``PgUp``/``PgDn`` scroll that widget while the input keeps focus.
     """
 
     DEFAULT_CSS = """
@@ -134,10 +140,21 @@ class TextPromptDialog(ModalScreen[str | None]):
         color: $text-muted;
         margin-top: 1;
     }
+    TextPromptDialog.-beside {
+        align: left middle;
+        background: $background 0%;
+    }
+    TextPromptDialog.-beside > Vertical {
+        width: 50%;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "cancel", "Cancel", show=False),
+        Binding("up", "scroll_beside('cursor_up')", show=False),
+        Binding("down", "scroll_beside('cursor_down')", show=False),
+        Binding("pageup", "scroll_beside('page_up')", show=False),
+        Binding("pagedown", "scroll_beside('page_down')", show=False),
     ]
 
     def __init__(
@@ -147,12 +164,14 @@ class TextPromptDialog(ModalScreen[str | None]):
         default: str = "",
         title: str = "Prompt",
         help_text: str = "",
+        beside: Any = None,
     ) -> None:
-        super().__init__()
+        super().__init__(classes="-beside" if beside is not None else "")
         self._title = title
         self._message = message
         self._default = default
         self._help_text = help_text
+        self._beside = beside
 
     def compose(self) -> ComposeResult:
         from textual.widgets import Input
@@ -163,10 +182,10 @@ class TextPromptDialog(ModalScreen[str | None]):
             yield Input(value=self._default, id="prompt-input", select_on_focus=False)
             if self._help_text:
                 yield Static(self._help_text, classes="help")
-            yield Static(
-                "[dim]Enter to submit · Esc to cancel[/dim]",
-                classes="hint",
-            )
+            hint = "Enter to submit · Esc to cancel"
+            if self._beside is not None:
+                hint += " · ↑↓ PgUp PgDn scroll the right pane"
+            yield Static(f"[dim]{hint}[/dim]", classes="hint")
 
     def on_mount(self) -> None:
         from textual.widgets import Input
@@ -177,6 +196,12 @@ class TextPromptDialog(ModalScreen[str | None]):
 
     def on_input_submitted(self, event) -> None:  # type: ignore[no-untyped-def]
         self.dismiss(event.value)
+
+    def action_scroll_beside(self, action: str) -> None:
+        """Forward a cursor/page action to the widget beside the dialog."""
+        method = getattr(self._beside, f"action_{action}", None)
+        if method is not None:
+            method()
 
     def action_cancel(self) -> None:
         self.dismiss(None)

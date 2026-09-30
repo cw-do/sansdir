@@ -107,6 +107,8 @@ class AppProtocol(Protocol):
 
     def is_other_pane_viewing(self) -> bool: ...
 
+    def show_dir_in_other_pane(self, path: Path) -> None: ...
+
     def revalidate_panes(self) -> None:
         """Re-sync both panes with the filesystem after a destructive op."""
 

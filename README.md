@@ -100,7 +100,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 |-----------|-------------------------------------------------------------|
 | `F2`      | **Rename** the file under the cursor (in-place dialog)       |
 | `F3`      | View file in the *other* pane (Tab into it; `Esc` / `F3` close). `Enter` does the same for text files, but only ever opens |
-| `F4`      | Edit in `$EDITOR`                                            |
+| `F4`      | Edit in `$EDITOR` (default: `vim`, else `vi`) — see below     |
 | `F5`      | **Refresh** both panes — also repairs stale panes (see below) |
 | `F6`      | Copy tagged → other pane (with confirm)                      |
 | `F7`      | Move tagged → other pane                                     |
@@ -109,6 +109,14 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `c`       | Toggle catalog / list (other pane) — Phase 4                 |
 | `z`       | Zip tagged → prompt for archive name                         |
 | `e`       | Email tagged (`mail` / `mutt` shell-out)                     |
+
+**Editing with `F4`.** sansdir steps aside while the editor owns the
+terminal, so none of its keys work until you quit. In `vi`/`vim` a banner
+says so: the top line names the file and editor, the bottom line lists the
+commands you need — `i` type · `Esc` stop typing · `:w` save · `:wq` save &
+quit · `:q!` quit without saving · `u` undo. With `$EDITOR` unset, sansdir
+picks full `vim` over RHEL's minimal `vi`, which cannot draw the banner.
+Other editors (nano, emacs) are launched as-is; they show their own help.
 
 **Deleted out from under you.** If a pane is sitting *inside* a directory
 that gets deleted — from the other pane, a `:!rm`, or another user on a
@@ -293,8 +301,11 @@ r    → "No setup table selected. Build a preliminary reduction table
         for IPTS-37679?"        → fetches the run list, shows the catalog
                                   on the right pane, writes the CSV + NOTE,
                                   and opens the CSV for review
+     → asks for the first run of the experiment; the question sits in
+        the left pane so the catalog stays readable (↑↓ PgUp PgDn scroll it)
 F4   → correct anything the NOTE flagged
-r    → reduce (prompts for the output directory)
+r    → reduce (prompts for the output directory, then offers to show it
+        in the other pane — swapping out the catalog; `c` brings it back)
 p    → plot UN_*_det_1_lb.txt / _background_subtracted.txt
 ```
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import shlex
 import subprocess
 from pathlib import Path
 from typing import ClassVar
@@ -41,6 +40,7 @@ from sansdir.ui.keys import KeyBinding, default_keymap
 from sansdir.ui.pane_slot import PaneSlot
 from sansdir.ui.panel import FilePanel
 from sansdir.ui.pathbar import PathBar
+from sansdir.ui.run_catalog import CatalogTable
 from sansdir.ui.statusbar import StatusBar
 from sansdir.ui.titlebar import TitleBar
 
@@ -193,6 +193,15 @@ class SansdirApp(App[int]):
         if not right.has_catalog:
             return None
         return right.catalog.ipts, right.catalog.all_files
+
+    def visible_catalog_table(self) -> CatalogTable | None:
+        """The run catalog's table when it is on screen in the right pane, else ``None``.
+
+        Prompts that ask for a run number sit beside it rather than on top
+        of it (see :class:`~sansdir.ui.dialogs.TextPromptDialog`).
+        """
+        right = self._right_slot
+        return right.catalog.table if right.catalog_visible else None
 
     @property
     def active_panel(self) -> FilePanel:
@@ -363,12 +372,14 @@ class SansdirApp(App[int]):
         self.notify(message, severity=severity)  # type: ignore[arg-type]
 
     def edit_in_editor(self, path: Path) -> int:
-        """Suspend the TUI and exec ``$EDITOR`` (or ``vi``) on ``path``."""
-        import os as _os
+        """Suspend the TUI and run ``$EDITOR`` (default ``vim``/``vi``) on ``path``.
 
-        editor = _os.environ.get("EDITOR") or _os.environ.get("VISUAL") or "vi"
-        cmd = f"{editor} {shlex.quote(str(path))}"
-        return self.run_shell(cmd)
+        vi-family editors get an on-screen edit-mode banner and key cheat
+        sheet — see :mod:`sansdir.core.editor`.
+        """
+        from sansdir.core.editor import editor_command
+
+        return self.run_shell(editor_command(Path(path)))
 
     # ------------------------------------------------------------------
     # Inline file viewer (Norton-style preview in the *other* pane)
@@ -397,6 +408,21 @@ class SansdirApp(App[int]):
 
     def is_other_pane_viewing(self) -> bool:
         return self._inactive_slot.viewer_visible
+
+    def show_dir_in_other_pane(self, path: Path) -> None:
+        """Show ``path`` as a file listing in the inactive pane.
+
+        Whatever that slot was showing — an inline viewer, the run catalog,
+        a prompt — is swapped out for the file list first; otherwise the
+        cwd changes invisibly behind it. The catalog is only hidden, not
+        dropped, so ``c`` brings it back without another OnCat call.
+        """
+        slot = self._inactive_slot
+        if slot.mode != "list":
+            slot.show_panel()
+        self.inactive_panel.set_cwd(Path(path))
+        self.focus_active_surface()
+        self._refresh_status()
 
     async def pick_file_in_other_pane(
         self,

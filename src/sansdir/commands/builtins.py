@@ -1694,8 +1694,16 @@ async def _prompt_text(
         if not fut.done():
             fut.set_result(value)
 
+    # With the run catalog up on the right, the answer is usually a run
+    # number read off it — so ask from the left half and leave it visible.
     app.push_screen(
-        TextPromptDialog(message, default=default, title=title, help_text=help_text),
+        TextPromptDialog(
+            message,
+            default=default,
+            title=title,
+            help_text=help_text,
+            beside=app.visible_catalog_table(),
+        ),
         _cb,
     )
     return await fut
@@ -2107,12 +2115,10 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
             f"Reduced {len(result.produced)} curves into\n{resolved_out}\n\n"
             "Show that directory in the other pane?"
         ):
-            # The setup-table preview (from the generate step) may still be
-            # covering that pane — close it, or the cwd changes invisibly
-            # behind the viewer and the user keeps staring at the CSV.
-            if app.is_other_pane_viewing():
-                app.close_inline_viewer(str(app.inactive_panel.id))
-            app.inactive_panel.set_cwd(resolved_out)
+            # That pane is usually covered — by the run catalog, or by the
+            # setup-table preview from the generate step. Swap it back to
+            # the file list, or the cwd changes invisibly behind it.
+            app.show_dir_in_other_pane(resolved_out)
         return str(resolved_out)
 
     return Command(
