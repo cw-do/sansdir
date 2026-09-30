@@ -1,8 +1,8 @@
 """Group consecutive same-title USANS runs into reduction blocks.
 
 A USANS "sample" is a run of consecutive run numbers sharing one title
-(typically 5 to 7 runs). The block whose title contains ``empty`` or ``banjo``
-is the background (empty cell) subtracted from every sample; everything
+(typically 5 to 7 runs). The block whose title contains ``empty``, ``banjo``
+or ``blank`` is the background (empty cell) subtracted from every sample; everything
 else is a sample.
 
 Run titles often carry a trailing annotation after a space, e.g.
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 # Title substrings that mark a block as the empty-cell background.
-BACKGROUND_KEYWORDS: tuple[str, ...] = ("empty", "banjo")
+BACKGROUND_KEYWORDS: tuple[str, ...] = ("empty", "banjo", "blank")
 
 # Sample thickness written into the setup CSV when the user hasn't said
 # otherwise. Overridable via ``[usans].thickness_cm`` in the config.
@@ -62,6 +62,11 @@ class Group:
             oversized (restarted) block. ``None`` when no narrowing applied.
         restart_suspect: True when the block looks like a stop-and-restart
             under one title and therefore needs human review.
+        skipped: Run → reason, for every run of the block the reconciliation
+            left out (pause, off-wavelength, no ARN files). Empty until
+            reconciled.
+        run_warnings: Run → note, for runs that were *kept* but look odd
+            (e.g. a monitor far below the block median).
     """
 
     title: str
@@ -71,6 +76,8 @@ class Group:
     scan_runs: list[int] | None = None
     window: list[int] | None = None
     restart_suspect: bool = False
+    skipped: dict[int, str] = field(default_factory=dict)
+    run_warnings: dict[int, str] = field(default_factory=dict)
 
     # ---- raw (title-grouping) view --------------------------------------
 
@@ -131,12 +138,11 @@ class Group:
         return [r for r in range(rr[0], rr[-1] + 1) if r not in present]
 
     @property
-    def transmission_runs(self) -> list[int]:
-        """Runs in the title block that are *not* reducible ARN scans.
+    def excluded_runs(self) -> list[int]:
+        """Runs in the title block the reconciliation left out.
 
         Empty until the block has been reconciled against the data
-        directory. On USANS this is normally the single trailing
-        transmission run of each block.
+        directory. Why each one was left out is in :attr:`skipped`.
         """
         if self.scan_runs is None:
             return []
@@ -167,7 +173,7 @@ class Group:
 
     @property
     def is_background(self) -> bool:
-        """True when the title names an empty cell / empty banjo."""
+        """True when the title names an empty cell / empty banjo / blank."""
         lowered = self.title.lower()
         return any(k in lowered for k in BACKGROUND_KEYWORDS)
 
@@ -223,7 +229,7 @@ def apply_start_run(groups: list[Group], start_run: int | None) -> int:
 
 
 def default_background(groups: list[Group]) -> Group | None:
-    """Pick the background block: the last *included* empty/banjo block.
+    """Pick the background block: the last *included* empty/banjo/blank block.
 
     "Last" rather than "first" because a restarted empty-cell measurement
     supersedes the aborted one before it.

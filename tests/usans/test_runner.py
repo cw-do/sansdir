@@ -151,9 +151,24 @@ def test_reduce_csv_runs_in_place_when_the_csv_sits_in_the_data_dir(tmp_path: Pa
     engine = _stub_engine(tmp_path, f'test "$(pwd)" = "{data_dir.resolve()}" || exit 5\n')
 
     result = runner.reduce_csv(
+        csv, data_dir=data_dir, output_dir=tmp_path / "out", command=str(engine), to_json=False
+    )
+    assert result.ok
+
+
+def test_translating_never_writes_into_the_data_dir(tmp_path: Path) -> None:
+    """Even a CSV sitting in the data dir is staged: the JSON must not land in /SNS."""
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = data_dir / "setup.csv"
+    csv.write_text("b,E,100,4,0.1\ns,S,104,4,0.1\n", encoding="utf-8")
+    engine = _stub_engine(tmp_path, f'test "$(pwd)" != "{data_dir.resolve()}" || exit 5\n')
+
+    result = runner.reduce_csv(
         csv, data_dir=data_dir, output_dir=tmp_path / "out", command=str(engine)
     )
     assert result.ok
+    assert sorted(p.name for p in data_dir.iterdir()) == ["setup.csv"]
 
 
 def test_reduce_csv_reports_a_failing_engine(tmp_path: Path) -> None:
@@ -233,8 +248,9 @@ def test_reduce_smoke(tmp_path: Path) -> None:
     csv = tmp_path / "IPTS-37679_setup.csv"
     csv.write_text(
         "# USANS reduction table for IPTS-37679\n"
-        "b,emptyBanjo-restart,49434,4,0.1\n"
-        "s,S0-20C,49439,4,0.1\n",
+        "t,emptyBanjo-restart_T,49435,3,0.1\n"
+        "b,emptyBanjo-restart,49435,3,0.1\n"
+        "s,S0-20C,49440,3,0.1\n",
         encoding="utf-8",
     )
     out = tmp_path / "output"
@@ -242,8 +258,12 @@ def test_reduce_smoke(tmp_path: Path) -> None:
 
     assert result.ok, result.tail(20)
     names = {p.name for p in result.produced}
-    assert "UN_S0-20C_det_1_lb.txt" in names
+    # usansred 1.9.0 dropped log binning (-l is ignored): no _lb.txt any more.
     assert "UN_S0-20C_det_1_background_subtracted.txt" in names
+    # The 't' row reached the engine as empty_cell: T was computed and applied.
+    log = (out / "reduction_S0-20C.log").read_text(encoding="utf-8")
+    assert "Transmission coefficient for sample S0-20C:" in log
+    assert "Transmission coefficient for sample S0-20C: 1.0000" not in log
 
 
 # ---------------------------------------------------------------------------
@@ -340,3 +360,67 @@ def test_reduce_csv_can_skip_the_short_alias(tmp_path: Path) -> None:
         csv, data_dir=data_dir, output_dir=out, command=str(engine), short_name_copy=False
     )
     assert not (out / "UN_S0_det_1_bsub.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# CSV -> usansred JSON
+# ---------------------------------------------------------------------------
+
+_T_CSV = "# header\nt,E_T,100,4,0.2\nb,E,100,4,0.2\ns,S0,104,5,0.2,106\n"
+
+
+def test_the_engine_gets_json_with_the_t_row_as_empty_cell(tmp_path: Path) -> None:
+    import json
+
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = tmp_path / "setup.csv"
+    csv.write_text(_T_CSV, encoding="utf-8")
+    out = tmp_path / "out"
+    # The stub gets the config path last; save a copy so the test can read it.
+    engine = _stub_engine(tmp_path, 'for a; do last="$a"; done\ncp "$last" "$3/seen.json"\n')
+
+    result = runner.reduce_csv(csv, data_dir=data_dir, output_dir=out, command=str(engine))
+
+    assert result.ok, result.stderr
+    assert result.command[-1].endswith("setup.json")
+    seen = json.loads((out / "seen.json").read_text(encoding="utf-8"))
+    assert seen == {
+        "samples": [
+            {
+                "name": "S0",
+                "start_scan_num": 104,
+                "num_of_scans": 5,
+                "thickness": 0.2,
+                "exclude": [106],
+            }
+        ],
+        "background": {"name": "E", "start_scan_num": 100, "num_of_scans": 4, "thickness": 0.2},
+        "empty_cell": {"name": "E_T", "start_scan_num": 100, "num_of_scans": 4},
+    }
+    assert result.engine_config == out / "setup.usansred.json"
+    assert json.loads(result.engine_config.read_text(encoding="utf-8")) == seen
+
+
+def test_to_json_false_passes_the_csv_through(tmp_path: Path) -> None:
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = tmp_path / "setup.csv"
+    csv.write_text(_T_CSV, encoding="utf-8")
+    engine = _stub_engine(tmp_path, "exit 0\n")
+    result = runner.reduce_csv(
+        csv, data_dir=data_dir, output_dir=tmp_path / "o", command=str(engine), to_json=False
+    )
+    assert result.command[-1].endswith("setup.csv")
+    assert result.engine_config is None
+
+
+def test_an_invalid_table_is_refused_before_running(tmp_path: Path) -> None:
+    data_dir = tmp_path / "autoreduce"
+    data_dir.mkdir()
+    csv = tmp_path / "setup.csv"
+    csv.write_text("t,E_T,100,4,0.2\nb,E,101,3,0.2\ns,S0,104,4,0.2\n", encoding="utf-8")
+    out = tmp_path / "out"
+    with pytest.raises(ReduceError, match="cover different runs"):
+        runner.reduce_csv(csv, data_dir=data_dir, output_dir=out, command="/bin/true")
+    assert not out.exists()

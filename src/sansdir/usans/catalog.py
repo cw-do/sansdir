@@ -20,13 +20,20 @@ from datetime import date
 from pathlib import Path
 
 from sansdir.usans.grouping import (
+    DEFAULT_THICKNESS_CM,
     Group,
     RunLike,
     apply_start_run,
     default_background,
     group_runs,
 )
-from sansdir.usans.reconcile import flag_restarts, modal_scan_count, reconcile
+from sansdir.usans.reconcile import (
+    REASON_OFF_WAVELENGTH,
+    REASON_PAUSE,
+    flag_restarts,
+    modal_scan_count,
+    reconcile,
+)
 from sansdir.usans.table import ReductionTable
 
 # Where the pre-processed per-run ASCII files live, by convention.
@@ -96,7 +103,25 @@ class Catalog:
         empty = [g.name for g in self.groups if g.included and g.reduce_count == 0]
         if empty:
             out.append(f"no ARN scans on disk for: {', '.join(empty)} (left out of the CSV)")
+        # A block's trailing transmission run is routine; runs dropped for
+        # any other reason are worth a status-bar mention.
+        unusual = [
+            r
+            for g in self.groups
+            if g.included and g.reduce_count
+            for r, why in g.skipped.items()
+            if why.startswith((REASON_OFF_WAVELENGTH, REASON_PAUSE))
+        ]
+        if unusual:
+            out.append(
+                f"{len(unusual)} pause/off-wavelength runs left out of their blocks — "
+                "listed with reasons in the NOTE"
+            )
+        odd = [r for g in self.groups if g.included for r in g.run_warnings]
+        if odd:
+            out.append(f"suspicious runs kept: {', '.join(map(str, odd))} — see the NOTE")
         out.extend(self.table.validate())
+        out.extend(self.table.advisories())
         return out
 
 
@@ -108,6 +133,8 @@ def build_catalog(
     data_dir: str | Path | None = None,
     data_dir_template: str = DATA_DIR_TEMPLATE,
     thickness_cm: float | None = None,
+    skip_off_wavelength: bool = True,
+    transmission_row: bool = True,
 ) -> Catalog:
     """Build a preliminary reduction table from an already-fetched run list.
 
@@ -124,6 +151,11 @@ def build_catalog(
         data_dir_template: Override the ``/SNS/USANS/{ipts}/shared/autoreduce``
             convention (config: ``[usans].data_dir_template``).
         thickness_cm: Default sample thickness for every row.
+        skip_off_wavelength: Leave out runs recorded only at a non-primary
+            wavelength (the 1.2 Å first run of each block); see
+            :mod:`sansdir.usans.reconcile`. Always listed in the NOTE.
+        transmission_row: Write the empty cell as a ``t`` row as well as a
+            ``b`` row, so the engine divides by T before subtracting.
 
     Returns:
         A :class:`Catalog` holding the blocks, the table and the warnings.
@@ -140,13 +172,13 @@ def build_catalog(
     )
     reconciled = resolved.is_dir()
     if reconciled:
-        reconcile(groups, resolved)
+        reconcile(groups, resolved, skip_off_wavelength=skip_off_wavelength)
         restarts = flag_restarts(groups)
     else:
         restarts = []
 
     background = default_background(groups)
-    table = ReductionTable.from_groups(label, groups, background)
+    table = ReductionTable.from_groups(label, groups, background, transmission_row=transmission_row)
     return Catalog(
         ipts=label,
         groups=groups,
@@ -173,7 +205,7 @@ def render_note(
     """Render the human-readable companion to the setup CSV.
 
     Everything the generator guessed or dropped goes here: skipped
-    pre-start blocks, transmission runs, title annotations, restart
+    pre-start blocks, runs left out of each block (and why), title annotations, restart
     suspicions and odd block sizes — plus a legend for the reduced-output
     filenames, which are the engine's and are easy to misread.
 
@@ -203,8 +235,8 @@ def render_note(
         lines.append(f"- Data dir: `{cat.data_dir}` (reconciled against ARN-scan files)")
         if typical:
             lines.append(
-                f"- Each block = {typical} ARN rocking scans + 1 transmission run; "
-                "only the ARN scans are reduced."
+                f"- Typical block: {typical} usable rocking scans; runs left out "
+                "of each block are listed below with the reason."
             )
     else:
         lines.append(
@@ -217,18 +249,28 @@ def render_note(
             f"- Background (empty cell): **{bg.name}** runs "
             f"{bg.reduce_start}-{bg.reduce_runs[-1]} ({bg.reduce_count} scans)"
         )
+        if cat.table.transmissions:
+            lines.append(
+                f"  - written twice: `t,{cat.table.transmissions[0].name}` (empty cell: "
+                f"transmission reference, divides by T) and `b,{bg.name}` (subtracted) "
+                "→ I = S/T - B. At reduce time sansdir converts the CSV to usansred's JSON "
+                "(`t` → `empty_cell`, `b` → `background`) — the engine's CSV reader cannot "
+                "take an empty cell."
+            )
     else:
         lines.append(
-            "- Background: **none detected** — flip one row's flag to `b` "
-            "in the CSV before reducing."
+            "- Background: **none detected** — flag the empty cell `b` (and `t`, as a "
+            "second row over the same runs) in the CSV before reducing."
         )
     lines.append("")
+    lines.extend(_render_thickness_callout(cat))
     lines.append("Review this table, fix the CSV with `F4`, then reduce with `r`.")
     lines.append("")
 
     lines.extend(_render_table_section(cat))
     lines.extend(_render_restart_section(cat))
-    lines.extend(_render_transmission_section(cat))
+    lines.extend(_render_skipped_section(cat))
+    lines.extend(_render_run_warning_section(cat))
     lines.extend(_render_annotation_section(cat))
     lines.extend(_render_excluded_section(cat))
     lines.extend(_render_odd_size_section(cat, typical))
@@ -247,8 +289,10 @@ def _render_table_section(cat: Catalog) -> list[str]:
         span = f"{r.start_run}-{r.end_run}" if r.num_runs > 1 else f"{r.start_run}"
         excl = f" (excl {','.join(map(str, r.exclude))})" if r.exclude else ""
         notes = []
+        if r.is_transmission:
+            notes.append("transmission reference (t)")
         if r.is_background:
-            notes.append("background")
+            notes.append("background (b)")
         if r.restart_suspect:
             notes.append("⚠ possible restart")
         if r.annotation:
@@ -281,21 +325,60 @@ def _render_restart_section(cat: Catalog) -> list[str]:
     return lines
 
 
-def _render_transmission_section(cat: Catalog) -> list[str]:
-    trans = [
-        (g.name, g.transmission_runs) for g in cat.groups if g.included and g.transmission_runs
+def _render_thickness_callout(cat: Catalog) -> list[str]:
+    """Loud reminder that every thickness is a placeholder, not a measurement."""
+    values = sorted({r.thickness_cm for r in cat.table.rows})
+    if not values:
+        return []
+    shown = ", ".join(f"{v:g}" for v in values)
+    default = values == [DEFAULT_THICKNESS_CM]
+    return [
+        "> **⚠ THICKNESS — CONFIRM BEFORE REDUCING.** Every row uses "
+        f"**{shown} cm**, "
+        + ("sansdir's built-in default, " if default else "the `[usans].thickness_cm` setting, ")
+        + "not a measured value. The engine divides by it, so a wrong value "
+        "rescales the whole curve. Fix column 5 of the CSV with `F4`.",
+        "",
     ]
-    if not trans:
+
+
+def _render_skipped_section(cat: Catalog) -> list[str]:
+    """Every run left out of an included block, grouped by block, with the reason."""
+    blocks = [g for g in cat.groups if g.included and g.skipped]
+    if not blocks:
         return []
     lines = [
-        "## Transmission runs (excluded from reduction)",
+        "## Runs left out of each block, and why",
         "",
-        "Last run of each block — no ARN rocking scan, so the engine cannot "
-        "read it. Including it is what makes `reduceUSANS` fail with "
-        "`FileNotFoundError`.",
+        "The engine reads `num_of_scans` consecutive runs from `start_scan`, so a "
+        "run left out at the start or end of a block moves `start_scan` / "
+        "`num_of_scans`, and one in the middle goes in the `exclude` column.",
+        "",
+        "- **pause** — no ARN scan files and a near-zero monitor.",
+        "- **no ARN scan files** — typically the block's transmission run; "
+        "reading it makes `reduceUSANS` fail with `FileNotFoundError`.",
+        "- **off-wavelength** — recorded only at a non-primary wavelength "
+        "(`USANS_<run>_detector_1.2.txt`, no `_3.6`). It has ARN files but "
+        "essentially no usable counts. Why these runs exist is not yet known; set "
+        "`[usans].skip_off_wavelength = false` to keep them.",
         "",
     ]
-    lines.extend(f"- **{name}**: {', '.join(map(str, runs))}" for name, runs in trans)
+    for g in blocks:
+        lines.append(f"- **{g.name}** (`{g.title}`, runs {g.start_run}-{g.runs[-1]}):")
+        lines.extend(f"  - {run}: {reason}" for run, reason in sorted(g.skipped.items()))
+    lines.append("")
+    return lines
+
+
+def _render_run_warning_section(cat: Catalog) -> list[str]:
+    blocks = [g for g in cat.groups if g.included and g.run_warnings]
+    if not blocks:
+        return []
+    lines = ["## ⚠ Runs kept but worth a look", ""]
+    for g in blocks:
+        lines.extend(
+            f"- **{g.name}** {run}: {note}" for run, note in sorted(g.run_warnings.items())
+        )
     lines.append("")
     return lines
 
@@ -422,6 +505,22 @@ def _render_output_legend(
         ]
     lines += [
         "",
+        "Which corrections are in `_background_subtracted` depends on the flags:",
+        "",
+        "| rows in the CSV | T (transmission) | empty cell subtracted | result |",
+        "|-----------------|------------------|-----------------------|--------|",
+        "| `t` + `b` (same runs) | from the `t` row | `b` | S/T - B |",
+        "| `b` only | **1** (no correction) | `b` | S - B |",
+        "| `t` only | from the `t` row | `t` (the empty cell) | S/T - EC |",
+        "| neither | **1** | **nothing** | S |",
+        "",
+        "Without a `b` or `t` row nothing is subtracted, so `_background_subtracted` "
+        "is really the unsubtracted data. Check the engine log for "
+        "`Transmission coefficient for sample <name>`: exactly 1.0000 means no "
+        "empty cell was used. T is computed by usansred 1.9.0 as the sample's "
+        "(detector + transmission counts) / monitor over the empty cell's; the "
+        "translated config is kept beside the output as `<csv stem>.usansred.json`.",
+        "",
         f"The background sample itself (`{bg_name}`) gets **no** "
         "`_background_subtracted.txt` — nothing is subtracted from itself, so it "
         "has one file fewer than each sample. That is correct, not a failed run.",
@@ -471,7 +570,12 @@ def write_outputs(
     cat.table.to_csv(csv_path)
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text(
-        render_note(cat, today=today, logbin=logbin, short_name_copy=short_name_copy),
+        render_note(
+            cat,
+            today=today,
+            logbin=logbin,
+            short_name_copy=short_name_copy,
+        ),
         encoding="utf-8",
     )
     return csv_path, note_path

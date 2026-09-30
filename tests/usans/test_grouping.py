@@ -56,6 +56,8 @@ def test_background_detection_is_keyword_based() -> None:
     assert Group(title="emptyBanjo", runs=[1]).is_background
     assert Group(title="Empty Cell", runs=[1]).is_background
     assert Group(title="the BANJO", runs=[1]).is_background
+    assert Group(title="Blank", runs=[1]).is_background
+    assert Group(title="blank 2p", runs=[1]).is_background
     assert not Group(title="S0-20C", runs=[1]).is_background
 
 
@@ -73,6 +75,13 @@ def test_default_background_picks_the_last_included_empty_block() -> None:
     bg = default_background(groups)
     assert bg is not None
     assert bg.start_run == 104
+
+
+def test_default_background_picks_a_blank_block() -> None:
+    groups = group_runs(make_block(100, "S0", 2) + make_block(102, "Blank", 2))
+    bg = default_background(groups)
+    assert bg is not None and bg.name == "Blank"
+    assert bg.flag == "b"
 
 
 def test_default_background_ignores_excluded_blocks() -> None:
@@ -104,7 +113,7 @@ def test_unreconciled_group_reduces_the_whole_title_block() -> None:
     assert g.scan_runs is None
     assert g.reduce_runs == [100, 101, 102, 103, 104]
     assert g.reduce_count == 5
-    assert g.transmission_runs == []
+    assert g.excluded_runs == []
 
 
 def test_reduce_exclude_lists_mid_block_gaps() -> None:

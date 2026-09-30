@@ -96,9 +96,9 @@ async def test_init_table_writes_csv_and_note(
     note = app.left.cwd / "IPTS-1_NOTE.md"
     assert note.is_file()
     body = csv_path.read_text(encoding="utf-8")
-    assert "b,emptyBanjo,1003,4,0.1" in body
+    assert "t,emptyBanjo_T,1003,4,0.1\nb,emptyBanjo,1003,4,0.1" in body
     assert "alignment" not in body, "pre-start block must not reach the CSV"
-    assert "Transmission runs" in note.read_text(encoding="utf-8")
+    assert "Runs left out of each block" in note.read_text(encoding="utf-8")
 
 
 async def test_init_table_respects_out_dir(
@@ -330,6 +330,23 @@ async def test_reduce_leaves_the_catalog_up_when_the_user_declines(
     )
 
     assert app.other_pane_shows_catalog
+
+
+async def test_reduce_accepts_a_t_row(app: FakeApp, tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "autoreduce"
+    write_arn(data_dir, [*range(100, 108)])
+    _config(tmp_path, monkeypatch, reduce_command=str(_stub_engine(tmp_path)))
+    csv = app.left.cwd / "IPTS-1_setup.csv"
+    csv.write_text("t,E_T,100,4,0.2\nb,E,100,4,0.2\ns,S0,104,4,0.2\n", encoding="utf-8")
+    reg = build_default_registry(app=app)
+    out = tmp_path / "output"
+
+    result = await reg.dispatch(
+        "usans.reduce", path=str(csv), data_dir=str(data_dir), output_dir=str(out)
+    )
+    assert result == str(out)
+    assert (out / "IPTS-1_setup.usansred.json").is_file()
+    assert any("engine config: IPTS-1_setup.usansred.json" in n for n in app.notifications)
 
 
 async def test_reduce_uses_the_cursor_when_no_path_is_given(

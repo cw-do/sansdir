@@ -19,16 +19,27 @@ own folder — and the autoreduce folder is instrument data we must not write
 to — we build a throwaway staging directory of symlinks to the data files,
 drop a copy of the CSV in it, and run there. Nothing under ``/SNS`` is
 modified.
+
+**CSV in, JSON to the engine.** ``usansred`` 1.9.0's CSV reader knows only
+``b`` and files every other row as a sample, so a ``t`` (empty-cell) row
+would be reduced as a sample with T = 1. An empty cell — and with it the
+transmission correction — is only accepted from its JSON config. The setup
+CSV stays the file the user reviews; :func:`reduce_csv` translates it with
+:meth:`~sansdir.usans.table.ReductionTable.to_engine_config` into the staging
+directory and hands the engine that. A copy lands in the output directory
+(``<stem>.usansred.json``) as a record of exactly what was reduced.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # Root of the instrument-team pixi deployment. ``pixi run --manifest-path``
 # points here, and the console script lives under ``.pixi/envs/default/bin``.
@@ -46,6 +57,9 @@ _STAGE_PREFIX: str = "sansdir-usans-"
 
 # Reduced-output filenames the engine writes into the output directory.
 OUTPUT_GLOB: str = "UN_*_det_1*.txt"
+
+# Suffix of the translated engine config kept beside the reduced output.
+ENGINE_CONFIG_SUFFIX: str = ".usansred.json"
 
 # The engine (usansred) hard-codes verbose output suffixes. This maps the
 # long ones sansdir aliases to shorter, plot-friendly names. The originals
@@ -71,6 +85,8 @@ class ReduceResult:
         stdout: Captured standard output.
         stderr: Captured standard error.
         produced: Reduced ``UN_*_det_1*.txt`` files found afterwards.
+        engine_config: The JSON copy written beside the output when the CSV
+            was translated, else ``None``.
     """
 
     output_dir: Path
@@ -79,6 +95,7 @@ class ReduceResult:
     stdout: str = ""
     stderr: str = ""
     produced: tuple[Path, ...] = field(default_factory=tuple)
+    engine_config: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -285,6 +302,7 @@ def reduce_csv(
     pixi_manifest: str = DEFAULT_PIXI_MANIFEST,
     timeout: float | None = None,
     short_name_copy: bool = True,
+    to_json: bool = True,
 ) -> ReduceResult:
     """Reduce every sample in ``setup_csv`` with the installed engine.
 
@@ -304,13 +322,17 @@ def reduce_csv(
         short_name_copy: After a successful run, also write short-named
             aliases of the verbose engine output (see
             :func:`write_short_name_copies`). Non-destructive.
+        to_json: Translate a CSV into the engine's JSON config first (see
+            the module docstring). ``False`` hands the engine the CSV as-is,
+            which silently drops any ``t`` row's transmission correction.
 
     Returns:
         A :class:`ReduceResult`; check :attr:`ReduceResult.ok`.
 
     Raises:
         FileNotFoundError: When the CSV or the data directory is missing.
-        ReduceError: When the engine can't be located or timed out.
+        ReduceError: When the engine can't be located or timed out, or the
+            CSV can't be translated (unparseable, or fails validation).
     """
     setup_csv = Path(setup_csv).expanduser().resolve()
     data_dir = Path(data_dir).expanduser().resolve()
@@ -319,11 +341,24 @@ def reduce_csv(
         raise FileNotFoundError(f"setup CSV not found: {setup_csv}")
     if not data_dir.is_dir():
         raise FileNotFoundError(f"USANS data directory not found: {data_dir}")
+    config = _engine_config(setup_csv) if to_json else None
     output_dir.mkdir(parents=True, exist_ok=True)
 
     stage: str | None = None
+    kept_config: Path | None = None
     try:
-        if _same_dir(setup_csv.parent, data_dir):
+        if config is not None:
+            # Always staged: the JSON must not be written into the data dir.
+            stage = tempfile.mkdtemp(prefix=_STAGE_PREFIX)
+            staged_csv = stage_inputs(setup_csv, data_dir, Path(stage))
+            run_csv = staged_csv.with_name(setup_csv.stem + ".json")
+            if run_csv.is_symlink() or run_csv.exists():
+                run_csv.unlink()  # never write through a link into /SNS
+            run_csv.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            cwd = Path(stage)
+            kept_config = output_dir / (setup_csv.stem + ENGINE_CONFIG_SUFFIX)
+            shutil.copyfile(run_csv, kept_config)
+        elif _same_dir(setup_csv.parent, data_dir):
             # Already sitting next to the ASCII files — run in place, which
             # is exactly the command the instrument team documents.
             run_csv = setup_csv
@@ -369,4 +404,26 @@ def reduce_csv(
         stdout=proc.stdout or "",
         stderr=proc.stderr or "",
         produced=produced,
+        engine_config=kept_config,
     )
+
+
+def _engine_config(setup_file: Path) -> dict[str, Any] | None:
+    """The JSON config for ``setup_file``, or ``None`` when it is already JSON.
+
+    Raises:
+        ReduceError: When the CSV doesn't parse or fails validation — the
+            same checks ``r`` runs, repeated so the CLI path is covered.
+    """
+    from sansdir.usans.table import ReductionTable, TableError
+
+    if setup_file.suffix.lower() != ".csv":
+        return None
+    try:
+        table = ReductionTable.from_csv(setup_file)
+    except (TableError, OSError) as exc:
+        raise ReduceError(f"cannot read {setup_file.name}: {exc}") from exc
+    problems = table.validate()
+    if problems:
+        raise ReduceError(f"{setup_file.name} is not reducible: " + "; ".join(problems))
+    return table.to_engine_config()

@@ -1,20 +1,39 @@
 """The USANS reduction table — the reviewable, hand-editable setup CSV.
 
-CSV columns, consumed verbatim by ``reduceUSANS``::
+CSV columns::
 
     flag,name,start_scan,num_of_scans,thickness_cm[,exclude;scan;nums]
 
-* ``flag``          — ``b`` background (empty cell) / ``s`` sample
+* ``flag``          — ``t`` empty cell (transmission reference) / ``b``
+                      background (subtracted) / ``s`` sample
 * ``name``          — sample name; becomes the ``UN_<name>_det_1*.txt`` stem
 * ``start_scan``    — first run number of the block
-* ``num_of_scans``  — how many consecutive runs the engine should read
+* ``num_of_scans``  — how many consecutive runs, from ``start_scan``, the
+                      block spans — *including* any excluded ones
 * ``thickness_cm``  — sample thickness in cm
 * ``exclude``       — optional ``;``-separated run numbers to skip
 
-Rows starting with ``#`` are comments the engine ignores, so we use them
-for a human-readable header. The file is plain text on purpose: it is
-reviewed and corrected with sansdir's existing ``F4`` ($EDITOR) flow rather
-than a bespoke table widget.
+The CSV is what the user reviews; it is not what the engine reads. The
+installed ``usansred`` (1.9.0) takes an empty cell only from a **JSON**
+config, so at reduce time :meth:`ReductionTable.to_engine_config` maps the
+rows onto it: ``t`` → ``empty_cell``, ``b`` → ``background``, ``s`` →
+``samples`` (see :mod:`sansdir.usans.runner`).
+
+The empty cell is normally written **twice**, as a ``t`` row and a ``b``
+row over the same runs, because the two do different jobs: ``empty_cell``
+gives each sample its transmission T (the engine divides by it), and
+``background`` is subtracted afterwards — I = S/T - B. With only ``b`` the
+result is S - B (T = 1); with only ``t`` the engine subtracts the empty
+cell itself. IPTS-35306 was reduced wrongly both ways before this was
+understood.
+
+``num_of_scans`` counts the span *including* excluded runs because that is
+how ``usansred`` 1.9.0 reads it (``range(num_of_scans)``, skipping excludes).
+
+Rows starting with ``#`` are comments, so we use them for a human-readable
+header. The file is plain text on purpose: it is reviewed and corrected
+with sansdir's existing ``F4`` ($EDITOR) flow rather than a bespoke table
+widget.
 """
 
 from __future__ import annotations
@@ -22,11 +41,22 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from sansdir.usans.grouping import DEFAULT_THICKNESS_CM, Group
 
 # Number of leading cells a valid data row must have.
 MIN_CELLS: int = 4
+
+# Row flags, and what they mean to the engine.
+FLAG_TRANSMISSION: str = "t"
+FLAG_BACKGROUND: str = "b"
+FLAG_SAMPLE: str = "s"
+FLAGS: tuple[str, ...] = (FLAG_TRANSMISSION, FLAG_BACKGROUND, FLAG_SAMPLE)
+
+# Name suffix of the generated ``t`` row, so it never collides with the
+# ``b`` row's name (duplicate names overwrite each other's output).
+TRANSMISSION_SUFFIX: str = "_T"
 
 
 class TableError(ValueError):
@@ -38,10 +68,12 @@ class Row:
     """One line of the setup CSV.
 
     Attributes:
-        flag: ``"b"`` (background/empty cell) or ``"s"`` (sample).
+        flag: ``"t"`` (transmission reference), ``"b"`` (background,
+            subtracted) or ``"s"`` (sample).
         name: Sample name — becomes the reduced-output filename stem.
         start_run: First run number of the block.
-        num_runs: Consecutive runs the engine reads from ``start_run``.
+        num_runs: Consecutive runs the block spans from ``start_run``,
+            excluded runs included.
         thickness_cm: Sample thickness in centimetres.
         exclude: Run numbers inside the span the engine must skip.
         annotation: Free-text note from the run title. Never written to the
@@ -62,7 +94,22 @@ class Row:
     @property
     def is_background(self) -> bool:
         """True for the ``b``-flagged empty-cell row."""
-        return self.flag == "b"
+        return self.flag == FLAG_BACKGROUND
+
+    @property
+    def is_transmission(self) -> bool:
+        """True for the ``t``-flagged transmission-reference row."""
+        return self.flag == FLAG_TRANSMISSION
+
+    @property
+    def is_sample(self) -> bool:
+        """True for an ``s`` row."""
+        return self.flag == FLAG_SAMPLE
+
+    @property
+    def span(self) -> tuple[int, int, tuple[int, ...]]:
+        """``(start, num, exclude)`` — what the engine will actually read."""
+        return self.start_run, self.num_runs, tuple(sorted(self.exclude))
 
     @property
     def end_run(self) -> int:
@@ -89,7 +136,7 @@ def _row_from_group(g: Group, *, flag: str | None = None) -> Row:
         flag=flag if flag is not None else g.flag,
         name=g.name,
         start_run=g.reduce_start,
-        num_runs=g.reduce_count,
+        num_runs=g.reduce_span,
         thickness_cm=g.thickness_cm,
         exclude=g.reduce_exclude,
         annotation=g.annotation,
@@ -112,26 +159,35 @@ class ReductionTable:
         ipts: str,
         groups: list[Group],
         background: Group | None,
+        *,
+        transmission_row: bool = True,
     ) -> ReductionTable:
         """Build a table from reconciled blocks.
 
-        The background row is written first so a reader sees the empty cell
-        at the top. Blocks with zero reducible runs are skipped entirely —
-        the engine would raise ``FileNotFoundError`` on them — and they are
-        reported in the NOTE instead.
+        The empty cell is written first so a reader sees it at the top — as
+        a ``t`` row (``<name>_T``) and a ``b`` row over the same runs, see
+        the module docstring. Blocks with zero reducible runs are skipped
+        entirely — the engine would raise ``FileNotFoundError`` on them —
+        and they are reported in the NOTE instead.
 
         Args:
             ipts: Label such as ``"IPTS-37679"``, written into the header.
             groups: Blocks from :func:`~sansdir.usans.grouping.group_runs`.
             background: The chosen empty-cell block, or ``None``.
+            transmission_row: Also write the ``t`` row. ``False`` reproduces
+                the old ``b``-only table (no transmission correction).
         """
         rows: list[Row] = []
         if background is not None and background.reduce_count > 0:
-            rows.append(_row_from_group(background, flag="b"))
+            if transmission_row:
+                t_row = _row_from_group(background, flag=FLAG_TRANSMISSION)
+                t_row.name += TRANSMISSION_SUFFIX
+                rows.append(t_row)
+            rows.append(_row_from_group(background, flag=FLAG_BACKGROUND))
         for g in groups:
             if not g.included or g is background or g.reduce_count == 0:
                 continue
-            # An extra empty/banjo block that isn't the chosen background is
+            # An extra empty/banjo/blank block that isn't the chosen background is
             # still reduced, but as a sample — the engine treats the last
             # ``b`` row as THE background, and two of them is ambiguous.
             rows.append(_row_from_group(g, flag="s" if g.is_background else None))
@@ -163,8 +219,8 @@ class ReductionTable:
                         f"(flag,name,start_scan,num_of_scans), got {len(raw)}"
                     )
                 flag = raw[0].strip().lower()
-                if flag not in ("b", "s"):
-                    raise TableError(f"{path}:{lineno}: flag must be 'b' or 's', got {flag!r}")
+                if flag not in FLAGS:
+                    raise TableError(f"{path}:{lineno}: flag must be 't', 'b' or 's', got {flag!r}")
                 try:
                     start_run = int(raw[2])
                     num_runs = int(raw[3])
@@ -204,6 +260,11 @@ class ReductionTable:
         """Every ``b``-flagged row (should be exactly one)."""
         return [r for r in self.rows if r.is_background]
 
+    @property
+    def transmissions(self) -> list[Row]:
+        """Every ``t``-flagged row (zero or one)."""
+        return [r for r in self.rows if r.is_transmission]
+
     def validate(self) -> list[str]:
         """Return human-readable problems that would break the reduction.
 
@@ -218,6 +279,19 @@ class ReductionTable:
         elif n_bg > 1:
             names = ", ".join(r.name for r in self.backgrounds)
             problems.append(f"{n_bg} background rows ({names}) — exactly one 'b' row is allowed")
+        trans = self.transmissions
+        if len(trans) > 1:
+            names = ", ".join(r.name for r in trans)
+            problems.append(
+                f"{len(trans)} transmission rows ({names}) — at most one 't' row is allowed"
+            )
+        elif trans and n_bg == 1 and trans[0].span != self.backgrounds[0].span:
+            t, b = trans[0], self.backgrounds[0]
+            problems.append(
+                f"'t' row {t.name} ({t.start_run},{t.num_runs}) and 'b' row {b.name} "
+                f"({b.start_run},{b.num_runs}) cover different runs — both must be the "
+                "same empty-cell block"
+            )
         for r in self.rows:
             if r.num_runs <= 0:
                 problems.append(f"{r.name}: num_of_scans is {r.num_runs} — must be ≥ 1")
@@ -232,6 +306,47 @@ class ReductionTable:
         for name in sorted(duplicates):
             problems.append(f"duplicate sample name {name!r} — reduced outputs would overwrite")
         return problems
+
+    def advisories(self) -> list[str]:
+        """Things that don't stop the engine but make the result questionable.
+
+        Unlike :meth:`validate`, nothing here blocks a reduction.
+        """
+        notes: list[str] = []
+        trans = self.transmissions
+        if self.backgrounds and not trans:
+            notes.append(
+                "no 't' row — transmission correction is off (T = 1): the result is "
+                "S - B, not S/T - B"
+            )
+        return notes
+
+    def to_engine_config(self) -> dict[str, Any]:
+        """The ``usansred`` JSON config equivalent to this table.
+
+        ``t`` → ``empty_cell`` (no thickness: the engine fixes it at 1 cm
+        and rejects the key), ``b`` → ``background``, ``s`` → ``samples``.
+        Call :meth:`validate` first; this does not re-check the table.
+        """
+
+        def entry(r: Row, *, thickness: bool = True) -> dict[str, Any]:
+            out: dict[str, Any] = {
+                "name": r.name,
+                "start_scan_num": r.start_run,
+                "num_of_scans": r.num_runs,
+            }
+            if thickness:
+                out["thickness"] = r.thickness_cm
+            if r.exclude:
+                out["exclude"] = sorted(r.exclude)
+            return out
+
+        config: dict[str, Any] = {"samples": [entry(r) for r in self.rows if r.is_sample]}
+        if self.backgrounds:
+            config["background"] = entry(self.backgrounds[0])
+        if self.transmissions:
+            config["empty_cell"] = entry(self.transmissions[0], thickness=False)
+        return config
 
     # ---- editing ---------------------------------------------------------
 
@@ -249,8 +364,9 @@ class ReductionTable:
         if target is None:
             return False
         for r in self.rows:
-            r.flag = "s"
-        target.flag = "b"
+            if r.is_background:
+                r.flag = FLAG_SAMPLE
+        target.flag = FLAG_BACKGROUND
         return True
 
     # ---- output ----------------------------------------------------------
@@ -269,7 +385,15 @@ class ReductionTable:
             if header:
                 fh.write(f"# USANS reduction table for {self.ipts}\n")
                 fh.write("# columns: flag,name,start_scan,num_of_scans,thickness_cm[,exclude]\n")
-                fh.write("#   flag: b=background(empty)  s=sample\n")
+                fh.write(
+                    "#   flag: t=empty cell (transmission reference, divides by T)  "
+                    "b=background (subtracted)  s=sample\n"
+                )
+                fh.write("#   the empty cell is listed twice (t and b): result = S/T - B\n")
+                fh.write(
+                    "#   num_of_scans spans start_scan.. including excluded runs; "
+                    "sansdir converts this file to usansred JSON at reduce time\n"
+                )
             writer = csv.writer(fh, lineterminator="\n")
             for r in self.rows:
                 writer.writerow(r.to_cells())

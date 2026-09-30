@@ -58,7 +58,13 @@ def test_build_catalog_reconciles_when_the_data_dir_exists(
     assert cat.data_dir == data_dir_5x
     assert cat.background is not None
     assert cat.background.name == "emptyBanjo"
-    assert [r.num_runs for r in cat.table.rows] == [4, 4, 4, 4]
+    assert [(r.flag, r.num_runs) for r in cat.table.rows] == [
+        ("t", 4),
+        ("b", 4),
+        ("s", 4),
+        ("s", 4),
+        ("s", 4),
+    ]
     assert cat.warnings == []
 
 
@@ -113,7 +119,7 @@ def test_build_catalog_warns_about_restarts(tmp_path: Path) -> None:
 
 def test_summarize_is_a_one_liner(runs_5x: list[FakeRun], data_dir_5x: Path) -> None:
     cat = build_catalog("IPTS-1", runs_5x, start_run=1003, data_dir=data_dir_5x)
-    assert summarize(cat) == "4 rows · bg=emptyBanjo · reconciled"
+    assert summarize(cat) == "5 rows · bg=emptyBanjo · reconciled"
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +127,14 @@ def test_summarize_is_a_one_liner(runs_5x: list[FakeRun], data_dir_5x: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_note_records_the_transmission_runs(runs_5x: list[FakeRun], data_dir_5x: Path) -> None:
+def test_note_records_the_left_out_runs_with_a_reason(
+    runs_5x: list[FakeRun], data_dir_5x: Path
+) -> None:
     cat = build_catalog("IPTS-1", runs_5x, start_run=1003, data_dir=data_dir_5x)
     note = render_note(cat, today="2026-01-01")
-    assert "## Transmission runs (excluded from reduction)" in note
-    assert "**S0-20C**: 1012" in note
+    assert "## Runs left out of each block, and why" in note
+    assert "**S0-20C** (`S0-20C 1p`, runs 1008-1012):" in note
+    assert "  - 1012: no ARN scan files (transmission run?)" in note
 
 
 def test_note_records_excluded_and_annotated_blocks(
@@ -237,3 +246,60 @@ def test_note_legend_names_the_short_alias_when_enabled(
     assert "UN_<name>_det_1_bsub.txt" in with_alias
     assert "identical contents" in with_alias
     assert "_bsub.txt" not in without
+
+
+# ---------------------------------------------------------------------------
+# IPTS-35306: 1.2 Å first runs, pause runs, t + b empty cell
+# ---------------------------------------------------------------------------
+
+
+def test_ipts_35306_shape_reproduces_the_verified_table(
+    tmp_path: Path, runs_35306: list, data_dir_35306: Path
+) -> None:
+    from tests.usans.conftest import EXPECTED_35306
+
+    cat = build_catalog("IPTS-35306", runs_35306, data_dir=data_dir_35306, thickness_cm=0.2)
+    path = cat.table.to_csv(tmp_path / "setup.csv")
+    data = [ln for ln in path.read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
+    assert data == EXPECTED_35306
+    assert cat.restarts == [], "AO's 5 scans are an odd size, not a restart"
+
+
+def test_ipts_35306_note_lists_every_left_out_run_with_its_reason(
+    runs_35306: list, data_dir_35306: Path
+) -> None:
+    cat = build_catalog("IPTS-35306", runs_35306, data_dir=data_dir_35306)
+    note = render_note(cat, today="2026-09-30")
+    for run in (48219, 48226, 48234, 48241, 48249, 48256, 48263, 48270, 48277, 48284, 48291):
+        assert f"  - {run}: off-wavelength — recorded at 1.2 Å (no _3.6 files)" in note, run
+    assert "  - 48233: pause — no ARN scan files, monitor 10 counts" in note
+    assert "  - 48248: pause" in note
+    assert "Transmission runs" not in note
+    assert "`t,Blank_T`" in note
+    assert "Blocks with ≠ 6 scan runs" in note and "`AO Buffer` — 5 scans" in note
+    assert "THICKNESS — CONFIRM BEFORE REDUCING" in note
+    assert "sansdir's built-in default" in note
+
+
+def test_off_wavelength_runs_can_be_kept(runs_35306: list, data_dir_35306: Path) -> None:
+    cat = build_catalog(
+        "IPTS-35306", runs_35306, data_dir=data_dir_35306, skip_off_wavelength=False
+    )
+    one = cat.table.find("#1")
+    assert one is not None and (one.start_run, one.num_runs) == (48226, 7)
+    note = render_note(cat, today="2026-09-30")
+    assert "## ⚠ Runs kept but worth a look" in note
+    assert "48226: off-wavelength" in note
+
+
+def test_thickness_callout_names_a_configured_value(runs_5x: list, data_dir_5x: Path) -> None:
+    cat = build_catalog("IPTS-1", runs_5x, data_dir=data_dir_5x, thickness_cm=0.2)
+    note = render_note(cat, today="2026-01-01")
+    assert "**0.2 cm**" in note and "`[usans].thickness_cm` setting" in note
+
+
+def test_legend_explains_what_the_t_and_b_rows_do(runs_5x: list, data_dir_5x: Path) -> None:
+    note = render_note(build_catalog("IPTS-1", runs_5x, data_dir=data_dir_5x), today="x")
+    assert "| `b` only | **1** (no correction) | `b` | S - B |" in note
+    assert "| `t` only | from the `t` row | `t` (the empty cell) | S/T - EC |" in note
+    assert "`t` → `empty_cell`" in note

@@ -118,6 +118,7 @@ def test_usans_section_overrides(tmp_path: Path) -> None:
         logbin = false
         short_name_copy = false
         thickness_cm = 0.25
+        skip_off_wavelength = false
         reduce_command = "my-reduce"
         """,
         encoding="utf-8",
@@ -126,6 +127,7 @@ def test_usans_section_overrides(tmp_path: Path) -> None:
     assert cfg.usans.logbin is False
     assert cfg.usans.short_name_copy is False
     assert cfg.usans.thickness_cm == 0.25
+    assert cfg.usans.skip_off_wavelength is False
     assert cfg.usans.reduce_command == "my-reduce"
 
 

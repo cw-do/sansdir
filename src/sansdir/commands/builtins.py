@@ -769,8 +769,10 @@ def _make_oncat_login(app: AppProtocol) -> Command:
             link = getattr(challenge, "verification_uri_complete", None) or getattr(
                 challenge, "verification_uri", ""
             )
-            code = "" if getattr(challenge, "verification_uri_complete", None) else getattr(
-                challenge, "user_code", ""
+            code = (
+                ""
+                if getattr(challenge, "verification_uri_complete", None)
+                else getattr(challenge, "user_code", "")
             )
             # Called from the worker thread — hop back to the UI thread.
             app.call_from_thread(screen.show_challenge, str(link), str(code))
@@ -1852,6 +1854,7 @@ def _make_usans_init_table(app: AppProtocol) -> Command:
             data_dir=data_dir or None,
             data_dir_template=cfg.usans.data_dir_template,
             thickness_cm=cfg.usans.thickness_cm,
+            skip_off_wavelength=cfg.usans.skip_off_wavelength,
         )
         csv_path, note_path = output_paths(cat, target_dir)
         if csv_path.exists() and not await app.confirm(
@@ -2097,6 +2100,7 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
                 pixi_manifest=cfg.usans.pixi_manifest,
                 timeout=timeout,
                 short_name_copy=cfg.usans.short_name_copy,
+                to_json=cfg.usans.csv_to_json,
             )
         except (runner.ReduceError, FileNotFoundError, OSError) as exc:
             app.notify_user(f"reduceUSANS: {exc}", severity="error")
@@ -2110,7 +2114,8 @@ def _make_usans_reduce(app: AppProtocol) -> Command:
             )
             return None
 
-        app.notify_user(f"reduced {len(result.produced)} curves → {resolved_out}")
+        kept = f" (engine config: {result.engine_config.name})" if result.engine_config else ""
+        app.notify_user(f"reduced {len(result.produced)} curves → {resolved_out}{kept}")
         if await app.confirm(
             f"Reduced {len(result.produced)} curves into\n{resolved_out}\n\n"
             "Show that directory in the other pane?"

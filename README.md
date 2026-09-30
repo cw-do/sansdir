@@ -328,15 +328,39 @@ is reported for you to fix with `F4` — it is never silently regenerated
 over your edits.
 
 **The generated CSV is preliminary by design.** Generating groups the OnCat
-run list into same-title blocks, auto-detects the empty-cell background,
-and — critically — sets `num_of_scans` from the ARN-scan files actually on
-disk rather than the OnCat title count. A titled block of *N* runs is
-really *(N−1)* ARN rocking scans **plus one transmission run**; feeding the
-engine the full *N* makes it die on the transmission run's missing ASCII.
-*N* varies between experiments (5→4, 6→5, …), so it is derived, never
-assumed. Anything the generator had to guess — restarts, odd block sizes,
-blocks with no ARN files, dropped transmission runs — is written to
-`<IPTS>_NOTE.md` for you to check before pressing `r`.
+run list into same-title blocks, auto-detects the background (a title
+containing `empty`, `banjo` or `blank`, case-insensitive), and — critically —
+sets `start_scan` / `num_of_scans` from the files actually on disk rather than
+the OnCat title count. A titled block of *N* runs is not *N* usable scans, and
+which runs to drop differs between experiments:
+
+- **no ARN scan files** — the trailing transmission run (IPTS-37679), or a
+  *pause* run with a near-zero monitor in front of a block (IPTS-35306).
+  Feeding one to the engine makes it die with `FileNotFoundError`.
+- **off-wavelength** — the *first* run of every block in IPTS-35306 and
+  IPTS-37679 was recorded at 1.2 Å (`USANS_<run>_detector_1.2.txt`, no
+  `_3.6`): it has ARN files but no usable counts. Skipped by default; set
+  `[usans].skip_off_wavelength = false` to keep them.
+
+Every run left out is listed with its reason in `<IPTS>_NOTE.md`, along with
+anything else the generator had to guess — restarts, odd block sizes, blocks
+with no ARN files — for you to check before pressing `r`. The NOTE also
+carries a loud reminder that every thickness is a placeholder.
+
+**Transmission: the empty cell is written twice**, as a `t` row (empty
+cell — the transmission reference; the engine divides each sample by T) and a
+`b` row over the same runs (subtracted), giving I = S/T − B. `b` alone gives
+S − B (T = 1).
+
+**CSV in, JSON to the engine.** `usansred` 1.9.0 accepts an empty cell only
+from its JSON config (its CSV reader would reduce a `t` row as a sample). So
+at reduce time sansdir translates the reviewed CSV — `t` → `empty_cell`,
+`b` → `background`, `s` → `samples` — in its staging folder, runs the engine on
+that, and keeps a copy as `<csv stem>.usansred.json` in the output folder.
+Check the engine log for `Transmission coefficient for sample <name>`; 1.0000
+means no empty cell was used. `[usans].csv_to_json = false` passes the CSV
+through unchanged. `num_of_scans` counts the span from `start_scan`
+*including* `exclude`d runs, which is how `usansred` reads it.
 
 Every generated `NOTE.md` ends with a legend for the reduced-output
 filenames, because they are the engine's and are easy to misread — most of
@@ -383,10 +407,13 @@ and hand-editable:
 ```
 # USANS reduction table for IPTS-37679
 # columns: flag,name,start_scan,num_of_scans,thickness_cm[,exclude]
-#   flag: b=background(empty)  s=sample
-b,emptyBanjo-restart,49434,4,0.1
-s,S0-20C,49439,4,0.1
-s,S0-40C,49444,4,0.1,49446
+#   flag: t=empty cell (transmission reference, divides by T)  b=background (subtracted)  s=sample
+#   the empty cell is listed twice (t and b): result = S/T - B
+#   num_of_scans spans start_scan.. including excluded runs; sansdir converts this file to usansred JSON at reduce time
+t,emptyBanjo-restart_T,49435,3,0.1
+b,emptyBanjo-restart,49435,3,0.1
+s,S0-20C,49440,3,0.1
+s,S0-40C,49445,3,0.1,49446
 ```
 
 ### Desmearing (`d`)
@@ -719,10 +746,12 @@ workflow-polish pass driven by using it on real IPTS-37679 data
   it from the IPTS in the current path (fetching the run list and
   showing the catalog on the right pane). So the whole flow from an
   empty folder is `r`, `F4`, `r`.
-- **`num_of_scans` derived from disk, not guessed.** A titled block of
-  *N* runs is *(N−1)* ARN scans plus one transmission run, and *N*
-  varies per experiment. Feeding the engine the OnCat title count is
-  what makes `reduceUSANS` die with `FileNotFoundError`.
+- **`num_of_scans` derived from disk, not guessed.** Runs without ARN
+  files (transmission, pause) and 1.2 Å off-wavelength runs are left out,
+  each listed with its reason in the NOTE. Feeding the engine the OnCat
+  title count is what makes `reduceUSANS` die with `FileNotFoundError`.
+- **Empty cell as `t` + `b`** for I = S/T − B, translated to usansred's
+  JSON (`empty_cell` + `background`) at reduce time.
 - **The setup CSV is a first draft.** Restarts, odd block sizes and
   the background pick are all flagged in a companion `NOTE.md`, which
   also carries a legend for the reduced-output postfixes (`_lb.txt`

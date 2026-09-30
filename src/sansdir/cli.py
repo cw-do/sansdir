@@ -424,13 +424,18 @@ def usans_init(
         data_dir=data_dir,
         data_dir_template=cfg.usans.data_dir_template,
         thickness_cm=thickness if thickness is not None else cfg.usans.thickness_cm,
+        skip_off_wavelength=cfg.usans.skip_off_wavelength,
     )
     csv_path, note_path = output_paths(cat, out_dir)
     if output:
         csv_path = Path(output)
         note_path = csv_path.with_name(f"{label}_NOTE.md")
     write_outputs(
-        cat, csv_path, note_path, logbin=cfg.usans.logbin, short_name_copy=cfg.usans.short_name_copy
+        cat,
+        csv_path,
+        note_path,
+        logbin=cfg.usans.logbin,
+        short_name_copy=cfg.usans.short_name_copy,
     )
     click.echo(str(csv_path))
     click.echo(str(note_path))
@@ -508,6 +513,7 @@ def usans_reduce(
             pixi_manifest=cfg.usans.pixi_manifest,
             timeout=cfg.usans.reduce_timeout_seconds or None,
             short_name_copy=cfg.usans.short_name_copy,
+            to_json=cfg.usans.csv_to_json,
         )
     except (runner.ReduceError, FileNotFoundError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -517,6 +523,8 @@ def usans_reduce(
         raise click.ClickException(f"reduceUSANS exited {result.returncode}")
     for path in result.produced:
         click.echo(str(path))
+    if result.engine_config is not None:
+        click.echo(f"# engine config: {result.engine_config}", err=True)
 
 
 @usans.command("desmear")

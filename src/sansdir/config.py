@@ -150,6 +150,13 @@ class UsansConfig:
             ``_bsub.txt``). The original is kept, so the engine's own
             ``summary.xlsx`` and any downstream tooling are unaffected. Set
             to ``false`` to skip the extra file.
+        skip_off_wavelength: When building a setup CSV, leave out runs
+            recorded only at a non-primary wavelength (the 1.2 Å first run
+            of each block). They are listed in the NOTE either way.
+        csv_to_json: At reduce time, translate the setup CSV into
+            ``usansred``'s JSON config (``t`` → ``empty_cell``), the only way
+            to get the transmission correction applied. ``false`` hands the
+            engine the CSV unchanged.
     """
 
     pixi_manifest: str = "/usr/local/pixi/usansred"
@@ -160,6 +167,8 @@ class UsansConfig:
     reduce_timeout_seconds: float = 0.0
     short_name_copy: bool = True
     sigma_y: float = 0.13
+    skip_off_wavelength: bool = True
+    csv_to_json: bool = True
 
 
 @dataclass(frozen=True)
@@ -258,5 +267,9 @@ def load_config(path: Path | None = None) -> Config:
             ),
             short_name_copy=bool(usans_section.get("short_name_copy", UsansConfig.short_name_copy)),
             sigma_y=float(usans_section.get("sigma_y", UsansConfig.sigma_y)),
+            skip_off_wavelength=bool(
+                usans_section.get("skip_off_wavelength", UsansConfig.skip_off_wavelength)
+            ),
+            csv_to_json=bool(usans_section.get("csv_to_json", UsansConfig.csv_to_json)),
         ),
     )
