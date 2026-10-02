@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.11.1** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.11.2** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -46,7 +46,8 @@ If `sansdir` is not found on a particular node, the same command is always
 available at `/SNS/EQSANS/shared/bin/sansdir`.
 
 What you run is a **frozen stable release** with its own bundled Python —
-no pip, no conda env, no setup. It only changes when the maintainer tags a
+no pip, no conda env, no setup. The interpreter lives on the shared mount
+too, so it works on every analysis node whatever Python the node has. It only changes when the maintainer tags a
 new version, so a half-finished edit can never reach you; `sansdir version`
 prints the release you have.
 
@@ -665,6 +666,26 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.11.2
+
+- **Runs on every analysis node.** The stable install now carries its own
+  Python 3.11 on the shared mount instead of borrowing the node's
+  `/bin/python3.11`, which some nodes (e.g. analysis-node23, RHEL 9.8
+  with only Python 3.9) don't have. The launcher also runs Python
+  isolated (`-I`), so a user's `PYTHONPATH`, `~/.local` packages or a
+  stray module in the current directory can't shadow sansdir's own.
+- **Prompts beside the run catalog.** A text prompt asked while the
+  catalog is on the right (e.g. the USANS start-run question) sits in
+  the left half, undimmed, so the run numbers stay readable;
+  Up/Down/PgUp/PgDn scroll the catalog while the input keeps focus.
+  After a USANS reduce, "show the output?" swaps the catalog for the file
+  list in the right pane; `c` brings the catalog back.
+- **F4 announces edit mode.** vi-family editors get a banner naming the
+  file and a line with the essential vi commands.
+- **USANS empty cell as `t` + `b`** (I = S/T − B), translated to
+  usansred's JSON at reduce time; pause and 1.2 Å off-wavelength runs are
+  left out of the setup table, each with its reason in the NOTE.
 
 ## What's in v0.11.1
 

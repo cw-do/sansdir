@@ -81,3 +81,6 @@ TASKS.md
 docs/desmear_ref/
 docs/desmear.py
 docs/usans_gpr_inversion.pdf
+
+# Self-contained base interpreter for .venv (conda-forge Python 3.11)
+.python/

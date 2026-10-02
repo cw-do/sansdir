@@ -29,14 +29,24 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$SELF")" >/dev/null 2>&1 && pwd -P)"
 SANSDIR_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
 VENV_PY="$SANSDIR_ROOT/.venv/bin/python"
 
-if [[ ! -x "$VENV_PY" ]]; then
+if [[ ! -e "$VENV_PY" && ! -L "$VENV_PY" ]]; then
     echo "sansdir launcher: venv python not found at $VENV_PY" >&2
     echo "  (expected the bundled venv to live at $SANSDIR_ROOT/.venv)" >&2
     echo "  contact: doc1@ornl.gov" >&2
+    exit 1
+fi
+# The venv's python is a symlink to the base interpreter; a dangling one
+# means the venv was built on a Python this node doesn't have.
+if [[ ! -x "$VENV_PY" ]]; then
+    echo "sansdir launcher: the venv's base interpreter is missing on $(hostname -s)" >&2
+    echo "  $VENV_PY -> $(readlink -- "$VENV_PY")" >&2
+    echo "  rebuild the venv from $SANSDIR_ROOT/.python; contact: doc1@ornl.gov" >&2
     exit 1
 fi
 
 # Use the venv's installed entry point (so we get the same dependency
 # surface as `pip install -e .` produced). exec replaces this shell
 # process so signals (Ctrl+C, SIGTERM) reach the Python process directly.
-exec "$VENV_PY" -m sansdir "$@"
+# -I (isolated): ignore PYTHONPATH/PYTHONHOME, user site-packages and the
+# cwd, so nothing in the caller's environment can shadow our packages.
+exec "$VENV_PY" -I -m sansdir "$@"
