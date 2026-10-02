@@ -267,7 +267,7 @@ than by copying \texttt{eqsanscli}'s source code into it.
 
 \subsection{SCOPE OF THIS REPORT}
 
-This report describes version 0.11.1. Section~\ref{sec:install} covers
+This report describes version 0.11.2. Section~\ref{sec:install} covers
 installation and deployment. Section~\ref{sec:arch} describes the software
 architecture, with emphasis on the command registry. Sections~\ref{sec:ui}
 through~\ref{sec:mask} document the user-facing feature set. Section~\ref{sec:cli}
@@ -327,6 +327,16 @@ first on \texttt{PATH}. Second, a \emph{symbolic link is preferable to a copy}
 in practice: when the shared environment is rebuilt, every user holding a symlink
 picks up the new build automatically, whereas holders of copies do not.
 
+The base interpreter of that virtual environment also lives on the shared
+mount, in \texttt{<install>/.python/}, a self-contained conda-forge Python~3.11
+that links only against the C library. A virtual environment built on the
+node's own \texttt{/bin/python3.11} would run only on nodes whose
+administrators had installed that package; analysis nodes on RHEL~9 ship
+Python~3.9 by default, below the 3.10 minimum. The launcher further invokes
+the interpreter in isolated mode (\texttt{-I}), so the caller's
+\texttt{PYTHONPATH}, user site-packages and working directory cannot shadow
+the bundled packages.
+
 Table~\ref{tab:portable} summarizes which components must remain on the shared
 mount and which are freely relocatable.
 
@@ -339,7 +349,8 @@ mount and which are freely relocatable.
     \toprule
     Path & Status & Note \\
     \midrule
-    \texttt{.venv/} & Fixed & Bundled Python interpreter and dependencies. \\
+    \texttt{.venv/} & Fixed & Virtual environment: dependencies and the installed package. \\
+    \texttt{.python/} & Fixed & Self-contained base interpreter for \texttt{.venv}. \\
     \texttt{src/sansdir/} & Fixed & Source tree that the editable install
       points to. \\
     \texttt{.venv/bin/sansdir} & Portable & Python entry point; shebang is
@@ -464,7 +475,7 @@ implemented. A synchronous convenience wrapper exists for call sites that are no
 already inside an event loop; it raises rather than silently misbehaving if
 invoked from within one.
 
-Version 0.11.1 registers 61 commands. Appendix~\ref{sec:appcommands} lists them
+Version 0.11.2 registers 61 commands. Appendix~\ref{sec:appcommands} lists them
 in full.
 
 \subsection{DISPATCH PATHS}
@@ -1934,7 +1945,7 @@ it on production data.
 \section{COMMAND REGISTRY REFERENCE}
 \label{sec:appcommands}
 
-Table~\ref{tab:allcommands} lists every command registered in version 0.11.1.
+Table~\ref{tab:allcommands} lists every command registered in version 0.11.2.
 Any command may be invoked from the \key{:} line by name or alias.
 
 \begin{small}
