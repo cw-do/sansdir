@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.11.2** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.11.3** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -666,6 +666,14 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.11.3
+
+- **`i` opens the sign-in again after an OnCat session expires.** When
+  the OnCat sign-in lapsed, pressing `i` used to do nothing: sansdir
+  thought you were still signed in and waited on a browser sign-in it
+  couldn't show you. It now recognises the expired token and opens the
+  sign-in window, and `:oncat status` reports it correctly.
 
 ## What's in v0.11.2
 
