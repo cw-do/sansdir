@@ -445,6 +445,39 @@ async def test_not_signed_in_raises_auth_error(tmp_path: Path) -> None:
             await client.search_experiments("x")
 
 
+@pytest.mark.parametrize("payload", ["null", "", "{not json"])
+async def test_cleared_token_file_counts_as_not_signed_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    """pyoncat clears a dead refresh token by writing JSON ``null``; that file
+    must read as "not signed in", not trigger a hidden device flow (``i``
+    used to hang silently)."""
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(token))
+    token.write_text(payload, encoding="utf-8")
+    assert not oncat.is_signed_in(_config())
+    async with oncat.OnCatClient(_config()) as client:
+        with pytest.raises(oncat.OnCatAuthError, match="Not signed in"):
+            await client.search_experiments("x")
+
+
+def test_data_client_refuses_device_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-interactive clients get a verification handler that raises, so a
+    data call can never block a worker thread on an invisible sign-in."""
+    import pyoncat
+
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SANSDIR_ONCAT_TOKEN", str(token))
+    token.write_text('{"access_token": "x"}', encoding="utf-8")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(pyoncat, "ONCat", lambda *a, **kw: captured.update(kw))
+    oncat._make_client(_config(), interactive=False)
+    with pytest.raises(oncat.OnCatAuthError):
+        captured["verification_handler"](object())
+    oncat._make_client(_config(), interactive=True)
+    assert captured["verification_handler"] is not oncat._refuse_device_flow
+
+
 # ---------------------------------------------------------------------------
 # Caching: in-memory + on-disk
 # ---------------------------------------------------------------------------

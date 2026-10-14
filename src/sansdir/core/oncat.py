@@ -308,6 +308,29 @@ def token_path(config: OnCatConfig) -> Path:
     return default_config_path().parent / "oncat_token.json"
 
 
+def _has_token(config: OnCatConfig) -> bool:
+    """True if the token file holds a usable token, not merely exists.
+
+    When a refresh token dies, pyoncat clears the store by writing JSON
+    ``null`` — the file stays on disk. Treating that as "signed in" let a
+    data call start a fresh device flow in a worker thread, prompting on a
+    stderr hidden behind the TUI, so ``i`` silently hung.
+    """
+    try:
+        token = json.loads(token_path(config).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(token, dict)
+
+
+def _refuse_device_flow(_challenge: Any) -> None:
+    """Verification handler for data calls: never start a hidden sign-in."""
+    raise OnCatAuthError(
+        "OnCat session expired or not signed in. Sign in again "
+        "(:oncat login, or sansdir oncat login), then retry."
+    )
+
+
 def _token_store(config: OnCatConfig) -> pyoncat.FileSystemTokenStore:
     import pyoncat
 
@@ -361,7 +384,7 @@ def _make_client(config: OnCatConfig, *, interactive: bool) -> pyoncat.ONCat:
             timeout=config.request_timeout_seconds,
         )
 
-    if not interactive and not token_path(config).exists():
+    if not interactive and not _has_token(config):
         raise OnCatAuthError(
             "Not signed in to OnCat. Run the one-time sign-in "
             "(in the TUI: :oncat login; or the terminal: sansdir oncat login), "
@@ -376,7 +399,11 @@ def _make_client(config: OnCatConfig, *, interactive: bool) -> pyoncat.ONCat:
         token_getter=store.read_token,
         token_setter=store.write_token,
         flow=pyoncat.DEVICE_AUTHORIZATION_FLOW,
-        verification_handler=_verification_handler or _default_verification_handler,
+        verification_handler=(
+            (_verification_handler or _default_verification_handler)
+            if interactive
+            else _refuse_device_flow
+        ),
         reauth_on_expired=(pyoncat.REAUTH_PROMPT if interactive else pyoncat.REAUTH_NEVER),
         timeout=config.request_timeout_seconds,
     )
@@ -401,7 +428,7 @@ def login(config: OnCatConfig) -> dict[str, Any]:
     except Exception as exc:
         # If the token was obtained but the identity lookup failed, still
         # report success with the local username.
-        if token_path(config).exists():
+        if _has_token(config):
             return {"id": getpass.getuser()}
         raise _translate_auth_error(exc) from exc
     return me
@@ -410,7 +437,7 @@ def login(config: OnCatConfig) -> dict[str, Any]:
 def is_signed_in(config: OnCatConfig) -> bool:
     """True if a cached token exists or env credentials are configured. Does
     not hit the network (a stored token may still prove expired on use)."""
-    return _env_password_credentials() is not None or token_path(config).exists()
+    return _env_password_credentials() is not None or _has_token(config)
 
 
 def sign_out(config: OnCatConfig) -> bool:
