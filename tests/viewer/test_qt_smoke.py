@@ -18,7 +18,7 @@ pytest.importorskip("pyqtgraph")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from sansdir.viewer.cache import CubeCache
 from sansdir.viewer.cube import load_cube
@@ -171,3 +171,43 @@ def test_hovering_does_not_leak_true(
             qapp.processEvents()
     # 6.12.0 lost ~0.85 per hover; allow a little GC noise.
     assert sys.getrefcount(True) - before > -50
+
+
+def test_clear_cache_menu(
+    qapp: QApplication, raw_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = CubeCache(tmp_path / "cache", min_load_seconds=0.0)
+    win = MainWindow(cache=cache)
+    try:
+        assert win.clear_cache_action.isEnabled()
+        told: list[str] = []
+        monkeypatch.setattr(
+            QMessageBox, "information", lambda _parent, _title, text: told.append(text)
+        )
+        win.clear_cache()
+        assert told == ["The viewer cache is already empty."]
+
+        cache.put(load_cube(raw_file, nbins=16), 16)
+        asked: list[str] = []
+
+        def answer(reply: QMessageBox.StandardButton):  # type: ignore[no-untyped-def]
+            def question(_parent, _title, text):  # type: ignore[no-untyped-def]
+                asked.append(text)
+                return reply
+
+            return question
+
+        monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.No))
+        win.clear_cache()
+        assert "1 run," in asked[-1] and cache.summary()[0] == 1  # declined: kept
+
+        monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Yes))
+        win.clear_cache()
+        assert cache.summary() == (0, 0)
+        assert win.info.text().startswith("cache cleared: 1 run, ")
+    finally:
+        win.close()
+
+
+def test_clear_cache_disabled_without_cache(qapp: QApplication, window: MainWindow) -> None:
+    assert not window.clear_cache_action.isEnabled()

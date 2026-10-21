@@ -24,11 +24,23 @@ def main(argv: list[str] | None = None) -> int:
         help="neither read nor write ~/.cache/sansdir/viewer",
     )
     parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="delete everything in ~/.cache/sansdir/viewer and exit",
+    )
+    parser.add_argument(
         "--benchmark",
         action="store_true",
         help="print load milestones to stderr and exit once the full run is on screen",
     )
     args = parser.parse_args(argv)
+    if args.clear_cache:  # no Qt needed
+        from sansdir.viewer.cache import CubeCache, describe
+
+        cache = CubeCache.default()
+        runs, size = cache.clear()
+        print(f"removed {describe(runs, size)} from {cache.directory}")
+        return 0
     try:
         from sansdir.viewer.qt.main_window import run
     except ImportError as exc:

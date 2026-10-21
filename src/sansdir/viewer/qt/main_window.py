@@ -23,9 +23,10 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMessageBox,
 )
 
-from sansdir.viewer.cache import CubeCache
+from sansdir.viewer.cache import CubeCache, describe
 from sansdir.viewer.colorscale import auto_limits, display_levels, display_values
 from sansdir.viewer.cube import DEFAULT_NBINS, TofCube
 from sansdir.viewer.geometry import PixelInfo
@@ -76,7 +77,16 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._ask_open)
         quit_action = QAction("&Quit", self, shortcut=QKeySequence(QKeySequence.StandardKey.Quit))
         quit_action.triggered.connect(self.close)
-        file_menu.addActions([open_action, quit_action])
+        self.clear_cache_action = QAction("Clear viewer &cache…", self)
+        self.clear_cache_action.triggered.connect(self.clear_cache)
+        if self.cache is None:
+            self.clear_cache_action.setEnabled(False)
+            self.clear_cache_action.setToolTip("started with --no-cache")
+        file_menu.addAction(open_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.clear_cache_action)
+        file_menu.addSeparator()
+        file_menu.addAction(quit_action)
 
         view_menu = self.menuBar().addMenu("&View")
         self.log_action = QAction("&Log scale", self, shortcut=QKeySequence("L"), checkable=True)
@@ -111,6 +121,27 @@ class MainWindow(QMainWindow):
         self._title = f"{path.name} — EQSANS detector viewer"
         self._update_title()
         loader.start()
+
+    def clear_cache(self) -> None:
+        """File → Clear viewer cache…: show the size, confirm, delete."""
+        if self.cache is None:
+            return
+        runs, size = self.cache.summary()
+        if size == 0:
+            QMessageBox.information(self, "Viewer cache", "The viewer cache is already empty.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Clear viewer cache",
+            f"Delete the cached histograms ({describe(runs, size)}) in\n"
+            f"{self.cache.directory}?\n\n"
+            "Big runs will take their full load time again the next time they are "
+            "opened. The run on screen is not affected.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        runs, size = self.cache.clear()
+        self.info.setText(f"cache cleared: {describe(runs, size)}")
 
     def cancel_load(self) -> None:
         """Stop the current load (Cancel button / Esc); a preview stays up."""

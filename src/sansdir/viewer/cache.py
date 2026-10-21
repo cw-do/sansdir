@@ -203,9 +203,42 @@ class CubeCache:
                 self._remove(stem)
                 total -= size
 
+    def summary(self) -> tuple[int, int]:
+        """``(cached runs, bytes on disk)``; partial entries count toward bytes only."""
+        entries = self.entries()
+        runs = sum(1 for _, _, stem in entries if (self.directory / f"{stem}.json").exists())
+        return runs, sum(size for _, size, _ in entries)
+
+    def clear(self) -> tuple[int, int]:
+        """Delete every cache file; returns what :meth:`summary` reported.
+
+        Only the cache's own ``.npy`` / ``.json`` / ``.tmp`` files are
+        removed, never the directory or anything else in it. A viewer
+        saving at this moment just reports "not cached".
+        """
+        runs, size = self.summary()
+        if self.directory.is_dir():
+            for p in self.directory.iterdir():
+                if p.suffix in (".npy", ".json", ".tmp"):
+                    p.unlink(missing_ok=True)
+        return runs, size
+
     def _remove(self, stem: str) -> None:
         for suffix in (".json", ".npy"):  # json first: the entry stops counting
             (self.directory / f"{stem}{suffix}").unlink(missing_ok=True)
 
 
-__all__ = ["CubeCache", "default_cache_dir"]
+def format_bytes(n: int) -> str:
+    """``1181116006`` → ``1.1 GB``."""
+    for scale, unit in ((1024**3, "GB"), (1024**2, "MB"), (1024, "kB")):
+        if n >= scale:
+            return f"{n / scale:.1f} {unit}"
+    return f"{n} B"
+
+
+def describe(runs: int, size: int) -> str:
+    """``12 runs, 1.1 GB`` — shared by the menu and the CLI."""
+    return f"{runs} run{'' if runs == 1 else 's'}, {format_bytes(size)}"
+
+
+__all__ = ["CubeCache", "default_cache_dir", "describe", "format_bytes"]

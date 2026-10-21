@@ -6,8 +6,10 @@ the same process may already have imported PySide6.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 TUI_AND_PURE_MODULES = [
     "sansdir.app",
@@ -30,3 +32,19 @@ def test_tui_and_pure_viewer_modules_import_no_qt() -> None:
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == ""
+
+
+def test_clear_cache_cli_imports_no_qt(tmp_path: Path) -> None:
+    code = (
+        "import sys\n"
+        "from sansdir.viewer.__main__ import main\n"
+        "assert main(['--clear-cache']) == 0\n"
+        "bad = sorted(m for m in sys.modules if m.split('.')[0] in ('PySide6', 'pyqtgraph'))\n"
+        "print('QT:' + ','.join(bad))\n"
+    )
+    env = {**os.environ, "SANSDIR_CACHE_DIR": str(tmp_path)}
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True, env=env
+    )
+    assert out.stdout.strip().endswith("QT:")
+    assert "removed 0 runs, 0 B" in out.stdout
