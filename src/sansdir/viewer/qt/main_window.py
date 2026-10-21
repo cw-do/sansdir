@@ -60,6 +60,7 @@ from sansdir.viewer.qt.mask_editor import MaskEditor
 from sansdir.viewer.qt.progress import LoadProgress, format_count
 from sansdir.viewer.qt.scale_panel import ScalePanel
 from sansdir.viewer.qt.tof_panel import TofPanel
+from sansdir.viewer.runs import neighbour, worth_preloading
 from sansdir.viewer.settings import default_path, load_scale, save_scale
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
@@ -82,6 +83,8 @@ MASK_SAVE_FILTERS = {
     "Mantid mask XML (*.xml)": ".xml",
     "NumPy array (*.npy)": ".npy",
 }
+PRELOAD_DELAY_MS = 300  # after a run is on screen, start loading its neighbour
+PRELOAD_KEEP = 3  # cubes kept for PgUp / PgDn (each up to ~100 MB)
 SETTINGS_SAVE_DELAY_MS = 1500  # write preferences once changes settle, never per drag event
 # Qt's own file dialog, not the desktop's: the native one on the cluster is GTK's
 # chooser, which goes through gvfs / D-Bus and can stall on a node; Qt's needs
@@ -120,7 +123,15 @@ class MainWindow(QMainWindow):
         self.nbins = nbins
         self.cache = cache
         self.settings = settings  # viewer.json; None: nothing remembered (tests)
-        self.mask_output = mask_output  # default "Save mask" path
+        # Save mask defaults: per run, else <run stem>_mask.nxs in mask_dir (the
+        # folder K / V passed with --output, i.e. the TUI's other pane).
+        self.mask_dir = mask_output.parent if mask_output is not None else None
+        self.mask_targets: dict[Path, Path] = {}
+        # PgUp / PgDn: neighbours loaded in the background, and runs stepped away
+        # from, so stepping back is instant. Small: each cube is up to ~100 MB.
+        self._preloaded: dict[Path, TofCube] = {}
+        self._preloader: CubeLoader | None = None
+        self._step_direction = 1
         self.ask_to_save = ask_to_save  # closing with unsaved mask edits asks first
         self.saved_any = False
         self._mask: np.ndarray | None = None  # None when nothing is masked
@@ -212,7 +223,13 @@ class MainWindow(QMainWindow):
         self.save_mask_action = QAction("&Save mask…", self)
         self.save_mask_action.setShortcuts([QKeySequence("Ctrl+S"), QKeySequence("S")])
         self.save_mask_action.triggered.connect(self.save_mask)
+        self.prev_run_action = QAction("&Previous run", self, shortcut=QKeySequence("PgUp"))
+        self.prev_run_action.triggered.connect(lambda: self.step_run(-1))
+        self.next_run_action = QAction("&Next run", self, shortcut=QKeySequence("PgDown"))
+        self.next_run_action.triggered.connect(lambda: self.step_run(1))
         file_menu.addAction(open_action)
+        file_menu.addAction(self.prev_run_action)
+        file_menu.addAction(self.next_run_action)
         file_menu.addSeparator()
         file_menu.addAction(self.load_mask_action)
         file_menu.addAction(self.save_mask_action)
@@ -431,6 +448,7 @@ class MainWindow(QMainWindow):
             self._loader = None
             self.loading.finish()
             self._update_title()
+            QTimer.singleShot(PRELOAD_DELAY_MS, self._preload_neighbour)
 
     def _update_title(self) -> None:
         percent = self.loading.percent
@@ -438,19 +456,91 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(prefix + self._title)
 
     def _set_cube(self, cube: TofCube) -> None:
-        new_file = self.cube is None or self.cube.path != cube.path
+        previous = self.cube
         self.cube = cube
-        # A preview → full load of the same run keeps the TOF selection.
+        # Keep the TOF window for a preview → full load of the same run, and when
+        # stepping to a run on the same TOF grid (PgUp / PgDn compare runs).
+        keep = previous is not None and (
+            previous.path == cube.path
+            or (
+                previous.tof_edges is not None
+                and cube.tof_edges is not None
+                and np.array_equal(previous.tof_edges, cube.tof_edges)
+            )
+        )
         spectrum = cube.spectrum() if cube.has_tof else None
-        self.tof_panel.set_cube(cube.tof_edges, spectrum, keep=not new_file)
+        self.tof_panel.set_cube(cube.tof_edges, spectrum, keep=keep)
         self._image = cube.image(*self.tof_panel.selection) if cube.has_tof else cube.image()
         label = f"run {cube.run_number}" if cube.run_number else cube.path.name
         title = f" — {cube.title}" if cube.title else ""
         self._title = f"{label}{title} — EQSANS detector viewer"
         self._update_title()
         self._refresh()
-        if new_file:
+        if previous is None:  # later runs keep the zoom
             self.view.fit()
+
+    # -- previous / next run --------------------------------------------------
+
+    def step_run(self, step: int) -> bool:
+        """PgUp / PgDn: open the run before / after this one in the same folder."""
+        if self.cube is None:
+            self._say("open a run first")
+            return False
+        target = neighbour(self.cube.path, step)
+        if target is None:
+            self._say(f"no {'later' if step > 0 else 'earlier'} run next to {self.cube.path.name}")
+            return False
+        self._step_direction = 1 if step > 0 else -1
+        if self._preloader is not None and self._preloader.path == target:
+            self._preloader.stop()  # about to load it in the foreground anyway
+        if self._loader is None and not self.cube.is_preview:
+            self._remember(self.cube)  # stepping back is instant
+        cube = self._preloaded.pop(target, None)
+        if cube is None:
+            self.open_path(target)
+            return True
+        if self._loader is not None:
+            self._loader.stop()
+            self._loader = None
+            self.loading.finish()
+        self._set_cube(cube)
+        self.info.setText(
+            f"{format_count(cube.n_events)} events · {cube.nbins} TOF bins · preloaded"
+        )
+        QTimer.singleShot(PRELOAD_DELAY_MS, self._preload_neighbour)
+        return True
+
+    def _remember(self, cube: TofCube) -> None:
+        self._preloaded.pop(cube.path, None)
+        self._preloaded[cube.path] = cube
+        while len(self._preloaded) > PRELOAD_KEEP:
+            del self._preloaded[next(iter(self._preloaded))]  # oldest first
+
+    def _preload_neighbour(self) -> None:
+        """Load the next run in the stepping direction in the background, if cheap."""
+        if self.cube is None or self._loader is not None or self._preloader is not None:
+            return
+        target = neighbour(self.cube.path, self._step_direction)
+        if target is None or target in self._preloaded:
+            return
+        if not worth_preloading(target, self.cache, self.nbins):
+            return
+        loader = CubeLoader(target, self.nbins, self.cache)
+        loader.loaded.connect(self._on_preloaded)
+        loader.finished.connect(self._on_preload_finished)
+        self._retired.add(loader)  # closing waits for it, like any load
+        self._preloader = loader
+        loader.start()
+
+    def _on_preloaded(self, cube: TofCube) -> None:
+        if self.sender() is self._preloader and not cube.is_preview:
+            self._remember(cube)
+
+    def _on_preload_finished(self) -> None:
+        loader = self.sender()
+        self._retired.discard(loader)
+        if loader is self._preloader:
+            self._preloader = None
 
     # -- display -----------------------------------------------------------
 
@@ -652,7 +742,9 @@ class MainWindow(QMainWindow):
         if self._saver is not None:
             self._say("a save is already running")
             return False
-        default = self.mask_output or default_output(self.cube.path)
+        default = self.mask_targets.get(self.cube.path) or default_output(
+            self.cube.path, self.mask_dir
+        )
         name, chosen = QFileDialog.getSaveFileName(
             self, "Save mask", str(default), ";;".join(MASK_SAVE_FILTERS), options=DIALOG_OPTIONS
         )
@@ -682,7 +774,9 @@ class MainWindow(QMainWindow):
     def _on_saved(self, result: SavedMask) -> None:
         self.editor.state.mark_saved()
         self.saved_any = True
-        self.mask_output = result.path
+        if self.cube is not None:
+            self.mask_targets[self.cube.path] = result.path
+        self.mask_dir = result.path.parent
         self._say(f"mask saved: {result.path} ({result.n_masked:,} px) + {result.log_path.name}")
         self._update_mask_label()
 
@@ -926,6 +1020,8 @@ def run(
         mask_output=output,
         ask_to_save=not benchmark,
     )
+    if path is not None and output is not None:
+        win.mask_targets[path] = output  # exactly what --output asked for, for this run
     win.show()
     win.set_tool(tool)
     if mask is not None:

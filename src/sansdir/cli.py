@@ -36,6 +36,7 @@ Examples:
   sansdir                                # launch the TUI in cwd
   sansdir /SNS/EQSANS/IPTS-12345/shared  # launch the TUI in a folder
   sansdir extract -k /entry/duration *.nxs.h5
+  sansdir view EQSANS_176669.nxs.h5     # detector viewer / mask editor
   sansdir version
 
 Config: ~/.config/sansdir/config.toml (sections: [ui], [keys], [oncat], [mail]).
@@ -175,6 +176,26 @@ def extract(
             click.echo(str(p))
     else:
         click.echo(str(written))
+
+
+@main.command(
+    context_settings={"ignore_unknown_options": True, "help_option_names": []},
+    add_help_option=False,
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def view(args: tuple[str, ...]) -> None:
+    """Fast detector viewer / mask editor (Qt) on a NeXus file.
+
+    \b
+    sansdir view FILE [--mask M] [--output OUT] [--tool rect] [--nbins N]
+    sansdir view --help    # all options (same as python -m sansdir.viewer)
+    """
+    import os
+    import sys
+
+    # Replace this process: exit codes (3 = a mask was saved) pass straight
+    # through, and -I keeps the user's environment from shadowing the venv.
+    os.execv(sys.executable, [sys.executable, "-I", "-m", "sansdir.viewer", *args])
 
 
 _MASK_EPILOG = """\

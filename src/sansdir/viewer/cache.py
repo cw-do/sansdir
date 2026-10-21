@@ -73,6 +73,11 @@ class CubeCache:
 
     # -- read ----------------------------------------------------------------
 
+    def has(self, source: Path, nbins: int) -> bool:
+        """Whether ``source`` (as it is on disk now) has an entry — reads no data."""
+        stem = self._stem(source, nbins)
+        return stem is not None and (self.directory / f"{stem}.json").exists()
+
     def get(self, source: Path, nbins: int) -> TofCube | None:
         """The cached cube for ``source`` as it is on disk now, or ``None``."""
         t0 = time.perf_counter()

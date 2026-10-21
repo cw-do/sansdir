@@ -158,3 +158,9 @@ def test_cli_clear_cache(
     out = capsys.readouterr().out
     assert out.startswith("removed 1 run, ") and str(default_cache_dir()) in out
     assert CubeCache.default().summary() == (0, 0)
+
+
+def test_has_answers_without_reading(cache: CubeCache, raw_file: Path) -> None:
+    assert not cache.has(raw_file, 16)
+    cache.put(load_cube(raw_file, nbins=16), 16)
+    assert cache.has(raw_file, 16) and not cache.has(raw_file, 32)

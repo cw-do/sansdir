@@ -313,7 +313,8 @@ def test_save_adds_the_suffix_and_marks_saved(
     np.testing.assert_array_equal(read_mask_file(out), _mask(window))
     assert (tmp_path / "beamstop.mask_log.json").exists()
     assert window.saved_any and "unsaved" not in window.mask_label.text()
-    assert window.mask_output == out and "mask saved" in window.info.text()
+    assert window.cube is not None and window.mask_targets[window.cube.path] == out
+    assert "mask saved" in window.info.text()
 
 
 def test_save_needs_a_run(qapp: QApplication) -> None:
@@ -469,3 +470,82 @@ def test_escape_cancels_a_stack_export(window: MainWindow, tmp_path: Path) -> No
     assert window.info.text() == "stack export cancelled"
     assert window.cube is not None
     assert len(list((tmp_path / "frames").glob("*.png"))) < window.cube.nbins
+
+
+# -- PgUp / PgDn (Phase 9.10.5) ------------------------------------------------------
+
+
+def _wait_until(condition, timeout_ms: int = 20_000) -> None:  # type: ignore[no-untyped-def]
+    """Run the event loop until ``condition()`` holds (loads and preloads are threads)."""
+    app = QApplication.instance()
+    assert app is not None
+    deadline = QTimer()
+    deadline.setSingleShot(True)
+    deadline.start(timeout_ms)
+    while deadline.isActive() and not condition():
+        app.processEvents()
+    assert condition(), "timed out waiting"
+
+
+def _showing(win: MainWindow, name: str) -> bool:
+    return win.cube is not None and win.cube.path.name == name and win._loader is None
+
+
+@pytest.fixture
+def runs_folder(tmp_path: Path) -> Path:
+    folder = tmp_path / "nexus"
+    folder.mkdir()
+    for seed, run in [(1, 100), (2, 101), (3, 103)]:
+        _write_raw(folder / f"EQSANS_{run}.nxs.h5", _events(seed=seed, per_bank=2000))
+    return folder
+
+
+def test_page_down_up_step_through_the_runs(
+    qapp: QApplication, runs_folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sansdir.viewer.qt.main_window as main_window
+
+    monkeypatch.setattr(main_window, "PRELOAD_DELAY_MS", 0)
+    win = MainWindow(nbins=50)
+    win.show()
+    try:
+        win.open_path(runs_folder / "EQSANS_100.nxs.h5")
+        _wait_until(lambda: _showing(win, "EQSANS_100.nxs.h5"))
+        # ... then 101 is preloaded in the background
+        _wait_until(lambda: runs_folder / "EQSANS_101.nxs.h5" in win._preloaded)
+        win.tof_panel.full_box.setChecked(False)
+        win.tof_panel.width_box.setValue(5)
+        win.tof_panel.slider.setValue(10)
+        _drag(win, "rect", (0, 0), (10, 10))
+        win.next_run_action.trigger()  # preloaded: no loader needed
+        assert win._loader is None and win.cube.path.name == "EQSANS_101.nxs.h5"
+        assert "preloaded" in win.info.text()
+        assert win.tof_panel.selection == (10, 15)  # same TOF grid: window kept
+        assert _mask(win).sum() == 100  # the mask is per detector, not per run
+        win.next_run_action.trigger()  # 102 is missing: straight to 103
+        _wait_until(lambda: _showing(win, "EQSANS_103.nxs.h5"))
+        assert not win.step_run(1) and "no later run" in win.info.text()
+        win.prev_run_action.trigger()  # 101 was remembered on the way out
+        assert win._loader is None and win.cube.path.name == "EQSANS_101.nxs.h5"
+    finally:
+        win.close()
+
+
+def test_save_mask_default_follows_the_run(
+    qapp: QApplication, runs_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = MainWindow(nbins=50, mask_output=tmp_path / "out" / "EQSANS_100.nxs_mask.nxs")
+    win.show()
+    try:
+        win._set_cube(load_cube(runs_folder / "EQSANS_101.nxs.h5", nbins=50))
+        defaults: list[str] = []
+
+        def cancel(_parent, _title, default, _filters, **_kw):  # type: ignore[no-untyped-def]
+            defaults.append(default)
+            return "", ""  # the user cancels: only the offered default matters
+
+        monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", cancel)
+        win.save_mask()
+        assert defaults[-1] == str(tmp_path / "out" / "EQSANS_101.nxs_mask.nxs")
+    finally:
+        win.close()

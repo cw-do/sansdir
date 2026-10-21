@@ -515,7 +515,7 @@ sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
 ```
 
 **Interactive editor:** `K` (file pane or catalog) opens the Qt
-[detector viewer](#detector-viewer-in-development--phase-910) with its
+[detector viewer](#detector-viewer-phase-910) with its
 rectangle tool armed; `V` opens the same viewer. See **Masks** there for
 the tools and keys. (The old matplotlib editor was retired in Phase 9.10.)
 
@@ -532,13 +532,16 @@ The detector mapping is recovered directly from the source file
 instrument-specific code in `src/`, and no Mantid runtime imports
 anywhere in the package.
 
-### Detector viewer *(in development — Phase 9.10)*
+### Detector viewer *(Phase 9.10)*
 
-A fast Qt viewer for raw EQSANS event files. Press `V` on a NeXus file (or
-on a run in the catalog), type `:viewer`, or start it directly:
+A fast Qt viewer and mask editor for raw EQSANS event files (and Mantid
+processed files). Press `V` on a NeXus file (or on a run in the catalog),
+type `:viewer`, or start it from a shell:
 
 ```bash
-python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
+sansdir view /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
+sansdir view FILE --mask beam_mask.xml --output my_mask.nxs --tool rect
+sansdir view --help          # all options (same as python -m sansdir.viewer)
 ```
 
 It opens in its own window and the TUI stays usable. `K` opens the same
@@ -571,7 +574,12 @@ both need the `viewer` extra.
   dragging the colour-bar handles locks it, so slices can be compared. The
   colour bar is labelled in counts in log mode. The choices are remembered
   in `~/.config/sansdir/viewer.json`.
-- Ctrl+O or drag-and-drop opens another file.
+- **Other runs.** `PgDn` / `PgUp` step to the next / previous run in the
+  same folder (gaps in the numbering are skipped). The mask, the zoom and
+  the TOF window carry over, so runs can be compared slice by slice. The
+  next run is loaded in the background while you look at this one when
+  that is cheap (cached, or under ~1 GB), so stepping is instant; big runs
+  load when you step to them. `Ctrl+O` or drag-and-drop opens any file.
 
 **Masks.** The toolbar (also the *Mask* menu) draws the mask over the
 detector in translucent red; the hover readout says `MASKED`, and Auto

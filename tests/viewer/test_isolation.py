@@ -52,3 +52,36 @@ def test_clear_cache_cli_imports_no_qt(tmp_path: Path) -> None:
     )
     assert out.stdout.strip().endswith("QT:")
     assert "removed 0 runs, 0 B" in out.stdout
+
+
+def test_sansdir_view_hands_over_to_the_viewer(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """``sansdir view …`` execs ``python -I -m sansdir.viewer …`` with the args untouched."""
+    import os
+    import sys
+
+    from click.testing import CliRunner
+
+    from sansdir.cli import main
+
+    calls: list[list[str]] = []
+
+    def fake_execv(exe: str, argv: list[str]) -> None:
+        calls.append([exe, *argv])
+        raise SystemExit(0)
+
+    monkeypatch.setattr(os, "execv", fake_execv)
+    result = CliRunner().invoke(main, ["view", "EQSANS_1.nxs.h5", "--tool", "rect", "--help"])
+    assert result.exit_code == 0
+    assert calls == [
+        [
+            sys.executable,
+            sys.executable,
+            "-I",
+            "-m",
+            "sansdir.viewer",
+            "EQSANS_1.nxs.h5",
+            "--tool",
+            "rect",
+            "--help",
+        ]
+    ]
