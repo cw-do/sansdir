@@ -1381,6 +1381,33 @@ def _make_ui_mask(app: AppProtocol) -> Command:
 
 
 VIEWER_MODULES: tuple[str, ...] = ("PySide6", "pyqtgraph")
+VIEWER_LOG_MAX_BYTES = 256_000
+
+
+def viewer_log_path() -> Path:
+    """``~/.cache/sansdir/viewer.log`` — what the viewer printed, kept for bug reports."""
+    import os
+
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".cache") / "sansdir" / "viewer.log"
+
+
+def _keep_viewer_log(source: Path, rc: int, text: str) -> Path | None:
+    """Append a viewer run's stderr to :func:`viewer_log_path` (trimmed); None if empty."""
+    if not text.strip():
+        return None
+    from datetime import datetime
+
+    path = viewer_log_path()
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        old = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        new = f"{old}=== {stamp}  {source}  rc={rc}\n{text.rstrip()}\n"
+        path.write_text(new[-VIEWER_LOG_MAX_BYTES:], encoding="utf-8")
+    except OSError:
+        return None
+    return path
 
 
 async def _launch_viewer(
@@ -1402,7 +1429,17 @@ async def _launch_viewer(
 
     from sansdir.viewer import EXIT_SAVED
 
-    cmd = [sys.executable, "-m", "sansdir.viewer", str(source), "--output", str(mask_output)]
+    # -I, as bin/sansdir runs the TUI: no PYTHONPATH, user site-packages or cwd
+    # on sys.path, so nothing in the user's environment can shadow the venv.
+    cmd = [
+        sys.executable,
+        "-I",
+        "-m",
+        "sansdir.viewer",
+        str(source),
+        "--output",
+        str(mask_output),
+    ]
     if tool is not None:
         cmd += ["--tool", tool]
     stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115 — Popen keeps using it
@@ -1433,6 +1470,9 @@ async def _launch_viewer(
         stderr_text = ""
     finally:
         log_path.unlink(missing_ok=True)
+    kept = _keep_viewer_log(source, rc, stderr_text)
+    if rc == 0 and kept is not None and "Traceback" in stderr_text:
+        app.notify_user(f"the detector viewer reported an error — see {kept}", severity="warning")
     if rc == EXIT_SAVED:
         app.active_panel.refresh_listing()
         app.inactive_panel.refresh_listing()

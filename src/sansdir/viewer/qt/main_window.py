@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import statistics
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -67,6 +69,10 @@ MASK_SAVE_FILTERS = {
     "NumPy array (*.npy)": ".npy",
 }
 SETTINGS_SAVE_DELAY_MS = 1500  # write preferences once changes settle, never per drag event
+# Qt's own file dialog, not the desktop's: the native one on the cluster is GTK's
+# chooser, which goes through gvfs / D-Bus and can stall on a node; Qt's needs
+# neither, and with isolate_qt_settings() its history stays off the NFS home.
+DIALOG_OPTIONS = QFileDialog.Option.DontUseNativeDialog
 # (tool, label, key, tooltip) per mask tool, in toolbar order.
 TOOL_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
     ("pan", "Pan", "V", "Pan / select: drag to pan; drag ROIs to move, handles to resize"),
@@ -273,7 +279,9 @@ class MainWindow(QMainWindow):
 
     def _ask_open(self) -> None:
         start = str(self.cube.path.parent) if self.cube else ""
-        name, _ = QFileDialog.getOpenFileName(self, "Open NeXus file", start, NEXUS_FILTER)
+        name, _ = QFileDialog.getOpenFileName(
+            self, "Open NeXus file", start, NEXUS_FILTER, options=DIALOG_OPTIONS
+        )
         if name:
             self.open_path(Path(name))
 
@@ -574,7 +582,9 @@ class MainWindow(QMainWindow):
 
     def _ask_load_mask(self) -> None:
         start = str(self.cube.path.parent) if self.cube else ""
-        name, _ = QFileDialog.getOpenFileName(self, "Load mask", start, MASK_OPEN_FILTER)
+        name, _ = QFileDialog.getOpenFileName(
+            self, "Load mask", start, MASK_OPEN_FILTER, options=DIALOG_OPTIONS
+        )
         if name:
             self.load_mask(Path(name))
 
@@ -599,7 +609,7 @@ class MainWindow(QMainWindow):
             return False
         default = self.mask_output or default_output(self.cube.path)
         name, chosen = QFileDialog.getSaveFileName(
-            self, "Save mask", str(default), ";;".join(MASK_SAVE_FILTERS)
+            self, "Save mask", str(default), ";;".join(MASK_SAVE_FILTERS), options=DIALOG_OPTIONS
         )
         if not name:
             return False
@@ -690,6 +700,30 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def local_qt_settings_dir() -> Path:
+    """Node-local home for Qt's own settings: ``$XDG_RUNTIME_DIR`` (tmpfs), else the temp dir."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    base = Path(runtime) if runtime and Path(runtime).is_dir() else Path(tempfile.gettempdir())
+    return base / f"sansdir-qt-{os.getuid()}"
+
+
+def isolate_qt_settings(directory: Path | None = None) -> Path:
+    """Keep Qt's internal ``QSettings`` (e.g. ``QtProject.conf``) off the NFS home.
+
+    Qt's file dialog saves its history through ``QSettings``, which takes a
+    ``QLockFile`` next to ``~/.config/QtProject.conf``. On the cluster's NFS
+    homes that lock gets stuck and every later file dialog hangs — *Load
+    mask…* "failed" this way on 2026-10-21 behind a lock left at 09:50.
+    Redirect them to node-local storage, where locking works. Call before
+    any dialog opens.
+    """
+    target = directory or local_qt_settings_dir()
+    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
+        QSettings.setPath(fmt, QSettings.Scope.UserScope, str(target))
+    return target
+
+
 def run(
     path: Path | None,
     *,
@@ -706,6 +740,7 @@ def run(
     its panes), otherwise the event loop's exit code (0).
     """
     t0 = time.perf_counter()
+    isolate_qt_settings()
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     pg.setConfigOptions(antialias=False)

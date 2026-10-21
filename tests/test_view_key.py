@@ -51,7 +51,7 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> type[_FakePopen]:
 
 def _viewer_cmd(nexus: Path, right: Path, *tool: str) -> list[str]:
     out = right / f"{nexus.stem}_mask.nxs"
-    return ["-m", "sansdir.viewer", str(nexus), "--output", str(out), *tool]
+    return ["-I", "-m", "sansdir.viewer", str(nexus), "--output", str(out), *tool]
 
 
 def _app(tmp_path: Path) -> tuple[SansdirApp, Path]:
@@ -164,6 +164,28 @@ async def test_v_explains_a_missing_viewer_extra(
     assert any("sansdir[viewer]" in n for n in notes)
 
 
+async def test_viewer_errors_are_kept_in_a_log(
+    tmp_path: Path, popen: type[_FakePopen], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A traceback printed by a viewer that still exits 0 is kept and pointed to."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    popen.stderr_text = "Traceback (most recent call last):\nValueError: boom\n"
+    app, nexus = _app(tmp_path)
+    notes = await _press_v_on(app, nexus)
+    log = tmp_path / "cache" / "sansdir" / "viewer.log"
+    assert "ValueError: boom" in log.read_text() and "EQSANS_001.nxs.h5  rc=0" in log.read_text()
+    assert any("reported an error" in n and str(log) in n for n in notes)
+
+
+async def test_quiet_viewer_runs_leave_no_log(
+    tmp_path: Path, popen: type[_FakePopen], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    app, nexus = _app(tmp_path)
+    await _press_v_on(app, nexus)
+    assert not (tmp_path / "cache" / "sansdir" / "viewer.log").exists()
+
+
 async def test_a_viewer_crash_is_reported(tmp_path: Path, popen: type[_FakePopen]) -> None:
     popen.rc = 1
     popen.stderr_text = "Traceback …\nRuntimeError: boom\n"
@@ -205,7 +227,7 @@ async def test_catalog_v_opens_the_viewer_for_the_cursor_run(
         await pilot.pause()
         await pilot.pause()
         await pilot.press("q")
-    assert popen.calls and popen.calls[0][:4][1:] == ["-m", "sansdir.viewer", str(nexus)]
+    assert popen.calls and popen.calls[0][1:5] == ["-I", "-m", "sansdir.viewer", str(nexus)]
 
 
 def test_viewer_available_finds_the_extra_without_importing_qt() -> None:

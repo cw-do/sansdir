@@ -211,3 +211,22 @@ def test_clear_cache_menu(
 
 def test_clear_cache_disabled_without_cache(qapp: QApplication, window: MainWindow) -> None:
     assert not window.clear_cache_action.isEnabled()
+
+
+def test_qt_settings_stay_off_the_home_directory(qapp: QApplication, tmp_path: Path) -> None:
+    """Qt's file dialog keeps history in QSettings("QtProject"), whose lock file hung
+    on the NFS home (2026-10-21); the viewer redirects it to node-local storage."""
+    from PySide6.QtCore import QSettings
+
+    from sansdir.viewer.qt.main_window import isolate_qt_settings, local_qt_settings_dir
+
+    target = isolate_qt_settings(tmp_path / "qt")
+    try:
+        name = QSettings(QSettings.Scope.UserScope, "QtProject").fileName()
+        assert name == str(tmp_path / "qt" / "QtProject.conf")
+    finally:
+        isolate_qt_settings(local_qt_settings_dir())  # keep later tests off tmp_path
+    assert target.is_dir()
+    assert str(local_qt_settings_dir()).startswith(
+        (os.environ.get("XDG_RUNTIME_DIR") or "/", "/tmp")
+    )

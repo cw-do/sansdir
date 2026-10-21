@@ -337,3 +337,43 @@ def test_closing_with_unsaved_edits_asks(
     assert win.isVisible()  # cancelled
     win.close()
     assert not win.isVisible()  # discarded
+
+
+def test_load_mask_through_qts_own_dialog(
+    window: MainWindow, tmp_path: Path, cube: TofCube
+) -> None:
+    """2026-10-21: Load mask… hung on the desktop's dialog and a stuck lock on
+    ~/.config/QtProject.conf. The viewer now uses Qt's own dialog, whose history
+    goes to node-local storage (isolate_qt_settings)."""
+    from PySide6.QtWidgets import QDialogButtonBox, QFileDialog, QLineEdit
+
+    from sansdir.viewer.qt.main_window import isolate_qt_settings, local_qt_settings_dir
+
+    qt_dir = isolate_qt_settings(tmp_path / "qt")
+    state = MaskState()
+    state.add_shape(Rectangle(0, 0, 20, 20))
+    saved = save_mask(state, cube.path, "4242", tmp_path / "beam.xml")
+    seen: list[bool] = []  # per tick: was it Qt's own (non-native) dialog?
+
+    def drive() -> None:
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+        dialogs = [w for w in app.topLevelWidgets() if isinstance(w, QFileDialog) and w.isVisible()]
+        if dialogs:
+            dialog = dialogs[0]
+            seen.append(dialog.testOption(QFileDialog.Option.DontUseNativeDialog))
+            dialog.findChild(QLineEdit, "fileNameEdit").setText(str(saved.path))
+            button = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Open)
+            if button.isEnabled():
+                button.click()
+                return
+        QTimer.singleShot(50, drive)
+
+    try:
+        QTimer.singleShot(50, drive)
+        window._ask_load_mask()
+    finally:
+        isolate_qt_settings(local_qt_settings_dir())
+    assert seen and all(seen)
+    np.testing.assert_array_equal(_mask(window), state.build())
+    assert (qt_dir / "QtProject.conf").exists()  # the dialog's history, off the home dir
