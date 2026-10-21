@@ -80,7 +80,11 @@ FREQUENCY_LOGS: tuple[str, ...] = (
 )
 _BANK_RE = re.compile(r"^bank(\d+)_events$")
 
-Progress = Callable[[float], None]  # fraction of events done, 0..1
+# progress(stage, events done, events in the file). Stages, in order:
+# STAGE_PREVIEW (big runs only; no count, done = 0) then STAGE_LOADING.
+Progress = Callable[[str, int, int], None]
+STAGE_PREVIEW: str = "preview"
+STAGE_LOADING: str = "loading"
 
 
 class LoadCancelledError(RuntimeError):
@@ -259,16 +263,17 @@ def load_raw(
     stop = should_stop or (lambda: False)
     n_workers = workers if workers is not None else min(MAX_WORKERS, os.cpu_count() or 1)
     acc = _Accumulator(nbins)
+    report = progress or (lambda _stage, _done, _total: None)
     if total < PARALLEL_MIN_EVENTS or n_workers <= 1:
         done = 0
+        report(STAGE_LOADING, 0, total)
         with open_nexus(path) as fh:  # one open for all banks
             for t in full:
                 if stop():
                     raise LoadCancelledError(str(path))
                 acc.add(_run_task(t, stop, fh))
                 done += t.n_events
-                if progress is not None:
-                    progress(done / total if total else 1.0)
+                report(STAGE_LOADING, done, total)
         return finish(acc, 1.0)
 
     import multiprocessing as mp
@@ -289,6 +294,7 @@ def load_raw(
                 preview_futures.append(pool.submit(_run_task, task(number, group, ranges)))
         futures = {pool.submit(_run_task, t): t for t in full}  # queued behind the preview
         if on_preview is not None and preview_futures:
+            report(STAGE_PREVIEW, 0, total)
             preview = _Accumulator(nbins)
             for fut in preview_futures:
                 while not fut.done():
@@ -301,6 +307,7 @@ def load_raw(
         # Merge each slice as it lands: holding all ~200 partials (2 MB each)
         # until the end doubled peak memory on a 7.7e9-event run.
         done = 0
+        report(STAGE_LOADING, 0, total)
         pending = set(futures)
         while pending:
             if stop():
@@ -309,8 +316,8 @@ def load_raw(
             for fut in finished:
                 acc.add(fut.result())
                 done += futures.pop(fut).n_events
-            if finished and progress is not None:
-                progress(done / total)
+            if finished:
+                report(STAGE_LOADING, done, total)
         return finish(acc, 1.0)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
@@ -452,6 +459,8 @@ def load_processed(path: Path | str) -> TofCube:
 
 __all__ = [
     "DEFAULT_NBINS",
+    "STAGE_LOADING",
+    "STAGE_PREVIEW",
     "LoadCancelledError",
     "TofCube",
     "load_cube",

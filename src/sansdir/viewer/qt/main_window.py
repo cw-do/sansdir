@@ -16,34 +16,38 @@ from PySide6.QtGui import (
     QDropEvent,
     QFontDatabase,
     QKeySequence,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QLabel,
     QMainWindow,
-    QProgressBar,
 )
 
+from sansdir.viewer.cache import CubeCache
 from sansdir.viewer.colorscale import auto_limits, display_levels, display_values
 from sansdir.viewer.cube import DEFAULT_NBINS, TofCube
 from sansdir.viewer.geometry import PixelInfo
 from sansdir.viewer.qt.image_view import DetectorView
 from sansdir.viewer.qt.loader import CubeLoader
+from sansdir.viewer.qt.progress import LoadProgress, format_count
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, nbins: int = DEFAULT_NBINS) -> None:
+    def __init__(self, nbins: int = DEFAULT_NBINS, cache: CubeCache | None = None) -> None:
         super().__init__()
         self.nbins = nbins
+        self.cache = cache
         self.cube: TofCube | None = None
         self._image: np.ndarray | None = None  # counts currently shown
         self._log = True
         self._loader: CubeLoader | None = None
         self._retired: set[CubeLoader] = set()
         self._t_open = 0.0
+        self._title = "EQSANS detector viewer"
 
         self.view = DetectorView()
         self.setCentralWidget(self.view)
@@ -53,18 +57,17 @@ class MainWindow(QMainWindow):
         self.readout = QLabel()
         self.readout.setFont(mono)
         self.info = QLabel()
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1000)
-        self.progress.setMaximumWidth(160)
-        self.progress.hide()
+        self.loading = LoadProgress()
+        self.loading.cancel_requested.connect(self.cancel_load)
         bar = self.statusBar()
         bar.addWidget(self.readout, 1)
         bar.addPermanentWidget(self.info)
-        bar.addPermanentWidget(self.progress)
+        bar.addPermanentWidget(self.loading)
+        QShortcut(QKeySequence("Esc"), self, self.cancel_load)
 
         self._build_menus()
         self.setAcceptDrops(True)
-        self.setWindowTitle("EQSANS detector viewer")
+        self._update_title()
         self.resize(1000, 860)
 
     def _build_menus(self) -> None:
@@ -92,58 +95,91 @@ class MainWindow(QMainWindow):
     def open_path(self, path: Path) -> None:
         if self._loader is not None:
             self._loader.stop()
-        loader = CubeLoader(path, self.nbins)
+        loader = CubeLoader(path, self.nbins, self.cache)
         loader.progressed.connect(self._on_progress)
         loader.preview.connect(self._on_preview)
         loader.loaded.connect(self._on_loaded)
         loader.failed.connect(self._on_failed)
-        loader.finished.connect(lambda: self._retired.discard(loader))
+        loader.note.connect(self._on_note)
+        loader.finished.connect(self._on_finished)
         self._retired.add(loader)  # keep a reference until the thread ends
         self._loader = loader
         self._t_open = time.perf_counter()
-        self.progress.setValue(0)
-        self.progress.show()
-        self.info.setText(f"loading {path.name}…")
-        self.setWindowTitle(f"{path.name} — EQSANS detector viewer")
+        self.loading.start(path.name)
+        self.info.setText("")
+        self.info.setToolTip("")
+        self._title = f"{path.name} — EQSANS detector viewer"
+        self._update_title()
         loader.start()
 
-    def _is_current(self) -> bool:
-        return self.sender() is self._loader
+    def cancel_load(self) -> None:
+        """Stop the current load (Cancel button / Esc); a preview stays up."""
+        loader = self._loader
+        if loader is None:
+            return
+        loader.stop()
+        self._loader = None  # ignore anything it still emits
+        self.loading.finish()
+        if self.cube is not None and self.cube.is_preview:
+            self.info.setText("cancelled — showing the preview only (counts are estimates)")
+        else:
+            self.info.setText("loading cancelled")
+        self._update_title()
 
-    def _on_progress(self, fraction: float) -> None:
+    def _is_current(self) -> bool:
+        return self._loader is not None and self.sender() is self._loader
+
+    def _on_progress(self, stage: str, done: float, total: float) -> None:
         if self._is_current():
-            self.progress.setValue(int(fraction * 1000))
+            self.loading.update_stage(stage, done, total)
+            self._update_title()
 
     def _on_preview(self, cube: TofCube) -> None:
         if not self._is_current():
             return
         self._set_cube(cube)
         self.info.setText(
-            f"preview from {cube.n_events / cube.total_events:.1%} of "
-            f"{cube.total_events / 1e9:.2f} G events (scaled) · loading the full run…"
+            f"PREVIEW from {cube.n_events / cube.total_events:.1%} of the events, scaled"
         )
 
     def _on_loaded(self, cube: TofCube) -> None:
         if not self._is_current():
             return
-        self._loader = None
-        self.progress.hide()
         self._set_cube(cube)
         elapsed = time.perf_counter() - self._t_open
+        if "cache_read" in cube.timings:
+            how = f"from cache in {elapsed:.2f} s"
+        else:
+            how = f"in {elapsed:.2f} s"
         if cube.has_tof:
             self.info.setText(
-                f"{_events(cube.n_events)} events · {cube.nbins} TOF bins · loaded in {elapsed:.2f} s"
+                f"{format_count(cube.n_events)} events · {cube.nbins} TOF bins · {how}"
             )
         else:
-            self.info.setText(f"processed file (no TOF) · loaded in {elapsed:.2f} s")
+            self.info.setText(f"processed file (no TOF) · {how}")
 
     def _on_failed(self, message: str) -> None:
         if not self._is_current():
             return
-        self._loader = None
-        self.progress.hide()
         self.info.setText(message.splitlines()[0])
         self.info.setToolTip(message)
+
+    def _on_note(self, message: str) -> None:
+        if self._is_current():
+            self.info.setToolTip(message)
+
+    def _on_finished(self) -> None:
+        loader = self.sender()
+        self._retired.discard(loader)
+        if loader is self._loader:
+            self._loader = None
+            self.loading.finish()
+            self._update_title()
+
+    def _update_title(self) -> None:
+        percent = self.loading.percent
+        prefix = f"[{percent}%] " if percent is not None and self._loader is not None else ""
+        self.setWindowTitle(prefix + self._title)
 
     def _set_cube(self, cube: TofCube) -> None:
         new_file = self.cube is None or self.cube.path != cube.path
@@ -151,7 +187,8 @@ class MainWindow(QMainWindow):
         self._image = cube.image()
         label = f"run {cube.run_number}" if cube.run_number else cube.path.name
         title = f" — {cube.title}" if cube.title else ""
-        self.setWindowTitle(f"{label}{title} — EQSANS detector viewer")
+        self._title = f"{label}{title} — EQSANS detector viewer"
+        self._update_title()
         self._refresh()
         if new_file:
             self.view.fit()
@@ -195,23 +232,27 @@ class MainWindow(QMainWindow):
             self.open_path(Path(urls[0].toLocalFile()))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 — Qt override
+        # A load stops within ~0.2 s; a cache write in progress (~1 s) is
+        # left to finish so it is not torn.
         for loader in list(self._retired):
             loader.stop()
-            loader.wait(2000)
+            loader.wait(15_000)
         super().closeEvent(event)
 
 
-def _events(n: int) -> str:
-    return f"{n / 1e9:.2f} G" if n >= 1e9 else f"{n / 1e6:.2f} M"
-
-
-def run(path: Path | None, *, nbins: int = DEFAULT_NBINS, benchmark: bool = False) -> int:
+def run(
+    path: Path | None,
+    *,
+    nbins: int = DEFAULT_NBINS,
+    use_cache: bool = True,
+    benchmark: bool = False,
+) -> int:
     """Create the application, show the window, start loading ``path``."""
     t0 = time.perf_counter()
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     pg.setConfigOptions(antialias=False)
-    win = MainWindow(nbins)
+    win = MainWindow(nbins, CubeCache.default() if use_cache else None)
     win.show()
     if benchmark:
         _attach_benchmark(app, win, t0)
@@ -238,14 +279,13 @@ def _attach_benchmark(app: QApplication, win: MainWindow, t0: float) -> None:
             lambda _c: QTimer.singleShot(0, lambda: mark("preview image on screen"))
         )
 
-        def done(_c: TofCube) -> None:
-            def finish() -> None:
-                mark("full image on screen")
-                app.quit()
+        loader.loaded.connect(lambda _c: QTimer.singleShot(0, lambda: mark("full image on screen")))
 
-            QTimer.singleShot(0, finish)
+        def done() -> None:
+            mark("loader finished (cache written if any)")
+            app.quit()
 
-        loader.loaded.connect(done)
+        loader.finished.connect(done)
 
         def failed(message: str) -> None:
             mark(f"failed: {message}")

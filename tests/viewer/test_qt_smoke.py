@@ -20,9 +20,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEventLoop, QPointF, QTimer
 from PySide6.QtWidgets import QApplication
 
+from sansdir.viewer.cache import CubeCache
 from sansdir.viewer.cube import load_cube
 from sansdir.viewer.geometry import info_for_detid
 from sansdir.viewer.qt.main_window import MainWindow
+from sansdir.viewer.qt.progress import (
+    LoadProgress,
+    eta_seconds,
+    format_count,
+    format_duration,
+)
 from tests.viewer.test_cube import _events, _write_raw
 
 
@@ -64,18 +71,85 @@ def test_hover_readout_names_the_pixel(
     assert window.readout.text() == ""
 
 
+def _open_and_wait(win: MainWindow, path: Path) -> list[str]:
+    """Open ``path`` and run the event loop until its loader thread ends."""
+    loop = QEventLoop()
+    win.open_path(path)
+    loader = win._loader
+    assert loader is not None
+    stages: list[str] = []
+    loader.progressed.connect(lambda stage, _d, _t: stages.append(stage))
+    loader.finished.connect(lambda: QTimer.singleShot(0, loop.quit))
+    QTimer.singleShot(20_000, loop.quit)
+    loop.exec()
+    return stages
+
+
 def test_background_load_shows_the_run(
     qapp: QApplication, window: MainWindow, raw_file: Path
 ) -> None:
-    loop = QEventLoop()
-    window.open_path(raw_file)
-    assert window._loader is not None
-    window._loader.loaded.connect(lambda _c: QTimer.singleShot(0, loop.quit))
-    QTimer.singleShot(20_000, loop.quit)
-    loop.exec()
+    stages = _open_and_wait(window, raw_file)
     assert window.cube is not None and window.cube.run_number == "4242"
-    assert "run 4242" in window.windowTitle()
-    assert window.progress.isHidden()
+    assert "run 4242" in window.windowTitle() and "%]" not in window.windowTitle()
+    assert window.loading.isHidden() and window._loader is None
+    assert stages[-1] == "loading"
+
+
+def test_second_open_comes_from_the_cache(
+    qapp: QApplication, raw_file: Path, tmp_path: Path
+) -> None:
+    win = MainWindow(cache=CubeCache(tmp_path / "cache", min_load_seconds=0.0))
+    win.show()
+    try:
+        first = _open_and_wait(win, raw_file)
+        assert "cache-write" in first
+        assert win.cube is not None and "cache_read" not in win.cube.timings
+        second = _open_and_wait(win, raw_file)
+        assert second == ["cache-read"]
+        assert win.cube is not None and "cache_read" in win.cube.timings
+        assert "from cache" in win.info.text()
+    finally:
+        win.close()
+
+
+def test_cancel_stops_and_hides_the_progress(
+    qapp: QApplication, window: MainWindow, raw_file: Path
+) -> None:
+    window.open_path(raw_file)
+    assert window.loading.isVisible()
+    window.cancel_load()
+    assert window._loader is None and window.loading.isHidden()
+    assert window.info.text() == "loading cancelled"
+    window.cancel_load()  # nothing loading: harmless
+
+
+def test_progress_panel_text(qapp: QApplication) -> None:
+    panel = LoadProgress()
+    panel.start("EQSANS_1.nxs.h5")
+    assert "Opening EQSANS_1" in panel.label.text() and panel.percent is None
+    panel.update_stage("preview", 0, 7.67e9)
+    assert panel.label.text() == "Preview: sampling 7.67 G events…"
+    panel.update_stage("loading", 2.5e9, 1e10)
+    assert panel.percent == 25
+    assert panel.label.text().startswith("Loading 2.50 G / 10 G events")
+    panel.update_stage("cache-write", 0, 0)
+    assert panel.label.text().startswith("Saving to cache") and panel.percent is None
+    panel.finish()
+    assert panel.isHidden()
+
+
+@pytest.mark.parametrize(
+    ("n", "text"), [(7.674e9, "7.67 G"), (2.0e7, "20 M"), (745_353, "745 k"), (12, "12")]
+)
+def test_format_count(n: float, text: str) -> None:
+    assert format_count(n) == text
+
+
+def test_eta_waits_for_enough_data() -> None:
+    assert eta_seconds(1, 100, 10.0) is None  # 1 % done
+    assert eta_seconds(50, 100, 0.5) is None  # under a second
+    assert eta_seconds(25, 100, 10.0) == pytest.approx(30.0)
+    assert format_duration(30.4) == "30 s" and format_duration(125) == "2 min 05 s"
 
 
 def test_log_toggle_keeps_the_image(qapp: QApplication, window: MainWindow, raw_file: Path) -> None:

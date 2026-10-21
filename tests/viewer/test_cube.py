@@ -131,10 +131,13 @@ def test_chunking_does_not_change_the_result(raw_file: Path) -> None:
     assert np.array_equal(whole.cum, chunked.cum)
 
 
-def test_progress_reaches_one(raw_file: Path) -> None:
-    seen: list[float] = []
-    load_cube(raw_file, nbins=20, progress=seen.append)
-    assert len(seen) == 48 and seen == sorted(seen) and seen[-1] == pytest.approx(1.0)
+def test_progress_counts_events(raw_file: Path) -> None:
+    seen: list[tuple[str, int, int]] = []
+    load_cube(raw_file, nbins=20, progress=lambda *a: seen.append(a))
+    assert {stage for stage, _, _ in seen} == {"loading"}
+    done = [d for _, d, _ in seen]
+    assert done[0] == 0 and done == sorted(done) and len(seen) == 49
+    assert seen[-1] == ("loading", 48 * 400, 48 * 400)
 
 
 def test_cancel(raw_file: Path) -> None:
@@ -153,7 +156,15 @@ def test_parallel_path_with_preview(
     monkeypatch.setattr(cube_mod, "PREVIEW_EVENTS", 48 * 40)
     serial = load_cube(raw_file, nbins=80, workers=1)
     previews = []
-    parallel = load_cube(raw_file, nbins=80, workers=2, on_preview=previews.append)
+    stages: list[str] = []
+    parallel = load_cube(
+        raw_file,
+        nbins=80,
+        workers=2,
+        on_preview=previews.append,
+        progress=lambda stage, _d, _t: stages.append(stage),
+    )
+    assert stages[0] == "preview" and stages[-1] == "loading"
     assert np.array_equal(parallel.counts(), serial.counts())
     assert np.array_equal(parallel.spectrum(), serial.spectrum())
     assert not parallel.is_preview

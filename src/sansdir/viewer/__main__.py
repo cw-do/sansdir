@@ -19,6 +19,11 @@ def main(argv: list[str] | None = None) -> int:
         "--nbins", type=int, default=DEFAULT_NBINS, help="fine TOF bins (default %(default)s)"
     )
     parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="neither read nor write ~/.cache/sansdir/viewer",
+    )
+    parser.add_argument(
         "--benchmark",
         action="store_true",
         help="print load milestones to stderr and exit once the full run is on screen",
@@ -33,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(args.path, nbins=args.nbins, benchmark=args.benchmark)
+    return run(args.path, nbins=args.nbins, use_cache=not args.no_cache, benchmark=args.benchmark)
 
 
 if __name__ == "__main__":
