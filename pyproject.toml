@@ -54,6 +54,12 @@ llm = [
 # Optional matplotlib interactive backends (one of):
 qt = ["PyQt5>=5.15"]      # pip install "sansdir[qt]"
 tk = []                   # tkinter ships with Python on most builds
+# Fast detector viewer / mask editor (`K`, PLANNING-viewer.md). Qt is imported only
+# inside sansdir/viewer/qt/, so the TUI cold start is unaffected.
+# PySide6 6.12.0 + pyqtgraph 0.14 corrupts refcounts (True/None freed while
+# painting; the viewer aborts within minutes) — reproduced 2026-10-21. 6.11.1
+# (also Mantid's version) is clean. Essentials only: pyqtgraph needs nothing more.
+viewer = ["PySide6-Essentials>=6.5,<6.12", "pyqtgraph>=0.13"]  # pip install "sansdir[viewer]"
 
 [project.scripts]
 sansdir = "sansdir.cli:main"
@@ -96,8 +102,16 @@ module = [
     "mantid.*",
     "tomli",
     "pyoncat.*",
+    "pyqtgraph.*",
 ]
 ignore_missing_imports = true
+
+# The viewer's Qt layer subclasses pyqtgraph widgets, and pyqtgraph ships no
+# type information, so those base classes are `Any`. Everything else in the
+# package (including the Qt-free viewer modules) stays fully strict.
+[[tool.mypy.overrides]]
+module = ["sansdir.viewer.qt.*"]
+disallow_subclassing_any = false
 
 # The interactive mask editor drives matplotlib's event API, which is
 # dynamically typed: artists come back as the base `Patch`/`Axes`/`Canvas`
