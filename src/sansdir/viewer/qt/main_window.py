@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from sansdir.viewer import EXIT_SAVED
+from sansdir.viewer import export as exporting
 from sansdir.viewer.cache import CubeCache, describe
 from sansdir.viewer.colorscale import (
     ScaleState,
@@ -54,7 +55,7 @@ from sansdir.viewer.masking import (
 )
 from sansdir.viewer.qt.dialogs import ThresholdDialog, ask_spec
 from sansdir.viewer.qt.image_view import DetectorView
-from sansdir.viewer.qt.loader import CubeLoader, MaskSaver
+from sansdir.viewer.qt.loader import CubeLoader, MaskSaver, StackExporter
 from sansdir.viewer.qt.mask_editor import MaskEditor
 from sansdir.viewer.qt.progress import LoadProgress, format_count
 from sansdir.viewer.qt.scale_panel import ScalePanel
@@ -63,6 +64,19 @@ from sansdir.viewer.settings import default_path, load_scale, save_scale
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
 MASK_OPEN_FILTER = "Masks (*.json *.xml *.nxs *.h5 *.npy);;All files (*)"
+FIGURE_FILTERS = {
+    "PNG image (*.png)": ".png",
+    "PDF (*.pdf)": ".pdf",
+    "SVG (*.svg)": ".svg",
+}
+DATA_FILTERS = {
+    "NumPy array + JSON (*.npy)": ".npy",
+    "Text with header (*.txt)": ".txt",
+}
+STACK_FILTERS = {
+    "One NumPy stack + JSON (*.npy)": ".npy",
+    "Numbered PNG figures (*.png)": ".png",
+}
 MASK_SAVE_FILTERS = {
     "Mantid mask NeXus (*.nxs)": ".nxs",
     "Mantid mask XML (*.xml)": ".xml",
@@ -112,6 +126,9 @@ class MainWindow(QMainWindow):
         self._mask: np.ndarray | None = None  # None when nothing is masked
         self._saver: MaskSaver | None = None
         self._close_after_save = False
+        self._exporter: StackExporter | None = None
+        # Exports default to the folder K / V passed (the TUI's other pane).
+        self.export_dir = mask_output.parent if mask_output is not None else Path.cwd()
         self.cube: TofCube | None = None
         self._image: np.ndarray | None = None  # counts currently shown
         self.scale = load_scale(settings) if settings is not None else ScaleState()
@@ -199,6 +216,30 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.load_mask_action)
         file_menu.addAction(self.save_mask_action)
+        file_menu.addSeparator()
+        export_menu = file_menu.addMenu("&Export")
+        self.export_figure_action = QAction(
+            "Save &figure… (PNG / PDF / SVG)", self, shortcut=QKeySequence("Ctrl+E")
+        )
+        self.export_figure_action.triggered.connect(self.ask_export_figure)
+        self.export_view_action = QAction("Save &view as PNG…", self)
+        self.export_view_action.triggered.connect(self.ask_export_view)
+        self.export_data_action = QAction("Save image &data… (.npy / .txt)", self)
+        self.export_data_action.triggered.connect(self.ask_export_data)
+        self.export_stack_action = QAction("Save TOF &stack…", self)
+        self.export_stack_action.triggered.connect(self.ask_export_stack)
+        self.blank_masked_action = QAction("&Blank masked pixels", self, checkable=True)
+        self.blank_masked_action.setChecked(True)
+        self.blank_masked_action.setToolTip("Masked pixels: grey in figures, NaN in data")
+        for action in (
+            self.export_figure_action,
+            self.export_view_action,
+            self.export_data_action,
+            self.export_stack_action,
+        ):
+            export_menu.addAction(action)
+        export_menu.addSeparator()
+        export_menu.addAction(self.blank_masked_action)
         file_menu.addSeparator()
         file_menu.addAction(self.clear_cache_action)
         file_menu.addSeparator()
@@ -526,8 +567,12 @@ class MainWindow(QMainWindow):
         self.editor.brush_radius = float(radius)
 
     def _on_escape(self) -> None:
-        if not self.editor.cancel():
-            self.cancel_load()
+        if self.editor.cancel():
+            return
+        if self._exporter is not None:
+            self._exporter.stop()
+            return
+        self.cancel_load()
 
     def _say(self, message: str) -> None:
         self.info.setText(message)
@@ -657,6 +702,133 @@ class MainWindow(QMainWindow):
         state = self.editor.state
         return state.modified and not state.is_empty
 
+    # -- export -------------------------------------------------------------
+
+    def _export_mask(self) -> np.ndarray | None:
+        return self._mask if self.blank_masked_action.isChecked() else None
+
+    def _export_name(self, suffix: str) -> Path:
+        """``run176669_tof200-229.png`` (or ``_all``) in :attr:`export_dir`."""
+        assert self.cube is not None
+        stem = f"run{self.cube.run_number}" if self.cube.run_number else self.cube.path.stem
+        a, b = self.tof_panel.selection
+        if self.tof_panel.has_tof and (a, b) != (0, self.cube.nbins):
+            stem += f"_tof{a}-{b - 1}"
+        elif self.tof_panel.has_tof:
+            stem += "_all"
+        return self.export_dir / (stem + suffix)
+
+    def _ask_path(self, title: str, default: Path, filters: dict[str, str]) -> Path | None:
+        """Save dialog; adds the suffix of the chosen filter when none was typed."""
+        name, chosen = QFileDialog.getSaveFileName(
+            self, title, str(default), ";;".join(filters), options=DIALOG_OPTIONS
+        )
+        if not name:
+            return None
+        out = Path(name)
+        if out.suffix.lower() not in filters.values():
+            out = out.with_name(out.name + filters.get(chosen, next(iter(filters.values()))))
+        self.export_dir = out.parent
+        return out
+
+    def _image_info(self) -> exporting.ImageInfo:
+        assert self.cube is not None
+        return exporting.ImageInfo.for_cube(self.cube, *self.tof_panel.selection)
+
+    def ask_export_figure(self) -> None:
+        if self.cube is None or self._image is None:
+            self._say("open a run first")
+            return
+        out = self._ask_path("Save figure", self._export_name(".png"), FIGURE_FILTERS)
+        if out is not None:
+            self.export_figure(out)
+
+    def export_figure(self, out: Path) -> bool:
+        """Re-render the image off-screen with matplotlib (axes, colour bar, title)."""
+        assert self._image is not None
+        self._say(f"rendering {out.name}…")
+        QApplication.processEvents()
+        try:
+            exporting.export_figure(
+                out, self._image, self._image_info(), self.scale, mask=self._export_mask()
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Save figure", f"Could not save {out.name}:\n{exc}")
+            return False
+        self._say(f"figure saved: {out}")
+        return True
+
+    def ask_export_view(self) -> None:
+        if self.cube is None:
+            self._say("open a run first")
+            return
+        out = self._ask_path(
+            "Save view as PNG", self._export_name("_view.png"), {"PNG image (*.png)": ".png"}
+        )
+        if out is not None:
+            ok = self.view.grab().save(str(out), "PNG")
+            self._say(f"view saved: {out}" if ok else f"could not write {out}")
+
+    def ask_export_data(self) -> None:
+        if self.cube is None or self._image is None:
+            self._say("open a run first")
+            return
+        out = self._ask_path("Save image data", self._export_name(".npy"), DATA_FILTERS)
+        if out is not None:
+            self.export_data(out)
+
+    def export_data(self, out: Path) -> bool:
+        assert self._image is not None
+        try:
+            exporting.export_data(out, self._image, self._image_info(), mask=self._export_mask())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Save image data", f"Could not save {out.name}:\n{exc}")
+            return False
+        extra = f" + {out.with_suffix('.json').name}" if out.suffix == ".npy" else ""
+        self._say(f"image data saved: {out}{extra}")
+        return True
+
+    def ask_export_stack(self) -> None:
+        if self.cube is None or not self.cube.has_tof:
+            self._say("the TOF stack needs a raw run (this file has no TOF)")
+            return
+        width = self.tof_panel.window_width
+        n = len(exporting.stack_ranges(self.cube.nbins, width))
+        stem = f"run{self.cube.run_number}" if self.cube.run_number else self.cube.path.stem
+        out = self._ask_path(
+            f"Save TOF stack: {n} slices of {width} bins",
+            self.export_dir / f"{stem}_stack{width}.npy",
+            STACK_FILTERS,
+        )
+        if out is not None:
+            self.export_stack(out)
+
+    def export_stack(self, out: Path) -> bool:
+        """Start writing the stack at the current window width (Esc cancels)."""
+        if self.cube is None or self._exporter is not None:
+            return False
+        exporter = StackExporter(
+            self.cube,
+            self.tof_panel.window_width,
+            out,
+            scale=ScaleState(**self.scale.__dict__),
+            mask=self._export_mask(),
+        )
+        exporter.progressed.connect(
+            lambda done, total: self._say(f"exporting TOF stack {done}/{total}… (Esc cancels)")
+        )
+        exporter.done.connect(self._say)
+        exporter.failed.connect(self._say)
+        exporter.finished.connect(self._on_export_finished)
+        self._exporter = exporter
+        self.export_stack_action.setEnabled(False)
+        exporter.start()
+        return True
+
+    def _on_export_finished(self) -> None:
+        self._exporter = None
+        self.export_stack_action.setEnabled(True)
+
     # -- Qt plumbing -------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 — Qt override
@@ -669,6 +841,9 @@ class MainWindow(QMainWindow):
             self.open_path(Path(urls[0].toLocalFile()))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 — Qt override
+        if self._exporter is not None:  # stop a stack export; let it finish its file
+            self._exporter.stop()
+            self._exporter.wait(10_000)
         if self._saver is not None:  # never tear a mask file
             self._close_after_save = True
             self._say("closing after the mask is saved…")

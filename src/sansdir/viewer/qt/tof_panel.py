@@ -114,6 +114,12 @@ class TofPanel(QWidget):
         return self._a, self._b
 
     @property
+    def window_width(self) -> int:
+        """Width in bins of the TOF window (the last one, while Full range is ticked)."""
+        a, b = self._windowed if self._is_full() else (self._a, self._b)
+        return max(1, b - a)
+
+    @property
     def has_tof(self) -> bool:
         return self._edges is not None
 

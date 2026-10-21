@@ -22,6 +22,7 @@ TUI_AND_PURE_MODULES = [
     "sansdir.viewer.tofrange",
     "sansdir.viewer.masking",
     "sansdir.viewer.settings",
+    "sansdir.viewer.export",
     "sansdir.viewer.__main__",
 ]
 

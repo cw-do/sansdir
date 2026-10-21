@@ -571,7 +571,7 @@ both need the `viewer` extra.
   dragging the colour-bar handles locks it, so slices can be compared. The
   colour bar is labelled in counts in log mode. The choices are remembered
   in `~/.config/sansdir/viewer.json`.
-- Ctrl+O or drag-and-drop opens another file. Image export comes next.
+- Ctrl+O or drag-and-drop opens another file.
 
 **Masks.** The toolbar (also the *Mask* menu) draws the mask over the
 detector in translucent red; the hover readout says `MASKED`, and Auto
@@ -597,6 +597,25 @@ asks first. Brush and eraser strokes are stored in `mask_log.json` as a
 `pixels` shape, so `sansdir mask --shapes-json` replays any viewer mask
 exactly. `python -m sansdir.viewer FILE --mask M --output OUT --tool rect`
 does the same from a shell.
+
+**Export** (*File → Export*), for the image on screen (current TOF range):
+
+- *Save figure…* (`Ctrl+E`): PNG / PDF / SVG re-rendered with matplotlib —
+  real axes, colour bar in counts, run number, title and TOF range in the
+  title, the current colour scale and map. Masked pixels are grey.
+- *Save view as PNG…*: a quick screenshot of the detector panel.
+- *Save image data…*: the 256 x 192 counts as `.npy` (+ a `.json` describing
+  it) or `.txt` with a `#` header (run, title, source, TOF range, whether
+  the mask was applied, row/column layout). Row 0 is the bottom of the
+  tubes (Mantid `pixel1`).
+- *Save TOF stack…*: every slice at the current window width, as one
+  `(nslice, 256, 192)` `.npy` (+ `.json` with each slice's bins and TOF in
+  µs) or as numbered PNG figures. It runs in the background; `Esc` cancels.
+- *Blank masked pixels* (on by default): masked pixels become NaN in data
+  and grey in figures; every file records whether they were.
+
+Exports default to the folder `K` / `V` were started with (the other pane),
+named like `run176669_tof200-229.png`.
 
 Needs the `viewer` extra (`pip install "sansdir[viewer]"`; the shared
 cluster venv already has it). PySide6 is held below 6.12, because 6.12.0

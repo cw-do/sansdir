@@ -377,3 +377,95 @@ def test_load_mask_through_qts_own_dialog(
     assert seen and all(seen)
     np.testing.assert_array_equal(_mask(window), state.build())
     assert (qt_dir / "QtProject.conf").exists()  # the dialog's history, off the home dir
+
+
+# -- export (Phase 9.10.4) ------------------------------------------------------------
+
+
+def _save_as(monkeypatch: pytest.MonkeyPatch, path: Path, chosen: str = "") -> list[str]:
+    defaults: list[str] = []
+
+    def fake(_parent, _title, default, _filters, **_kw):  # type: ignore[no-untyped-def]
+        defaults.append(default)
+        return str(path), chosen
+
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", fake)
+    return defaults
+
+
+def test_export_figure_from_the_menu(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window.export_dir = tmp_path
+    window.tof_panel.full_box.setChecked(False)
+    window.tof_panel.width_box.setValue(5)
+    window.tof_panel.slider.setValue(10)
+    defaults = _save_as(monkeypatch, tmp_path / "fig", "PDF (*.pdf)")
+    window.export_figure_action.trigger()
+    assert defaults == [str(tmp_path / "run4242_tof10-14.png")]
+    assert (tmp_path / "fig.pdf").read_bytes().startswith(b"%PDF")
+    assert "figure saved" in window.info.text()
+
+
+def test_export_data_blanks_the_mask_unless_turned_off(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window.export_dir = tmp_path
+    _drag(window, "rect", (0, 0), (192, 4))
+    _save_as(monkeypatch, tmp_path / "a.npy")
+    window.export_data_action.trigger()
+    assert np.isnan(np.load(tmp_path / "a.npy")[:4]).all()
+    window.blank_masked_action.setChecked(False)
+    _save_as(monkeypatch, tmp_path / "b.txt")
+    window.export_data_action.trigger()
+    assert not np.isnan(np.loadtxt(tmp_path / "b.txt")).any()
+    assert "mask applied: no" in (tmp_path / "b.txt").read_text()
+
+
+def test_export_view_png(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window.export_dir = tmp_path
+    defaults = _save_as(monkeypatch, tmp_path / "v.png")
+    window.export_view_action.trigger()
+    assert defaults[0].endswith("run4242_all_view.png")
+    assert (tmp_path / "v.png").read_bytes().startswith(b"\x89PNG")
+
+
+def _wait_for_export(win: MainWindow) -> None:
+    exporter = win._exporter
+    if exporter is None:
+        return
+    loop = QEventLoop()
+    exporter.finished.connect(lambda: QTimer.singleShot(0, loop.quit))
+    QTimer.singleShot(30_000, loop.quit)
+    if win._exporter is not None:
+        loop.exec()
+
+
+def test_export_stack_in_the_background(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window.export_dir = tmp_path
+    window.tof_panel.full_box.setChecked(False)
+    window.tof_panel.width_box.setValue(20)
+    window.tof_panel.full_box.setChecked(True)  # the remembered window still sets the width
+    defaults = _save_as(monkeypatch, tmp_path / "s", "One NumPy stack + JSON (*.npy)")
+    window.export_stack_action.trigger()
+    assert defaults == [str(tmp_path / "run4242_stack20.npy")]
+    assert not window.export_stack_action.isEnabled()
+    _wait_for_export(window)
+    assert np.load(tmp_path / "s.npy").shape == (3, 256, 192)
+    assert window.info.text().startswith("TOF stack saved")
+    assert window.export_stack_action.isEnabled()
+
+
+def test_escape_cancels_a_stack_export(window: MainWindow, tmp_path: Path) -> None:
+    window.tof_panel.full_box.setChecked(False)
+    window.tof_panel.width_box.setValue(1)  # one PNG figure per bin: slow enough to cancel
+    assert window.export_stack(tmp_path / "frames" / "f.png")
+    window._on_escape()
+    _wait_for_export(window)
+    assert window.info.text() == "stack export cancelled"
+    assert window.cube is not None
+    assert len(list((tmp_path / "frames").glob("*.png"))) < window.cube.nbins

@@ -1,13 +1,16 @@
-"""Background work off the UI thread: loading a run (cache → :func:`load_cube` → cache), saving a mask."""
+"""Background work off the UI thread: loading a run (cache → :func:`load_cube` → cache),
+saving a mask, exporting a TOF stack."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from sansdir.viewer.cache import CubeCache
-from sansdir.viewer.cube import DEFAULT_NBINS, LoadCancelledError, load_cube
+from sansdir.viewer.colorscale import ScaleState
+from sansdir.viewer.cube import DEFAULT_NBINS, LoadCancelledError, TofCube, load_cube
 from sansdir.viewer.masking import MaskState, save_mask
 
 # Stages reported on top of cube.STAGE_PREVIEW / STAGE_LOADING.
@@ -80,6 +83,64 @@ class CubeLoader(QThread):
                 self.cache.put(cube, self.nbins)
             except OSError as exc:
                 self.note.emit(f"not cached: {exc}")
+
+
+class StackExporter(QThread):
+    """Writes a TOF stack (``.npy`` or numbered PNG figures) off the UI thread."""
+
+    progressed = Signal(int, int)  # slices done, total
+    done = Signal(str)  # what was written
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        cube: TofCube,
+        width: int,
+        target: Path,
+        *,
+        scale: ScaleState,
+        mask: np.ndarray | None,
+    ) -> None:
+        super().__init__()
+        self.cube, self.width, self.target = cube, width, target
+        self.scale, self.mask = scale, mask
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def _progress(self, done: int, total: int) -> bool:
+        self.progressed.emit(done, total)
+        return not self._stop
+
+    def run(self) -> None:
+        from sansdir.viewer.export import (
+            ExportCancelledError,
+            export_stack_npy,
+            export_stack_pngs,
+        )
+
+        try:
+            if self.target.suffix.lower() == ".npy":
+                path = export_stack_npy(
+                    self.target, self.cube, self.width, mask=self.mask, progress=self._progress
+                )
+                self.done.emit(f"TOF stack saved: {path} (+ {path.with_suffix('.json').name})")
+            else:
+                paths = export_stack_pngs(
+                    self.target.parent,
+                    self.cube,
+                    self.width,
+                    self.scale,
+                    mask=self.mask,
+                    prefix=self.target.stem,
+                    progress=self._progress,
+                )
+                self.done.emit(f"TOF stack saved: {len(paths)} PNGs in {self.target.parent}")
+        except ExportCancelledError:
+            self.failed.emit("stack export cancelled")
+        except Exception as exc:  # surfaced in the status bar, never a traceback
+            self.failed.emit(f"stack export failed: {exc}")
 
 
 class MaskSaver(QThread):
