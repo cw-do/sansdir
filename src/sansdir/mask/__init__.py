@@ -13,7 +13,9 @@ Submodules:
 * :mod:`sansdir.mask.writers`  — XML / NeXus / npy / log writers
 
 The TUI integration lives in :mod:`sansdir.commands.builtins` (the
-``mask.create`` registry command + ``ui.mask`` keybinding handler).
+``mask.create`` registry command); interactive editing is the detector
+viewer's mask tools (:mod:`sansdir.viewer`, ``K`` / ``V``), which build on
+this package.
 """
 
 from __future__ import annotations

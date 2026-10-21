@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -1200,186 +1201,6 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
     )
 
 
-def _make_ui_mask(app: AppProtocol) -> Command:
-    """``K`` keystroke / ``:mask`` — open the mask editor for a NeXus file.
-
-    Since Phase 9.10 that is the Qt detector viewer (started on the
-    rectangle tool, via :func:`_launch_viewer`) whenever the ``viewer``
-    extra is installed; otherwise the matplotlib editor below, with a
-    status-bar note.
-
-    Two entry points (mirrors how ``ui.batch_extract`` is wired):
-
-    * From a file pane (``K`` with no args): we resolve the cursor to
-      a raw ``.nxs.h5`` / ``.nxs`` file.
-    * From the catalog pane (``K`` dispatches with explicit ``path=``):
-      we honour the supplied path verbatim — the catalog has already
-      mapped the run number to its on-disk NeXus file.
-
-    Same forking pattern as :mod:`sansdir.plot.window`: we spawn a
-    detached ``python -m sansdir.mask.gui <source>`` subprocess so the
-    matplotlib event loop runs independently of Textual's. Output
-    lands in the *inactive* pane's cwd by default (MDIR-style) so
-    you don't try to write into a read-only IPTS folder.
-    """
-
-    async def handler(path: str | None = None) -> str | None:
-        import os
-        import subprocess
-        import sys
-
-        from sansdir.plot.backend import has_display
-
-        cur: Path | None
-        if path is not None:
-            cur = Path(path)
-            if not cur.is_file():
-                app.notify_user(f"not a file: {cur}", severity="warning")
-                return None
-        else:
-            cur = app.active_panel.cursor_path
-            if cur is None or not cur.is_file():
-                app.notify_user("no file under cursor", severity="warning")
-                return None
-        name = cur.name
-        if not (name.endswith(".nxs.h5") or name.endswith(".nxs")):
-            app.notify_user(
-                f"{name}: mask GUI accepts NeXus (.nxs.h5 / .nxs) — "
-                "raw event-mode or Mantid processed",
-                severity="warning",
-            )
-            return None
-        if not has_display():
-            app.notify_user(
-                f"no $DISPLAY — use the CLI: sansdir mask {cur} --circle XC,YC,R --output mask.nxs",
-                severity="warning",
-            )
-            return None
-        # Default the output to the inactive pane's cwd so users don't
-        # accidentally try to write back into a read-only IPTS folder.
-        write_dir = app.inactive_panel.cwd
-        out = write_dir / f"{cur.stem}_mask.nxs"
-        if viewer_available():
-            # Phase 9.10: the Qt detector viewer is the mask editor now.
-            return await _launch_viewer(app, cur, out, tool="rect")
-        app.notify_user(
-            "PySide6 not installed — using the matplotlib mask editor "
-            "(pip install 'sansdir[viewer]' for the fast one)"
-        )
-        cmd = [
-            sys.executable,
-            "-m",
-            "sansdir.mask.gui",
-            str(cur),
-            "--output",
-            str(out),
-            "--format",
-            "nxs",
-        ]
-        # Capture the subprocess's stderr to a temp file so a crash
-        # inside the matplotlib editor surfaces to the user as a TUI
-        # notification on non-zero exit. Without this, a silent
-        # ``DEVNULL`` swallows tracebacks — exactly what made
-        # processed-NeXus failures invisible in the past.
-        import tempfile
-
-        stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115
-            mode="w+", delete=False, prefix="sansdir-mask-", suffix=".log"
-        )
-        # ^ SIM115: a ``with`` here would close the file when Popen
-        # is still using it. We close explicitly after proc.wait()
-        # and unlink the temp file ourselves.
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_log,
-                start_new_session=True,
-                env={**os.environ},
-            )
-        except OSError as exc:
-            stderr_log.close()
-            Path(stderr_log.name).unlink(missing_ok=True)
-            app.notify_user(f"mask gui failed to launch: {exc}", severity="error")
-            return None
-        app.notify_user(f"mask editor opened on {cur.name} → {out}")
-        # Wait for the editor to exit, then refresh panes if the user
-        # actually saved (rc=0). This handler is dispatched as a
-        # Textual worker (the registry's ``dispatch`` runs async
-        # handlers via ``run_worker``), so awaiting here doesn't
-        # block the TUI — the user can keep navigating while the
-        # editor is open. ``asyncio.to_thread`` keeps the blocking
-        # ``proc.wait()`` off the event loop. The mask GUI returns
-        # 0 on save and 1 on cancel/quit-without-save.
-        try:
-            rc = await asyncio.to_thread(proc.wait)
-        except Exception as exc:
-            # Mock subprocess in tests may not implement ``wait``;
-            # treat that as "we don't know, don't refresh".
-            stderr_log.close()
-            Path(stderr_log.name).unlink(missing_ok=True)
-            app.notify_user(f"mask wait failed: {exc}", severity="warning")
-            return str(out)
-        # Flush + read the stderr log before deciding how to report.
-        stderr_log.close()
-        log_path = Path(stderr_log.name)
-        stderr_text = ""
-        try:
-            stderr_text = log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            pass
-        finally:
-            log_path.unlink(missing_ok=True)
-        if rc == 0:
-            # Refresh both panes — the user might have redirected the
-            # save to a non-default folder via the Tk dialog, and a
-            # listdir call is cheap regardless.
-            app.active_panel.refresh_listing()
-            app.inactive_panel.refresh_listing()
-            app.notify_user(f"mask saved (panes refreshed) — {cur.name}")
-        elif rc != 1:
-            # rc == 1 is "user quit without saving" — silent is fine.
-            # Anything else means the editor crashed (HdfError on a
-            # non-EQSANS file, missing $DISPLAY mid-flight, segfault,
-            # etc.); surface the tail of stderr so the user has a
-            # clue. Most useful line is usually the last non-empty
-            # one (the exception class + message).
-            tail = ""
-            for line in reversed(stderr_text.splitlines()):
-                if line.strip():
-                    tail = line.strip()[:200]
-                    break
-            if tail:
-                app.notify_user(
-                    f"mask editor failed (rc={rc}): {tail}",
-                    severity="error",
-                )
-            else:
-                app.notify_user(
-                    f"mask editor failed (rc={rc}, no stderr captured)",
-                    severity="error",
-                )
-        return str(out)
-
-    return Command(
-        name="ui.mask",
-        description="Open the interactive mask editor on a NeXus file.",
-        params=(
-            CommandParam(
-                name="path",
-                type="path",
-                description=(
-                    "Explicit *.nxs.h5 / *.nxs path (catalog pane uses this); "
-                    "blank → fall back to the active file pane's cursor."
-                ),
-                required=False,
-            ),
-        ),
-        handler=handler,
-        aliases=("mask",),
-    )
-
-
 VIEWER_MODULES: tuple[str, ...] = ("PySide6", "pyqtgraph")
 VIEWER_LOG_MAX_BYTES = 256_000
 
@@ -1493,13 +1314,25 @@ def viewer_available() -> bool:
     return all(importlib.util.find_spec(name) is not None for name in VIEWER_MODULES)
 
 
-def _make_ui_view(app: AppProtocol) -> Command:
-    """``V`` / ``:viewer`` — open the fast Qt detector viewer on a NeXus file.
+_NEXUS_PATH_PARAM = CommandParam(
+    name="path",
+    type="path",
+    description=(
+        "Explicit *.nxs.h5 / *.nxs path (catalog pane uses this); "
+        "blank → fall back to the active file pane's cursor."
+    ),
+    required=False,
+)
 
-    Resolves the file like ``ui.mask`` (an explicit ``path=`` from the
-    catalog pane, otherwise the active pane's cursor) and starts it with
-    :func:`_launch_viewer`. The viewer is also the mask editor; ``K``
-    opens the same window with the rectangle tool armed.
+
+def _viewer_handler(
+    app: AppProtocol, *, tool: str | None
+) -> Callable[[str | None], Awaitable[str | None]]:
+    """The ``V`` / ``K`` handler: resolve the NeXus file, check the extra and the display.
+
+    The file is an explicit ``path=`` (catalog pane) or the active pane's
+    cursor. *Save mask* defaults to ``<stem>_mask.nxs`` in the inactive pane
+    (MDIR-style: never back into a read-only IPTS folder).
     """
 
     async def handler(path: str | None = None) -> str | None:
@@ -1526,30 +1359,44 @@ def _make_ui_view(app: AppProtocol) -> Command:
             )
             return None
         if not has_display():
-            app.notify_user("no $DISPLAY — the detector viewer needs a display", severity="warning")
+            app.notify_user(
+                "no $DISPLAY — the detector viewer needs one; masks also work from the "
+                f"CLI: sansdir mask {cur} --circle XC,YC,R --output mask.nxs",
+                severity="warning",
+            )
             return None
         out = app.inactive_panel.cwd / f"{cur.stem}_mask.nxs"
-        return await _launch_viewer(app, cur, out)
+        return await _launch_viewer(app, cur, out, tool=tool)
 
+    return handler
+
+
+def _make_ui_view(app: AppProtocol) -> Command:
+    """``V`` / ``:viewer`` — the detector viewer (also the mask editor) on a NeXus file."""
     return Command(
         name="ui.view",
         description=(
             "Open the fast detector viewer (TOF slicing, colour scale, "
-            "bank/tube/pixel readout) on a NeXus file."
+            "bank/tube/pixel readout, mask tools) on a NeXus file."
         ),
-        params=(
-            CommandParam(
-                name="path",
-                type="path",
-                description=(
-                    "Explicit *.nxs.h5 / *.nxs path (catalog pane uses this); "
-                    "blank → fall back to the active file pane's cursor."
-                ),
-                required=False,
-            ),
-        ),
-        handler=handler,
+        params=(_NEXUS_PATH_PARAM,),
+        handler=_viewer_handler(app, tool=None),
         aliases=("viewer", "detector"),
+    )
+
+
+def _make_ui_mask(app: AppProtocol) -> Command:
+    """``K`` / ``:mask`` — the same viewer, with the rectangle tool armed for masking.
+
+    Phase 9.10 retired the matplotlib editor (``mask/gui.py``); without the
+    ``viewer`` extra this says how to install it.
+    """
+    return Command(
+        name="ui.mask",
+        description="Open the detector viewer's mask tools (rectangle armed) on a NeXus file.",
+        params=(_NEXUS_PATH_PARAM,),
+        handler=_viewer_handler(app, tool="rect"),
+        aliases=("mask",),
     )
 
 

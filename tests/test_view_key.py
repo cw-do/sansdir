@@ -110,24 +110,15 @@ async def test_k_opens_the_viewer_on_the_rectangle_tool(
     assert popen.calls[0][1:] == _viewer_cmd(nexus, tmp_path / "R", "--tool", "rect")
 
 
-async def test_k_falls_back_to_the_matplotlib_editor(
+async def test_k_without_the_viewer_extra_says_how_to_get_it(
     tmp_path: Path, popen: type[_FakePopen], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The matplotlib editor is retired (9.10.3): K needs the viewer extra too."""
     monkeypatch.setattr(builtins, "viewer_available", lambda: False)
-    calls: list[list[str]] = []
-
-    class _Gui:
-        def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
-            calls.append(list(cmd))
-
-        def wait(self) -> int:
-            return 1
-
-    monkeypatch.setattr("subprocess.Popen", _Gui)
     app, nexus = _app(tmp_path)
     notes = await _press_v_on(app, nexus, "K")
-    assert calls and "sansdir.mask.gui" in calls[0]
-    assert any("using the matplotlib mask editor" in n for n in notes)
+    assert popen.calls == []
+    assert any("pip install 'sansdir[viewer]'" in n for n in notes)
 
 
 async def test_a_saved_mask_refreshes_the_panes(tmp_path: Path, popen: type[_FakePopen]) -> None:

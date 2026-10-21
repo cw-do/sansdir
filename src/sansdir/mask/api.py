@@ -4,7 +4,8 @@ Single function — :func:`create_mask` — takes the source NeXus file,
 a list of shapes (typically parsed from CLI flags or a
 ``--shapes-json`` file), the output destination, and a format string.
 Writes the chosen format plus the ``mask_log.json`` companion. No
-matplotlib involvement; the GUI lives in :mod:`sansdir.mask.gui`.
+GUI involvement; interactive editing is the detector viewer's mask tools
+(:mod:`sansdir.viewer.masking` and :mod:`sansdir.viewer.qt`).
 
 The shape-string parser lives here too (``--rect 10,10,20,20`` etc.)
 so it can be reused by both the CLI and any future programmatic

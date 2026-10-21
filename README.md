@@ -163,7 +163,7 @@ On a host without `$DISPLAY` they fall back to PNGs under
 |-----|--------------------------------------------------------------------------|
 | `m` | Open the cursor's `.nxs(.h5)` in a tree browser (lazy expansion)         |
 | `M` | Batch metadata extract: tag NeXus files → `M` opens the picker dialog    |
-| `K` | Create a detector mask from the cursor's NeXus file (raw or processed)  |
+| `K` | Mask the cursor's NeXus file in the detector viewer (rectangle tool)  |
 | `V` | Detector viewer (TOF slices, colour scale) on the cursor's NeXus file    |
 
 Inside the `m` tree browser, `/` switches to **keyword search** — the same
@@ -516,53 +516,8 @@ sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
 
 **Interactive editor:** `K` (file pane or catalog) opens the Qt
 [detector viewer](#detector-viewer-in-development--phase-910) with its
-mask tools (below). The matplotlib editor described here is the
-**fallback** `K` uses when the `viewer` extra isn't installed; it opens
-a matplotlib window on the cursor's NeXus heatmap.
-Cell aspect is set to `1/1.3` to compensate for the EQSANS detector's
-~5.2 mm tube pitch / ~3.9 mm pixel pitch, so an Ellipse drawn to
-look round on screen is round on the actual detector. A faint dotted
-boundary marks the detector edge; the canvas extends a few cells
-past it on every side so you can drag rubber-band rectangles edge to
-edge without having to land the first click on column 0 / row 0.
-
-- **Draw modes:** `r` rectangle · `e` ellipse. Circle and Polygon
-  Shapes still exist (CLI: `--circle`, `--polygon`) but were dropped
-  from the GUI menu — Ellipse covers the same ground without the
-  cell-aspect rubber-band weirdness, and the bank/tube **Mask spec**
-  input below covers the strip-mask case better than freehand
-  polygons.
-- **Edit mode:** `v` (or click the **Edit (v)** button). Click a
-  drawn shape to **select** it (yellow outline), drag to **move**,
-  press `Delete` to **remove** that one shape. Outside edit mode
-  `Delete` falls back to plain undo so the keystroke is never a
-  no-op.
-- **Mask spec** (the **Mask Spec... (k)** button or the `k`
-  shortcut opens a Tk dialog): type `b3` / `t50` / `b5-7 t10-15`
-  to mask whole banks / tubes by number. Bank → 4 tubes; ranges
-  and mixed tokens work; the resulting Rectangles round-trip
-  through `mask_log.json` like any other shape. (Earlier drafts
-  used an inline matplotlib `TextBox` here — switched to a
-  dialog because matplotlib's text-widget redraws on every
-  keystroke, which on a 256x192 LogNorm imshow lands as visible
-  per-character lag.)
-- **Cursor readout:** matplotlib's status bar shows
-  `tube=N pixel=M counts=K · bank=B tube_in_bank=T` as you hover.
-- **Other action keys:** `z` undo · `i` invert · `k` mask spec
-  dialog · `s` save · `Esc` quit. The bottom button row is
-  `Rect (r) · Ellipse (e) · Edit (v) · Undo (z) · Clear · Invert (i)
-  · Save... (s) · Quit (Esc)`, with `Mask Spec... (k)` on the row
-  below.
-- **Move-in-edit-mode is blit-fast.** When you press to start
-  dragging a shape, the editor snapshots the static canvas; each
-  motion event then restores that snapshot and re-blits only the
-  patch you're moving — orders of magnitude cheaper than redrawing
-  the whole heatmap on every mouse pixel.
-- **Save dialog:** `Save... (s)` opens a Tk file chooser pre-filled
-  with the default path (the inactive pane's cwd /
-  `<source-stem>_mask.nxs`). Pick a different folder or filename if
-  you want; Cancel writes nothing. The GUI saves NeXus only; the
-  CLI still produces XML / npy when asked.
+rectangle tool armed; `V` opens the same viewer. See **Masks** there for
+the tools and keys. (The old matplotlib editor was retired in Phase 9.10.)
 
 The on-disk mask encoding mirrors a real EQSANS beamstop file
 (`tests/data/mask_4m2.nxs`): each *unmasked* detector carries one
@@ -587,7 +542,8 @@ python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
 ```
 
 It opens in its own window and the TUI stays usable. `K` opens the same
-viewer with the rectangle tool armed, for masking (see **Masks** below).
+viewer with the rectangle tool armed, for masking (see **Masks** below);
+both need the `viewer` extra.
 
 - **Hover readout.** Each tube shows x / y, the Mantid name (`front bank8
   tube1 pixel131`), the detector ID, the raw file's DAS bank and the counts.
@@ -911,12 +867,12 @@ refresh).
   (the 24h disk cache occasionally serves stale data otherwise);
   per-IPTS catalog on the right pane (`c` toggles), runs taggable
   with `Space`. From the catalog: `p` plot, `m` HDF5 tree, `M` batch
-  extract, `K` mask editor.
-- **Interactive mask editor (`K`):** matplotlib window with
-  cell-aspect-aware ellipses, edit-mode (click/drag/delete), a
-  bank/tube spec input (`b3`, `t50`, `b5-7 t10-15`), live cursor
-  readout (`tube=N pixel=M · bank=B tube_in_bank=T`), and a Tk file
-  chooser on save. Output is **drtsans-compatible**: the save step
+  extract, `K` mask editor, `V` detector viewer.
+- **Interactive mask editor (`K`, also `V`):** the Qt detector viewer's
+  mask tools — rectangles, ellipses, circles and polygons with move and
+  resize handles, brush and eraser, tube/bank click, a bank/tube spec
+  input (`b3`, `t50`, `b5-7 t10-15`), dead/hot threshold, undo/redo,
+  and load/save. Output is **drtsans-compatible**: the save step
   shells out to the cluster's ``drtsans --classic`` (Mantid wrapper)
   to run ``Load → MaskDetectors → SaveNexus`` against the source
   NeXus, producing a file whose ``instrument_parameter_map`` carries

@@ -361,12 +361,12 @@ async def test_catalog_space_tags_run_and_capital_m_uses_tags(
 async def test_catalog_capital_k_launches_mask_for_cursor_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``K`` from the catalog spawns the mask GUI for the cursor row's run.
+    """``K`` from the catalog opens the viewer's mask tools on the cursor row's run.
 
     Mirrors the file-pane K binding but reaches the mask command
     through the catalog's ``raw_nexus_path`` resolver instead of
     ``app.active_panel.cursor_path``. We intercept ``subprocess.Popen``
-    so the test never actually tries to spawn matplotlib.
+    so the test never actually starts the viewer.
     """
     from sansdir.core.oncat import Datafile
 
@@ -394,17 +394,17 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
             captured.append(list(cmd))
 
         def wait(self) -> int:
-            # Pretend the user cancelled — no refresh side-effect
-            # (this test only cares that K dispatched the right cmd).
-            return 1
+            # The viewer was closed without saving (rc 0): no refresh, no
+            # error — this test only cares that K dispatched the right cmd.
+            return 0
 
     monkeypatch.setattr("subprocess.Popen", _FakePopen)
     # ``has_display`` is the gate inside the mask command; the headless
     # CI cluster would otherwise short-circuit with a "no $DISPLAY"
     # warning before Popen runs.
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
-    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
-    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
+    # K opens the Qt detector viewer; pretend its extra is installed.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: True)
 
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
@@ -425,7 +425,7 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
     # subprocess.Popen got called once with the cursor row's NeXus.
     assert len(captured) == 1, f"expected 1 Popen call, got {len(captured)}"
     cmd = captured[0]
-    assert "sansdir.mask.gui" in cmd
+    assert "sansdir.viewer" in cmd and cmd[-2:] == ["--tool", "rect"]
     assert str(nexus_path) in cmd
     # Output goes to the *active* file-pane's cwd by convention. After
     # ``Tab`` into the catalog slot, the *other* slot is the file pane
@@ -436,14 +436,14 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
     assert cmd[out_idx].endswith("EQSANS_100.nxs_mask.nxs")
 
 
-async def test_mask_save_refreshes_panes_when_editor_exits_zero(
+async def test_mask_save_refreshes_panes_when_the_viewer_saved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the mask GUI subprocess exits with code 0 (= save), both
+    """When the viewer exits with ``EXIT_SAVED`` (a mask was saved), both
     panes refresh so the new ``*_mask.nxs`` file shows up in the
     listing without the user having to press F5.
 
-    The mock subprocess returns exit code 0 from ``wait()``; the
+    The mock subprocess returns that code from ``wait()``; the
     handler awaits it via ``asyncio.to_thread``. We pre-create the
     expected output file so the post-refresh listdir actually picks
     something up — that's the only way to assert the refresh ran.
@@ -460,7 +460,7 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
     expected_out = right / "EQSANS_172749.nxs_mask.nxs"
 
     class _FakePopenZero:
-        """Exits cleanly (rc=0) → triggers the refresh code path."""
+        """Exits with EXIT_SAVED → triggers the refresh code path."""
 
         def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
             self.cmd = list(cmd)
@@ -469,12 +469,12 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
             expected_out.write_bytes(b"")
 
         def wait(self) -> int:
-            return 0
+            return 3  # sansdir.viewer.EXIT_SAVED
 
     monkeypatch.setattr("subprocess.Popen", _FakePopenZero)
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
-    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
-    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
+    # K opens the Qt detector viewer; pretend its extra is installed.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: True)
 
     from sansdir.app import SansdirApp
 
@@ -503,10 +503,10 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
         await pilot.press("q")
 
 
-async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
+async def test_no_refresh_when_the_viewer_closes_without_saving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the editor exits with rc=1 (cancel / quit-without-save),
+    """When the viewer exits 0 (closed without saving a mask),
     no refresh fires — and crucially no notification claims a save."""
     left = tmp_path / "L"
     right = tmp_path / "R"
@@ -524,12 +524,12 @@ async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
             self.cmd = list(cmd)
 
         def wait(self) -> int:
-            return 1
+            return 0  # closed, nothing saved
 
     monkeypatch.setattr("subprocess.Popen", _FakePopenNonzero)
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
-    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
-    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
+    # K opens the Qt detector viewer; pretend its extra is installed.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: True)
 
     from sansdir.app import SansdirApp
 
@@ -549,9 +549,9 @@ async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
         assert "rogue_appeared.txt" not in right_names_before
         await pilot.press("K")
         await pilot.pause(0.5)
-        # rc=1 → no refresh → rogue file still not in cached listing.
+        # rc=0 → no refresh → rogue file still not in cached listing.
         right_names_after = {e.name for e in app.inactive_panel._all_entries}
-        assert "rogue_appeared.txt" not in right_names_after, "rc=1 should NOT trigger a refresh"
+        assert "rogue_appeared.txt" not in right_names_after, "rc=0 should NOT trigger a refresh"
         await pilot.press("q")
 
 
