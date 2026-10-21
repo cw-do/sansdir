@@ -206,3 +206,56 @@ def test_builder_from_log_reads_json_file(tmp_path: Path) -> None:
 def test_from_dict_rejects_bad_detector_shape() -> None:
     with pytest.raises(ValueError, match="detector_shape"):
         MaskBuilder.from_dict({"detector_shape": [10], "shapes": []})
+
+
+# ---------------------------------------------------------------------------
+# PixelSet (Phase 9.10.3): brush / eraser cells from the detector viewer
+# ---------------------------------------------------------------------------
+
+
+def test_index_ranges_round_trip() -> None:
+    from sansdir.mask.core import indices_to_text, text_to_indices
+
+    assert indices_to_text([42, 5, 9, 10, 11, 11]) == "5,9-11,42"
+    assert text_to_indices("5,9-11,42").tolist() == [5, 9, 10, 11, 42]
+    assert indices_to_text([]) == "" and text_to_indices("").size == 0
+    with pytest.raises(ValueError):
+        text_to_indices("9-5")
+
+
+def test_pixelset_masks_on_cells_and_clears_off_cells() -> None:
+    from sansdir.mask.core import PixelSet
+
+    builder = MaskBuilder(detector_shape=(4, 5))
+    builder.add(Rectangle(0, 0, 4, 3))  # everything
+    builder.add(PixelSet(on=(), off=(0, 6)))  # flat index = row * 5 + col
+    mask = builder.build()
+    assert mask.sum() == 18 and mask[0, 0] == 0 and mask[1, 1] == 0
+
+
+def test_pixelset_order_matters_later_shapes_win() -> None:
+    from sansdir.mask.core import PixelSet
+
+    builder = MaskBuilder(detector_shape=(4, 5))
+    builder.add(PixelSet(on=(3,), off=(0,)))
+    builder.add(Rectangle(0, 0, 0, 0))  # re-masks cell 0
+    assert builder.build()[0, 0] == 1 and builder.build()[0, 3] == 1
+
+
+def test_pixelset_round_trips_through_dict_as_ranges() -> None:
+    from sansdir.mask.core import PixelSet
+
+    on = np.zeros((4, 5), dtype=bool)
+    on[1, :] = True
+    shape = PixelSet.from_cells(on, np.eye(4, 5, dtype=bool))
+    data = shape.to_dict()
+    assert data == {"type": "pixels", "on": "5-9", "off": "0,6,12,18"}
+    assert shape_from_dict(data) == shape
+    assert shape_from_dict({"type": "pixels", "on": [5, 6]}) == PixelSet(on=(5, 6))
+
+
+def test_pixelset_outside_the_detector_is_an_error() -> None:
+    from sansdir.mask.core import PixelSet
+
+    with pytest.raises(ValueError, match="outside"):
+        PixelSet(on=(20,)).rasterise((4, 5))

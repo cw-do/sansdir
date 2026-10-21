@@ -218,3 +218,39 @@ def test_loader_smoke(tmp_path: Path) -> None:
 def test_unsupported_layout_error_class_present() -> None:
     """The class is exported for callers that want to catch it directly."""
     assert UnsupportedFileLayoutError is not None
+
+
+def test_cli_replays_a_viewer_mask_with_painted_cells(tmp_path: Path) -> None:
+    """A viewer ``mask_log.json`` (shapes + brush/eraser PixelSet) replays exactly."""
+    from sansdir.mask.core import Rectangle
+    from sansdir.viewer.masking import MaskState, save_mask
+
+    src = tmp_path / "EQSANS.nxs.h5"
+    _write_synthetic_eqsans(src)
+    state = MaskState()
+    state.add_shape(Rectangle(10, 10, 40, 60))
+    brushed = np.zeros((256, 192), dtype=bool)
+    brushed[200:210, 100:105] = True
+    state.paint(brushed, masked=True)
+    erased = np.zeros((256, 192), dtype=bool)
+    erased[20:30, 20:30] = True  # inside the rectangle
+    state.paint(erased, masked=False)
+    saved = save_mask(state, src, "0042", tmp_path / "viewer.npy")
+
+    replay = tmp_path / "replay.npy"
+    result = CliRunner().invoke(
+        main,
+        [
+            "mask",
+            str(src),
+            "--shapes-json",
+            str(saved.log_path),
+            "--format",
+            "npy",
+            "--output",
+            str(replay),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    np.testing.assert_array_equal(np.load(replay), state.build().astype(np.uint8))
+    np.testing.assert_array_equal(np.load(replay), np.load(saved.path))

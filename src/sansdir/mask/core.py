@@ -17,6 +17,12 @@ Rasterisation is fully vectorised — no Python pixel loops — so a
 256x192 detector rasterises in well under a millisecond per shape.
 ``Polygon`` uses :class:`matplotlib.path.Path` for the inside test;
 the rest are closed-form numpy meshgrids.
+
+:class:`PixelSet` is the one non-geometric shape: explicit cells to
+mask (``on``) and to *unmask* (``off``), e.g. brush and eraser strokes
+from the detector viewer. The builder applies shapes in order, so a
+``PixelSet``'s ``off`` cells clear anything masked by the shapes before
+it.
 """
 
 from __future__ import annotations
@@ -169,12 +175,91 @@ class Polygon(Shape):
         }
 
 
+def indices_to_text(indices: np.ndarray | Sequence[int]) -> str:
+    """``[5, 9, 10, 11, 42]`` → ``"5,9-11,42"`` (sorted, de-duplicated)."""
+    idx = np.unique(np.asarray(indices, dtype=np.int64))
+    if idx.size == 0:
+        return ""
+    breaks = np.nonzero(np.diff(idx) != 1)[0]
+    starts = idx[np.r_[0, breaks + 1]]
+    ends = idx[np.r_[breaks, idx.size - 1]]
+    return ",".join(f"{a}" if a == b else f"{a}-{b}" for a, b in zip(starts, ends, strict=True))
+
+
+def text_to_indices(text: str) -> np.ndarray:
+    """Inverse of :func:`indices_to_text`; raises ``ValueError`` on a bad token."""
+    parts: list[np.ndarray] = []
+    for token in text.replace(" ", "").split(","):
+        if not token:
+            continue
+        lo, sep, hi = token.partition("-")
+        a, b = int(lo), int(hi) if sep else int(lo)
+        if b < a:
+            raise ValueError(f"bad range {token!r}")
+        parts.append(np.arange(a, b + 1, dtype=np.int64))
+    return np.concatenate(parts) if parts else np.zeros(0, dtype=np.int64)
+
+
+@dataclass(frozen=True, slots=True)
+class PixelSet(Shape):
+    """Explicit cells: ``on`` are masked, ``off`` are unmasked.
+
+    Cells are flat row-major indices ``row * n_cols + col`` into the
+    ``(n_rows, n_cols)`` image. In ``mask_log.json`` they are stored as
+    range strings (``"0-191,4000"``), which keeps a brushed edge or a
+    loaded Mantid mask to a few kB.
+    """
+
+    on: tuple[int, ...] = ()
+    off: tuple[int, ...] = ()
+
+    type_name: ClassVar[str] = "pixels"
+
+    @classmethod
+    def from_cells(cls, on: np.ndarray, off: np.ndarray | None = None) -> PixelSet:
+        """Build from boolean ``(n_rows, n_cols)`` layers."""
+        on_idx = np.flatnonzero(on)
+        off_idx = np.flatnonzero(off) if off is not None else np.zeros(0, dtype=np.int64)
+        return cls(tuple(int(i) for i in on_idx), tuple(int(i) for i in off_idx))
+
+    def _layer(self, cells: tuple[int, ...], detector_shape: tuple[int, int]) -> np.ndarray:
+        n = detector_shape[0] * detector_shape[1]
+        idx = np.asarray(cells, dtype=np.int64)
+        if idx.size and (idx.min() < 0 or idx.max() >= n):
+            raise ValueError(f"PixelSet cell outside the {detector_shape} detector")
+        out = np.zeros(n, dtype=bool)
+        out[idx] = True
+        return out.reshape(detector_shape)
+
+    def rasterise(self, detector_shape: tuple[int, int]) -> np.ndarray:
+        """The ``on`` cells (what this shape masks)."""
+        return self._layer(self.on, detector_shape)
+
+    def unmasked(self, detector_shape: tuple[int, int]) -> np.ndarray:
+        """The ``off`` cells (what this shape clears)."""
+        return self._layer(self.off, detector_shape)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type_name,
+            "on": indices_to_text(self.on),
+            "off": indices_to_text(self.off),
+        }
+
+
 _SHAPE_REGISTRY: dict[str, type[Shape]] = {
     Rectangle.type_name: Rectangle,
     Ellipse.type_name: Ellipse,
     Circle.type_name: Circle,
     Polygon.type_name: Polygon,
+    PixelSet.type_name: PixelSet,
 }
+
+
+def _cells(value: Any) -> tuple[int, ...]:
+    if isinstance(value, str):
+        return tuple(int(i) for i in text_to_indices(value))
+    return tuple(int(i) for i in value or ())
 
 
 def shape_from_dict(data: dict[str, Any]) -> Shape:
@@ -185,6 +270,8 @@ def shape_from_dict(data: dict[str, Any]) -> Shape:
         raise ValueError(f"unknown shape type: {type_name!r}")
     if cls is Polygon:
         return Polygon(vertices=tuple((float(x), float(y)) for x, y in data.get("vertices", [])))
+    if cls is PixelSet:
+        return PixelSet(on=_cells(data.get("on")), off=_cells(data.get("off")))
     payload = {k: v for k, v in data.items() if k != "type"}
     return cls(**payload)
 
@@ -233,6 +320,8 @@ class MaskBuilder:
         out = np.zeros(self.detector_shape, dtype=bool)
         for shape in self.shapes:
             out |= shape.rasterise(self.detector_shape)
+            if isinstance(shape, PixelSet):
+                out &= ~shape.unmasked(self.detector_shape)
         if self.inverse:
             out = ~out
         return out.astype(np.uint8)
@@ -270,8 +359,11 @@ __all__ = [
     "Circle",
     "Ellipse",
     "MaskBuilder",
+    "PixelSet",
     "Polygon",
     "Rectangle",
     "Shape",
+    "indices_to_text",
     "shape_from_dict",
+    "text_to_indices",
 ]
