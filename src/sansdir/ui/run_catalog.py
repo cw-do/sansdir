@@ -44,6 +44,7 @@ class CatalogTable(DataTable[Any]):
         Binding("m", "show_keys_current", "HDF5 metadata tree", show=False),
         Binding("M", "batch_extract_selection", "Batch extract metadata", show=False),
         Binding("K", "mask_current", "Mask editor", show=False),
+        Binding("V", "view_current", "Detector viewer", show=False),
         Binding("space", "toggle_tag", "Tag run", show=False),
         Binding("u", "clear_tags", "Clear all tags", show=False),
     ]
@@ -69,6 +70,9 @@ class CatalogTable(DataTable[Any]):
 
     def action_mask_current(self) -> None:
         self._delegate("action_mask_current")
+
+    def action_view_current(self) -> None:
+        self._delegate("action_view_current")
 
     def action_toggle_tag(self) -> None:
         self._delegate("action_toggle_tag")
@@ -443,6 +447,22 @@ class RunCatalogPanel(Vertical):
         self.app.run_worker(
             self.app.registry.dispatch("ui.mask", path=str(path)),  # type: ignore[attr-defined]
             name=f"mask:run{run}",
+            exclusive=False,
+        )
+
+    def action_view_current(self) -> None:
+        """``V`` from the catalog: open the detector viewer on the cursor row's run."""
+        run = self.current_run_number
+        if run is None:
+            self.app.notify("no run under cursor", severity="warning")
+            return
+        path = self.raw_nexus_path(run)
+        if not path.exists():
+            self.app.notify(f"raw file not found: {path}", severity="warning")
+            return
+        self.app.run_worker(
+            self.app.registry.dispatch("ui.view", path=str(path)),  # type: ignore[attr-defined]
+            name=f"view:run{run}",
             exclusive=False,
         )
 

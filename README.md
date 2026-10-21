@@ -164,6 +164,7 @@ On a host without `$DISPLAY` they fall back to PNGs under
 | `m` | Open the cursor's `.nxs(.h5)` in a tree browser (lazy expansion)         |
 | `M` | Batch metadata extract: tag NeXus files → `M` opens the picker dialog    |
 | `K` | Create a detector mask from the cursor's NeXus file (raw or processed)  |
+| `V` | Detector viewer (TOF slices, colour scale) on the cursor's NeXus file    |
 
 Inside the `m` tree browser, `/` switches to **keyword search** — the same
 substring filter the `M` picker offers, so you don't have to expand your way
@@ -199,6 +200,7 @@ in the file, `Ctrl+S` returns to the form.
 | `m` *(in catalog)* | HDF5 tree of the cursor's run                              |
 | `M` *(in catalog)* | Batch extract (tagged runs, or just the cursor row)       |
 | `K` *(in catalog)* | Mask editor on the cursor row's raw NeXus                  |
+| `V` *(in catalog)* | Detector viewer on the cursor row's raw NeXus              |
 
 The catalog always lives on the right pane regardless of where you press
 `i`, so the layout is predictable; `Ctrl+U` swaps file pane cwds without
@@ -574,12 +576,15 @@ anywhere in the package.
 
 ### Detector viewer *(in development — Phase 9.10)*
 
-A fast Qt viewer for raw EQSANS event files. It will replace the `K` mask
-editor once masking lands in it. For now, start it directly:
+A fast Qt viewer for raw EQSANS event files. Press `V` on a NeXus file (or
+on a run in the catalog), type `:viewer`, or start it directly:
 
 ```bash
 python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
 ```
+
+It opens in its own window and the TUI stays usable. Mask drawing is coming
+to it next; until then `K` still opens the matplotlib mask editor.
 
 - **Hover readout.** Each tube shows x / y, the Mantid name (`front bank8
   tube1 pixel131`), the detector ID, the raw file's DAS bank and the counts.

@@ -216,9 +216,11 @@ def default_keymap(mode: str = "SANS") -> list[KeyBinding]:
         KeyBinding("p", "ui.plot_auto", "Plot selection (Iq / trans / 2D / NeXus)"),
         KeyBinding("l", "ui.plot_generic", "Plot selection (linear-linear, headered tables)"),
         # NeXus tree (Phase 7) + batch extract (Phase 8) + mask (Phase 9.6)
+        # + detector viewer (Phase 9.10)
         KeyBinding("m", "hdf.show_keys", "HDF5 metadata tree", _hdf_under_cursor),
         KeyBinding("M", "ui.batch_extract", "Batch extract metadata → table"),
         KeyBinding("K", "ui.mask", "Create detector mask from cursor's NeXus"),
+        KeyBinding("V", "ui.view", "Detector viewer (TOF slices) for cursor's NeXus"),
         # Filter (Phase 2)
         KeyBinding("slash", "app.cmdline_prompt", "Filter active pane", _filter_open),
         KeyBinding(

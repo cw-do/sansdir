@@ -1368,6 +1368,116 @@ def _make_ui_mask(app: AppProtocol) -> Command:
     )
 
 
+VIEWER_MODULES: tuple[str, ...] = ("PySide6", "pyqtgraph")
+
+
+def viewer_available() -> bool:
+    """True when the ``viewer`` extra is installed — checked without importing Qt."""
+    import importlib.util
+
+    return all(importlib.util.find_spec(name) is not None for name in VIEWER_MODULES)
+
+
+def _make_ui_view(app: AppProtocol) -> Command:
+    """``V`` / ``:viewer`` — open the fast Qt detector viewer on a NeXus file.
+
+    Resolves the file like ``ui.mask`` (an explicit ``path=`` from the
+    catalog pane, otherwise the active pane's cursor) and spawns a
+    detached ``python -m sansdir.viewer <file>``; Qt is only ever
+    imported in that subprocess. The viewer exits 0 when its window is
+    closed; any other code is surfaced with the last stderr line.
+    """
+
+    async def handler(path: str | None = None) -> str | None:
+        import os
+        import subprocess
+        import sys
+        import tempfile
+
+        from sansdir.plot.backend import has_display
+
+        cur = Path(path) if path is not None else app.active_panel.cursor_path
+        if cur is None or not cur.is_file():
+            app.notify_user(
+                f"not a file: {cur}" if path is not None else "no file under cursor",
+                severity="warning",
+            )
+            return None
+        if not (cur.name.endswith(".nxs.h5") or cur.name.endswith(".nxs")):
+            app.notify_user(
+                f"{cur.name}: the detector viewer opens NeXus (.nxs.h5 / .nxs) — "
+                "raw event-mode or Mantid processed",
+                severity="warning",
+            )
+            return None
+        if not viewer_available():
+            app.notify_user(
+                "the detector viewer needs PySide6 + pyqtgraph: pip install 'sansdir[viewer]'",
+                severity="warning",
+            )
+            return None
+        if not has_display():
+            app.notify_user("no $DISPLAY — the detector viewer needs a display", severity="warning")
+            return None
+        stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115 — Popen keeps using it
+            mode="w+", delete=False, prefix="sansdir-viewer-", suffix=".log"
+        )
+        log_path = Path(stderr_log.name)
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "sansdir.viewer", str(cur)],
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_log,
+                start_new_session=True,
+                env={**os.environ},
+            )
+        except OSError as exc:
+            stderr_log.close()
+            log_path.unlink(missing_ok=True)
+            app.notify_user(f"detector viewer failed to launch: {exc}", severity="error")
+            return None
+        app.notify_user(f"detector viewer opened on {cur.name}")
+        # Dispatched as a Textual worker, so waiting here does not block the TUI.
+        try:
+            rc = await asyncio.to_thread(proc.wait)
+        finally:
+            stderr_log.close()
+        try:
+            stderr_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            stderr_text = ""
+        finally:
+            log_path.unlink(missing_ok=True)
+        if rc != 0:
+            tail = next(
+                (line.strip()[:200] for line in reversed(stderr_text.splitlines()) if line.strip()),
+                "no stderr captured",
+            )
+            app.notify_user(f"detector viewer failed (rc={rc}): {tail}", severity="error")
+        return str(cur)
+
+    return Command(
+        name="ui.view",
+        description=(
+            "Open the fast detector viewer (TOF slicing, colour scale, "
+            "bank/tube/pixel readout) on a NeXus file."
+        ),
+        params=(
+            CommandParam(
+                name="path",
+                type="path",
+                description=(
+                    "Explicit *.nxs.h5 / *.nxs path (catalog pane uses this); "
+                    "blank → fall back to the active file pane's cursor."
+                ),
+                required=False,
+            ),
+        ),
+        handler=handler,
+        aliases=("viewer", "detector"),
+    )
+
+
 def _make_hdf_show_keys(app: AppProtocol) -> Command:
     def handler(path: str) -> None:
         from sansdir.app import SansdirApp as _RealApp
@@ -2949,6 +3059,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_plot_generic(app),
         _make_hdf_show_keys(app),
         _make_ui_mask(app),
+        _make_ui_view(app),
         _make_hdf_batch_extract(app),
         _make_ui_batch_extract(app),
         _make_ui_plot_auto(app),

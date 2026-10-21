@@ -632,13 +632,13 @@ class SansdirApp(App[int]):
             return
         # CatalogTable owns its own ``p`` / ``Enter`` (plot raw run),
         # ``m`` (HDF5 tree for the cursor's run), ``M`` (batch-extract
-        # the selection), ``K`` (mask editor), ``space`` (tag run) and
-        # ``u`` (clear tags). For every other key (Tab, q, :, ?,
-        # F-keys, …) we still want the App's keymap to fire normally —
+        # the selection), ``K`` (mask editor), ``V`` (detector viewer),
+        # ``space`` (tag run) and ``u`` (clear tags). For every other key
+        # (Tab, q, :, ?, F-keys, …) we still want the App's keymap to fire normally —
         # and a blanket "skip-when-focused-binds-anything" check would
         # also kill Enter on a FilePanel, where DataTable's row-select
         # binding shouldn't block ``nav.cd``.
-        if event.key in ("p", "enter", "m", "M", "K", "space", "u") and _is_catalog_table(
+        if event.key in ("p", "enter", "m", "M", "K", "V", "space", "u") and _is_catalog_table(
             self.focused
         ):
             return
