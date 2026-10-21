@@ -12,7 +12,7 @@ pytest.importorskip("PySide6.QtWidgets")
 pytest.importorskip("pyqtgraph")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPointF, QSettings
+from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
 
 from sansdir.viewer.colorscale import display_levels
@@ -217,15 +217,14 @@ def test_colour_map_picker(window: MainWindow) -> None:
 
 
 def test_scale_settings_persist(qapp: QApplication, cube: TofCube, tmp_path: Path) -> None:
-    ini = str(tmp_path / "viewer.ini")
-    first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    path = tmp_path / "viewer.json"
+    first = MainWindow(settings=path)
     first._set_cube(cube)
     first.scale_panel.cmap_box.setCurrentText("magma")
     first.scale_panel.max_box.setValue(77)  # locks
     first.log_action.trigger()
-    first.settings.sync()
-    first.close()
-    second = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    first.close()  # flushes the pending write
+    second = MainWindow(settings=path)
     try:
         state = second.scale
         assert (state.cmap, state.log, state.locked, state.vmax) == ("magma", False, True, 77)
@@ -234,14 +233,27 @@ def test_scale_settings_persist(qapp: QApplication, cube: TofCube, tmp_path: Pat
         second.close()
 
 
-def test_bad_settings_fall_back_to_defaults(qapp: QApplication, tmp_path: Path) -> None:
-    ini = tmp_path / "viewer.ini"
-    ini.write_text("[scale]\ncmap=nope\nvmin=abc\nlog=false\n")
-    win = MainWindow(settings=QSettings(str(ini), QSettings.Format.IniFormat))
+def test_dragging_the_colour_bar_does_not_write_per_event(
+    qapp: QApplication, cube: TofCube, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-21 freeze: QSettings synced (and locked a file on NFS) on every drag event."""
+    from sansdir.viewer.qt import main_window as mw
+
+    writes: list[float] = []
+    real = mw.save_scale
+    monkeypatch.setattr(mw, "save_scale", lambda p, st: writes.append(st.vmax) or real(p, st))
+    win = MainWindow(settings=tmp_path / "viewer.json")
+    win.show()
+    win._set_cube(cube)
     try:
-        assert win.scale.cmap == "viridis" and win.scale.vmin == 1.0 and not win.scale.log
+        for k in range(200):  # a handle drag: one levels change per mouse move
+            win.view.lut.setLevels(0.0, 1.0 + k / 100)
+        assert writes == [] and win._settings_timer.isActive()
+        win._settings_timer.timeout.emit()  # the changes settled
+        assert len(writes) == 1 and writes[0] == pytest.approx(10 ** (1.0 + 199 / 100))
     finally:
         win.close()
+    assert len(writes) == 2  # closing writes the final state once more
 
 
 @pytest.mark.parametrize(

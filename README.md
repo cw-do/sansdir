@@ -614,7 +614,7 @@ viewer with the rectangle tool armed, for masking (see **Masks** below).
   With *Lock limits* off, every TOF slice is auto-scaled. Typing a limit or
   dragging the colour-bar handles locks it, so slices can be compared. The
   colour bar is labelled in counts in log mode. The choices are remembered
-  in `~/.config/sansdir/viewer.ini`.
+  in `~/.config/sansdir/viewer.json`.
 - Ctrl+O or drag-and-drop opens another file. Image export comes next.
 
 **Masks.** The toolbar (also the *Mask* menu) draws the mask over the

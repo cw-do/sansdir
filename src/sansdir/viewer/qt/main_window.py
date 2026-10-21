@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
 from sansdir.viewer import EXIT_SAVED
 from sansdir.viewer.cache import CubeCache, describe
 from sansdir.viewer.colorscale import (
-    COLORMAPS,
     ScaleState,
     counts_from_levels,
     display_levels,
@@ -58,6 +57,7 @@ from sansdir.viewer.qt.mask_editor import MaskEditor
 from sansdir.viewer.qt.progress import LoadProgress, format_count
 from sansdir.viewer.qt.scale_panel import ScalePanel
 from sansdir.viewer.qt.tof_panel import TofPanel
+from sansdir.viewer.settings import default_path, load_scale, save_scale
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
 MASK_OPEN_FILTER = "Masks (*.json *.xml *.nxs *.h5 *.npy);;All files (*)"
@@ -66,7 +66,7 @@ MASK_SAVE_FILTERS = {
     "Mantid mask XML (*.xml)": ".xml",
     "NumPy array (*.npy)": ".npy",
 }
-SETTINGS_GROUP = "scale"
+SETTINGS_SAVE_DELAY_MS = 1500  # write preferences once changes settle, never per drag event
 # (tool, label, key, tooltip) per mask tool, in toolbar order.
 TOOL_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
     ("pan", "Pan", "V", "Pan / select: drag to pan; drag ROIs to move, handles to resize"),
@@ -80,11 +80,6 @@ TOOL_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
-def default_settings() -> QSettings:
-    """``~/.config/sansdir/viewer.ini`` — colour-scale choices kept between sessions."""
-    return QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "sansdir", "viewer")
-
-
 class MainWindow(QMainWindow):
     # Emitted with each new CubeLoader before it starts (a small run can finish
     # before open_path returns) and before the window's own slots are connected:
@@ -96,7 +91,7 @@ class MainWindow(QMainWindow):
         self,
         nbins: int = DEFAULT_NBINS,
         cache: CubeCache | None = None,
-        settings: QSettings | None = None,
+        settings: Path | None = None,
         *,
         mask_output: Path | None = None,
         ask_to_save: bool = False,
@@ -104,7 +99,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.nbins = nbins
         self.cache = cache
-        self.settings = settings  # None: nothing remembered (tests)
+        self.settings = settings  # viewer.json; None: nothing remembered (tests)
         self.mask_output = mask_output  # default "Save mask" path
         self.ask_to_save = ask_to_save  # closing with unsaved mask edits asks first
         self.saved_any = False
@@ -113,7 +108,11 @@ class MainWindow(QMainWindow):
         self._close_after_save = False
         self.cube: TofCube | None = None
         self._image: np.ndarray | None = None  # counts currently shown
-        self.scale = _load_scale(settings)
+        self.scale = load_scale(settings) if settings is not None else ScaleState()
+        self._settings_timer = QTimer(self)
+        self._settings_timer.setSingleShot(True)
+        self._settings_timer.setInterval(SETTINGS_SAVE_DELAY_MS)
+        self._settings_timer.timeout.connect(self.flush_settings)
         self._applying_levels = False
         self._hover: PixelInfo | None = None
         self._loader: CubeLoader | None = None
@@ -486,8 +485,14 @@ class MainWindow(QMainWindow):
         self._save_scale()
 
     def _save_scale(self) -> None:
+        """Schedule a preferences write (debounced: a handle drag is hundreds of events)."""
         if self.settings is not None:
-            _store_scale(self.settings, self.scale)
+            self._settings_timer.start()
+
+    def flush_settings(self) -> None:
+        self._settings_timer.stop()
+        if self.settings is not None:
+            save_scale(self.settings, self.scale)
 
     def _show_readout(self, info: PixelInfo | None) -> None:
         self._hover = info
@@ -676,60 +681,13 @@ class MainWindow(QMainWindow):
                 if self.save_mask():
                     self._close_after_save = True
                 return
+        self.flush_settings()
         # A load stops within ~0.2 s; a cache write in progress (~1 s) is
         # left to finish so it is not torn.
         for loader in list(self._retired):
             loader.stop()
             loader.wait(15_000)
         super().closeEvent(event)
-
-
-def _load_scale(settings: QSettings | None) -> ScaleState:
-    """The remembered colour-scale choices; defaults for anything missing or bad."""
-    state = ScaleState()
-    if settings is None:
-        return state
-    settings.beginGroup(SETTINGS_GROUP)
-    try:
-        state.log = _as_bool(settings.value("log"), state.log)
-        state.locked = _as_bool(settings.value("locked"), state.locked)
-        cmap = str(settings.value("cmap", state.cmap))
-        state.cmap = cmap if cmap in COLORMAPS else state.cmap
-        try:
-            state.set_percentiles(
-                float(settings.value("percentile_lo", state.percentiles[0])),  # type: ignore[arg-type]
-                float(settings.value("percentile_hi", state.percentiles[1])),  # type: ignore[arg-type]
-            )
-            state.set_limits(
-                float(settings.value("vmin", state.vmin)),  # type: ignore[arg-type]
-                float(settings.value("vmax", state.vmax)),  # type: ignore[arg-type]
-            )
-        except (TypeError, ValueError):
-            pass
-    finally:
-        settings.endGroup()
-    return state
-
-
-def _store_scale(settings: QSettings, state: ScaleState) -> None:
-    settings.beginGroup(SETTINGS_GROUP)
-    settings.setValue("log", state.log)
-    settings.setValue("locked", state.locked)
-    settings.setValue("cmap", state.cmap)
-    settings.setValue("percentile_lo", state.percentiles[0])
-    settings.setValue("percentile_hi", state.percentiles[1])
-    settings.setValue("vmin", state.vmin)
-    settings.setValue("vmax", state.vmax)
-    settings.endGroup()
-
-
-def _as_bool(value: object, default: bool) -> bool:
-    """QSettings hands booleans back as ``"true"`` / ``"false"`` from an ini file."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in ("true", "1", "yes")
 
 
 def run(
@@ -754,7 +712,7 @@ def run(
     win = MainWindow(
         nbins,
         CubeCache.default() if use_cache else None,
-        default_settings(),
+        default_path(),
         mask_output=output,
         ask_to_save=not benchmark,
     )
