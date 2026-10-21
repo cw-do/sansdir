@@ -403,6 +403,8 @@ async def test_catalog_capital_k_launches_mask_for_cursor_run(
     # CI cluster would otherwise short-circuit with a "no $DISPLAY"
     # warning before Popen runs.
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
 
     app = _real_app(tmp_path)
     async with app.run_test() as pilot:
@@ -471,6 +473,8 @@ async def test_mask_save_refreshes_panes_when_editor_exits_zero(
 
     monkeypatch.setattr("subprocess.Popen", _FakePopenZero)
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
 
     from sansdir.app import SansdirApp
 
@@ -524,6 +528,8 @@ async def test_mask_save_skips_refresh_when_editor_exits_nonzero(
 
     monkeypatch.setattr("subprocess.Popen", _FakePopenNonzero)
     monkeypatch.setattr("sansdir.plot.backend.has_display", lambda: True)
+    # The matplotlib editor is K's fallback when the Qt viewer extra is missing.
+    monkeypatch.setattr("sansdir.commands.builtins.viewer_available", lambda: False)
 
     from sansdir.app import SansdirApp
 

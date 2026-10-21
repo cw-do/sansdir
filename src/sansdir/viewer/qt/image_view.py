@@ -1,8 +1,9 @@
-"""Detector image widget: image + colour bar + hover readout + tube/bank highlight."""
+"""Detector image widget: image + colour bar + mask overlay + hover readout + highlight."""
 
 from __future__ import annotations
 
 import warnings
+from typing import Protocol
 
 import numpy as np
 import pyqtgraph as pg
@@ -39,6 +40,45 @@ _EXTRA_CMAPS = {
     "gray": ([0.0, 1.0], [(0, 0, 0), (255, 255, 255)]),
 }
 HIGHLIGHT_PEN = pg.mkPen((255, 255, 255, 200), width=1)
+MASK_RGBA = (255, 40, 40, 120)
+
+
+class Tool(Protocol):
+    """A mask tool: gets the left-button gestures on the detector, in view coordinates."""
+
+    def drag(self, start: QPointF, pos: QPointF, phase: str, shift: bool) -> None:
+        """``phase`` is ``"start"``, ``"move"`` or ``"finish"``."""
+
+    def click(self, pos: QPointF, double: bool, shift: bool) -> None: ...
+
+
+class ToolViewBox(pg.ViewBox):
+    """A ViewBox that hands left drags and clicks to :attr:`tool` when one is set.
+
+    With no tool, left-drag pans as usual. Middle-drag pans and the wheel
+    zooms in every mode, and ROIs on top still take their own drags.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tool: Tool | None = None
+
+    def mouseDragEvent(self, ev, axis=None) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        if self.tool is None or axis is not None or ev.button() != Qt.MouseButton.LeftButton:
+            super().mouseDragEvent(ev, axis)
+            return
+        ev.accept()
+        phase = "start" if ev.isStart() else "finish" if ev.isFinish() else "move"
+        shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self.tool.drag(self.mapToView(ev.buttonDownPos()), self.mapToView(ev.pos()), phase, shift)
+
+    def mouseClickEvent(self, ev) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        if self.tool is None or ev.button() != Qt.MouseButton.LeftButton:
+            super().mouseClickEvent(ev)
+            return
+        ev.accept()
+        shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self.tool.click(self.mapToView(ev.pos()), ev.double(), shift)
 
 
 class DetectorView(pg.GraphicsLayoutWidget):
@@ -54,7 +94,8 @@ class DetectorView(pg.GraphicsLayoutWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.plot = self.addPlot()
+        self.vb = ToolViewBox()
+        self.plot = self.addPlot(viewBox=self.vb)
         self.plot.setAspectLocked(True, ratio=CELL_ASPECT)
         self.plot.setLabel("bottom", "x  (tube column)")
         self.plot.setLabel("left", "y  (pixel along tube)")
@@ -62,6 +103,9 @@ class DetectorView(pg.GraphicsLayoutWidget):
 
         self.image = pg.ImageItem(axisOrder="row-major")
         self.plot.addItem(self.image)
+        self.overlay = pg.ImageItem(axisOrder="row-major")
+        self.overlay.setZValue(5)
+        self.plot.addItem(self.overlay)
 
         self.lut = pg.HistogramLUTItem()
         self.lut.setImageItem(self.image)
@@ -86,6 +130,15 @@ class DetectorView(pg.GraphicsLayoutWidget):
             warnings.simplefilter("ignore", RuntimeWarning)
             self.image.setImage(values, autoLevels=False, levels=levels)
         self.lut.setLevels(*levels)
+
+    def set_mask(self, mask: np.ndarray | None) -> None:
+        """Draw masked cells in translucent red (``None`` or all-clear: nothing)."""
+        if mask is None or not mask.any():
+            self.overlay.clear()
+            return
+        rgba = np.zeros((*mask.shape, 4), dtype=np.uint8)
+        rgba[mask] = MASK_RGBA
+        self.overlay.setImage(rgba, autoLevels=False, levels=(0, 255))
 
     def set_cmap(self, name: str) -> None:
         """Colour map by name (pyqtgraph's bundled maps, ``jet`` or ``gray``)."""

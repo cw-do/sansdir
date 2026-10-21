@@ -1,4 +1,8 @@
-"""``python -m sansdir.viewer [FILE]`` — open the detector viewer."""
+"""``python -m sansdir.viewer [FILE] [--mask M] [--output OUT]`` — open the detector viewer.
+
+Exit codes: 0 closed, 3 closed after saving a mask, 2 the viewer extra is
+missing (or a bad argument).
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ import sys
 from pathlib import Path
 
 from sansdir.viewer.cube import DEFAULT_NBINS
+from sansdir.viewer.masking import MASK_TOOLS
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,6 +22,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("path", nargs="?", type=Path, help="raw or processed NeXus file")
     parser.add_argument(
         "--nbins", type=int, default=DEFAULT_NBINS, help="fine TOF bins (default %(default)s)"
+    )
+    parser.add_argument(
+        "--mask", type=Path, help="load this mask (mask_log.json / .xml / .nxs / .npy) at start"
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="default path for Save mask (default: <file-stem>_mask.nxs next to FILE)",
+    )
+    parser.add_argument(
+        "--tool", choices=MASK_TOOLS, default="pan", help="mask tool active at start"
     )
     parser.add_argument(
         "--no-cache",
@@ -50,7 +67,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(args.path, nbins=args.nbins, use_cache=not args.no_cache, benchmark=args.benchmark)
+    return run(
+        args.path,
+        nbins=args.nbins,
+        use_cache=not args.no_cache,
+        benchmark=args.benchmark,
+        mask=args.mask,
+        output=args.output,
+        tool=args.tool,
+    )
 
 
 if __name__ == "__main__":

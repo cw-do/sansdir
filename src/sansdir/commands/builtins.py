@@ -1201,7 +1201,12 @@ def _make_ui_plot_auto(app: AppProtocol) -> Command:
 
 
 def _make_ui_mask(app: AppProtocol) -> Command:
-    """``K`` keystroke / ``:mask`` — open the mask GUI for a NeXus file.
+    """``K`` keystroke / ``:mask`` — open the mask editor for a NeXus file.
+
+    Since Phase 9.10 that is the Qt detector viewer (started on the
+    rectangle tool, via :func:`_launch_viewer`) whenever the ``viewer``
+    extra is installed; otherwise the matplotlib editor below, with a
+    status-bar note.
 
     Two entry points (mirrors how ``ui.batch_extract`` is wired):
 
@@ -1254,6 +1259,13 @@ def _make_ui_mask(app: AppProtocol) -> Command:
         # accidentally try to write back into a read-only IPTS folder.
         write_dir = app.inactive_panel.cwd
         out = write_dir / f"{cur.stem}_mask.nxs"
+        if viewer_available():
+            # Phase 9.10: the Qt detector viewer is the mask editor now.
+            return await _launch_viewer(app, cur, out, tool="rect")
+        app.notify_user(
+            "PySide6 not installed — using the matplotlib mask editor "
+            "(pip install 'sansdir[viewer]' for the fast one)"
+        )
         cmd = [
             sys.executable,
             "-m",
@@ -1371,6 +1383,69 @@ def _make_ui_mask(app: AppProtocol) -> Command:
 VIEWER_MODULES: tuple[str, ...] = ("PySide6", "pyqtgraph")
 
 
+async def _launch_viewer(
+    app: AppProtocol, source: Path, mask_output: Path, *, tool: str | None = None
+) -> str:
+    """Run ``python -m sansdir.viewer`` detached on ``source`` and wait for it.
+
+    ``mask_output`` is the viewer's default *Save mask* path (the inactive
+    pane, MDIR-style). Qt is only imported in the subprocess. Exit code
+    :data:`sansdir.viewer.EXIT_SAVED` means a mask was saved → both panes
+    refresh; 0 is a plain close; anything else is reported with the last
+    line of stderr. Dispatched as a Textual worker, so the TUI stays live
+    while the viewer is open.
+    """
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    from sansdir.viewer import EXIT_SAVED
+
+    cmd = [sys.executable, "-m", "sansdir.viewer", str(source), "--output", str(mask_output)]
+    if tool is not None:
+        cmd += ["--tool", tool]
+    stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115 — Popen keeps using it
+        mode="w+", delete=False, prefix="sansdir-viewer-", suffix=".log"
+    )
+    log_path = Path(stderr_log.name)
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_log,
+            start_new_session=True,
+            env={**os.environ},
+        )
+    except OSError as exc:
+        stderr_log.close()
+        log_path.unlink(missing_ok=True)
+        app.notify_user(f"detector viewer failed to launch: {exc}", severity="error")
+        return str(source)
+    app.notify_user(f"detector viewer opened on {source.name}")
+    try:
+        rc = await asyncio.to_thread(proc.wait)
+    finally:
+        stderr_log.close()
+    try:
+        stderr_text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        stderr_text = ""
+    finally:
+        log_path.unlink(missing_ok=True)
+    if rc == EXIT_SAVED:
+        app.active_panel.refresh_listing()
+        app.inactive_panel.refresh_listing()
+        app.notify_user(f"mask saved (panes refreshed) — {source.name}")
+    elif rc != 0:
+        tail = next(
+            (line.strip()[:200] for line in reversed(stderr_text.splitlines()) if line.strip()),
+            "no stderr captured",
+        )
+        app.notify_user(f"detector viewer failed (rc={rc}): {tail}", severity="error")
+    return str(source)
+
+
 def viewer_available() -> bool:
     """True when the ``viewer`` extra is installed — checked without importing Qt."""
     import importlib.util
@@ -1382,18 +1457,12 @@ def _make_ui_view(app: AppProtocol) -> Command:
     """``V`` / ``:viewer`` — open the fast Qt detector viewer on a NeXus file.
 
     Resolves the file like ``ui.mask`` (an explicit ``path=`` from the
-    catalog pane, otherwise the active pane's cursor) and spawns a
-    detached ``python -m sansdir.viewer <file>``; Qt is only ever
-    imported in that subprocess. The viewer exits 0 when its window is
-    closed; any other code is surfaced with the last stderr line.
+    catalog pane, otherwise the active pane's cursor) and starts it with
+    :func:`_launch_viewer`. The viewer is also the mask editor; ``K``
+    opens the same window with the rectangle tool armed.
     """
 
     async def handler(path: str | None = None) -> str | None:
-        import os
-        import subprocess
-        import sys
-        import tempfile
-
         from sansdir.plot.backend import has_display
 
         cur = Path(path) if path is not None else app.active_panel.cursor_path
@@ -1419,42 +1488,8 @@ def _make_ui_view(app: AppProtocol) -> Command:
         if not has_display():
             app.notify_user("no $DISPLAY — the detector viewer needs a display", severity="warning")
             return None
-        stderr_log = tempfile.NamedTemporaryFile(  # noqa: SIM115 — Popen keeps using it
-            mode="w+", delete=False, prefix="sansdir-viewer-", suffix=".log"
-        )
-        log_path = Path(stderr_log.name)
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "sansdir.viewer", str(cur)],
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_log,
-                start_new_session=True,
-                env={**os.environ},
-            )
-        except OSError as exc:
-            stderr_log.close()
-            log_path.unlink(missing_ok=True)
-            app.notify_user(f"detector viewer failed to launch: {exc}", severity="error")
-            return None
-        app.notify_user(f"detector viewer opened on {cur.name}")
-        # Dispatched as a Textual worker, so waiting here does not block the TUI.
-        try:
-            rc = await asyncio.to_thread(proc.wait)
-        finally:
-            stderr_log.close()
-        try:
-            stderr_text = log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            stderr_text = ""
-        finally:
-            log_path.unlink(missing_ok=True)
-        if rc != 0:
-            tail = next(
-                (line.strip()[:200] for line in reversed(stderr_text.splitlines()) if line.strip()),
-                "no stderr captured",
-            )
-            app.notify_user(f"detector viewer failed (rc={rc}): {tail}", severity="error")
-        return str(cur)
+        out = app.inactive_panel.cwd / f"{cur.stem}_mask.nxs"
+        return await _launch_viewer(app, cur, out)
 
     return Command(
         name="ui.view",

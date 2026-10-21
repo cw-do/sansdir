@@ -1,4 +1,4 @@
-"""``V`` / ``:viewer`` — launch the Qt detector viewer (Phase 9.10).
+"""``V`` / ``:viewer`` and ``K`` — launch the Qt detector viewer (Phase 9.10).
 
 ``subprocess.Popen`` is replaced, so no viewer window is ever opened.
 """
@@ -49,6 +49,11 @@ def popen(monkeypatch: pytest.MonkeyPatch) -> type[_FakePopen]:
     return fake
 
 
+def _viewer_cmd(nexus: Path, right: Path, *tool: str) -> list[str]:
+    out = right / f"{nexus.stem}_mask.nxs"
+    return ["-m", "sansdir.viewer", str(nexus), "--output", str(out), *tool]
+
+
 def _app(tmp_path: Path) -> tuple[SansdirApp, Path]:
     left = tmp_path / "L"
     right = tmp_path / "R"
@@ -65,7 +70,7 @@ def _app(tmp_path: Path) -> tuple[SansdirApp, Path]:
     return app, nexus
 
 
-async def _press_v_on(app: SansdirApp, path: Path) -> list[str]:
+async def _press_v_on(app: SansdirApp, path: Path, key: str = "V") -> list[str]:
     notes: list[str] = []
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -77,9 +82,10 @@ async def _press_v_on(app: SansdirApp, path: Path) -> list[str]:
 
         app.notify_user = record  # type: ignore[method-assign]
         assert app.active_panel.move_cursor_to_path(path)
-        await pilot.press("V")
+        await pilot.press(key)
         await pilot.pause()
-        await pilot.pause()
+        await pilot.pause(0.3)
+        app._names_after = {e.name for e in app.inactive_panel._all_entries}  # type: ignore[attr-defined]
         await pilot.press("q")
     return notes
 
@@ -90,9 +96,55 @@ async def test_v_opens_the_viewer_on_the_cursor_file(
     app, nexus = _app(tmp_path)
     notes = await _press_v_on(app, nexus)
     assert len(popen.calls) == 1
-    cmd = popen.calls[0]
-    assert cmd[1:] == ["-m", "sansdir.viewer", str(nexus)]
+    # Save mask defaults to the other pane, as K's editor always did.
+    assert popen.calls[0][1:] == _viewer_cmd(nexus, tmp_path / "R")
     assert any("detector viewer opened on EQSANS_001.nxs.h5" in n for n in notes)
+    assert not any("mask saved" in n for n in notes)  # rc 0: closed, nothing saved
+
+
+async def test_k_opens_the_viewer_on_the_rectangle_tool(
+    tmp_path: Path, popen: type[_FakePopen]
+) -> None:
+    app, nexus = _app(tmp_path)
+    await _press_v_on(app, nexus, "K")
+    assert popen.calls[0][1:] == _viewer_cmd(nexus, tmp_path / "R", "--tool", "rect")
+
+
+async def test_k_falls_back_to_the_matplotlib_editor(
+    tmp_path: Path, popen: type[_FakePopen], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(builtins, "viewer_available", lambda: False)
+    calls: list[list[str]] = []
+
+    class _Gui:
+        def __init__(self, cmd, **_kwargs):  # type: ignore[no-untyped-def]
+            calls.append(list(cmd))
+
+        def wait(self) -> int:
+            return 1
+
+    monkeypatch.setattr("subprocess.Popen", _Gui)
+    app, nexus = _app(tmp_path)
+    notes = await _press_v_on(app, nexus, "K")
+    assert calls and "sansdir.mask.gui" in calls[0]
+    assert any("using the matplotlib mask editor" in n for n in notes)
+
+
+async def test_a_saved_mask_refreshes_the_panes(tmp_path: Path, popen: type[_FakePopen]) -> None:
+    from sansdir.viewer import EXIT_SAVED
+
+    popen.rc = EXIT_SAVED
+    app, nexus = _app(tmp_path)
+    original = popen.__init__
+
+    def write_mask(self, cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        original(self, cmd, *args, **kwargs)
+        (tmp_path / "R" / "EQSANS_001.nxs_mask.nxs").write_bytes(b"")  # as the viewer would
+
+    popen.__init__ = write_mask  # type: ignore[method-assign]
+    notes = await _press_v_on(app, nexus, "K")
+    assert "EQSANS_001.nxs_mask.nxs" in app._names_after  # type: ignore[attr-defined]
+    assert any("mask saved (panes refreshed)" in n for n in notes)
 
 
 async def test_v_refuses_a_non_nexus_file(tmp_path: Path, popen: type[_FakePopen]) -> None:
@@ -153,7 +205,7 @@ async def test_catalog_v_opens_the_viewer_for_the_cursor_run(
         await pilot.pause()
         await pilot.pause()
         await pilot.press("q")
-    assert popen.calls and popen.calls[0][1:] == ["-m", "sansdir.viewer", str(nexus)]
+    assert popen.calls and popen.calls[0][:4][1:] == ["-m", "sansdir.viewer", str(nexus)]
 
 
 def test_viewer_available_finds_the_extra_without_importing_qt() -> None:

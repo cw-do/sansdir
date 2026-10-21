@@ -36,6 +36,17 @@ from sansdir.mask.core import MaskBuilder, PixelSet, Shape, text_to_indices
 from sansdir.viewer.geometry import NCOLS, NPIX, NROWS, detector_ids, to_image
 
 DETECTOR_SHAPE: tuple[int, int] = (NROWS, NCOLS)
+# Mask-editor tools (the viewer's toolbar, ``--tool``); "pan" = no tool.
+MASK_TOOLS: tuple[str, ...] = (
+    "pan",
+    "rect",
+    "ellipse",
+    "circle",
+    "polygon",
+    "brush",
+    "eraser",
+    "tube",
+)
 VIEW_OFFSET: float = 0.5  # view coordinate = shape coordinate + 0.5
 MAX_UNDO: int = 200
 MASK_SUFFIXES: tuple[str, ...] = (".json", ".xml", ".nxs", ".h5", ".npy")
@@ -404,6 +415,7 @@ def save_mask(state: MaskState, source: Path, run_number: str, output: Path) -> 
 __all__ = [
     "DETECTOR_SHAPE",
     "MASK_SUFFIXES",
+    "MASK_TOOLS",
     "SAVE_FORMATS",
     "VIEW_OFFSET",
     "MaskState",

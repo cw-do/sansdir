@@ -1,4 +1,4 @@
-"""Viewer main window: detector view, colour-scale panel, TOF panel, readout, loading."""
+"""Viewer main window: detector view, mask tools, colour-scale panel, TOF panel, readout."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
@@ -21,15 +22,19 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSpinBox,
     QSplitter,
+    QToolBar,
     QWidget,
 )
 
+from sansdir.viewer import EXIT_SAVED
 from sansdir.viewer.cache import CubeCache, describe
 from sansdir.viewer.colorscale import (
     COLORMAPS,
@@ -39,15 +44,40 @@ from sansdir.viewer.colorscale import (
     display_values,
 )
 from sansdir.viewer.cube import DEFAULT_NBINS, TofCube
-from sansdir.viewer.geometry import PixelInfo
+from sansdir.viewer.geometry import NPIX, PixelInfo
+from sansdir.viewer.masking import (
+    SAVE_FORMATS,
+    SavedMask,
+    default_output,
+    read_mask_file,
+)
+from sansdir.viewer.qt.dialogs import ThresholdDialog, ask_spec
 from sansdir.viewer.qt.image_view import DetectorView
-from sansdir.viewer.qt.loader import CubeLoader
+from sansdir.viewer.qt.loader import CubeLoader, MaskSaver
+from sansdir.viewer.qt.mask_editor import MaskEditor
 from sansdir.viewer.qt.progress import LoadProgress, format_count
 from sansdir.viewer.qt.scale_panel import ScalePanel
 from sansdir.viewer.qt.tof_panel import TofPanel
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
+MASK_OPEN_FILTER = "Masks (*.json *.xml *.nxs *.h5 *.npy);;All files (*)"
+MASK_SAVE_FILTERS = {
+    "Mantid mask NeXus (*.nxs)": ".nxs",
+    "Mantid mask XML (*.xml)": ".xml",
+    "NumPy array (*.npy)": ".npy",
+}
 SETTINGS_GROUP = "scale"
+# (tool, label, key, tooltip) per mask tool, in toolbar order.
+TOOL_ACTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("pan", "Pan", "V", "Pan / select: drag to pan; drag ROIs to move, handles to resize"),
+    ("rect", "Rect", "R", "Draw a rectangle"),
+    ("ellipse", "Ellipse", "E", "Draw an ellipse"),
+    ("circle", "Circle", "C", "Draw a circle (drag from the centre)"),
+    ("polygon", "Polygon", "P", "Click the corners; double-click to close"),
+    ("brush", "Brush", "B", "Paint masked pixels (click or drag)"),
+    ("eraser", "Eraser", "X", "Unmask pixels, also inside shapes (click or drag)"),
+    ("tube", "Tube", "T", "Click a tube to mask / unmask it; Shift-click: its whole bank"),
+)
 
 
 def default_settings() -> QSettings:
@@ -67,11 +97,20 @@ class MainWindow(QMainWindow):
         nbins: int = DEFAULT_NBINS,
         cache: CubeCache | None = None,
         settings: QSettings | None = None,
+        *,
+        mask_output: Path | None = None,
+        ask_to_save: bool = False,
     ) -> None:
         super().__init__()
         self.nbins = nbins
         self.cache = cache
         self.settings = settings  # None: nothing remembered (tests)
+        self.mask_output = mask_output  # default "Save mask" path
+        self.ask_to_save = ask_to_save  # closing with unsaved mask edits asks first
+        self.saved_any = False
+        self._mask: np.ndarray | None = None  # None when nothing is masked
+        self._saver: MaskSaver | None = None
+        self._close_after_save = False
         self.cube: TofCube | None = None
         self._image: np.ndarray | None = None  # counts currently shown
         self.scale = _load_scale(settings)
@@ -97,6 +136,9 @@ class MainWindow(QMainWindow):
         self.scale_panel.show_state(self.scale)
         self.tof_panel = TofPanel()
         self.tof_panel.range_changed.connect(self._on_tof_range)
+        self.editor = MaskEditor(self.view)
+        self.editor.changed.connect(self._on_mask_changed)
+        self.editor.message.connect(self._say)
 
         top = QWidget()
         row = QHBoxLayout(top)
@@ -115,15 +157,19 @@ class MainWindow(QMainWindow):
         self.readout = QLabel()
         self.readout.setFont(mono)
         self.info = QLabel()
+        self.mask_label = QLabel()
         self.loading = LoadProgress()
         self.loading.cancel_requested.connect(self.cancel_load)
         bar = self.statusBar()
         bar.addWidget(self.readout, 1)
         bar.addPermanentWidget(self.info)
+        bar.addPermanentWidget(self.mask_label)
         bar.addPermanentWidget(self.loading)
-        QShortcut(QKeySequence("Esc"), self, self.cancel_load)
+        QShortcut(QKeySequence("Esc"), self, self._on_escape)
 
         self._build_menus()
+        self._build_mask_tools()
+        self._update_mask_label()
         self.setAcceptDrops(True)
         self._update_title()
         self.resize(1100, 980)
@@ -139,7 +185,15 @@ class MainWindow(QMainWindow):
         if self.cache is None:
             self.clear_cache_action.setEnabled(False)
             self.clear_cache_action.setToolTip("started with --no-cache")
+        self.load_mask_action = QAction("&Load mask…", self, shortcut=QKeySequence("Ctrl+L"))
+        self.load_mask_action.triggered.connect(self._ask_load_mask)
+        self.save_mask_action = QAction("&Save mask…", self)
+        self.save_mask_action.setShortcuts([QKeySequence("Ctrl+S"), QKeySequence("S")])
+        self.save_mask_action.triggered.connect(self.save_mask)
         file_menu.addAction(open_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.load_mask_action)
+        file_menu.addAction(self.save_mask_action)
         file_menu.addSeparator()
         file_menu.addAction(self.clear_cache_action)
         file_menu.addSeparator()
@@ -150,6 +204,71 @@ class MainWindow(QMainWindow):
         self.log_action.setChecked(self.scale.log)
         self.log_action.toggled.connect(self._set_log)
         view_menu.addAction(self.log_action)
+        self.overlay_action = QAction(
+            "Show &mask", self, shortcut=QKeySequence("O"), checkable=True
+        )
+        self.overlay_action.setChecked(True)
+        self.overlay_action.toggled.connect(lambda _on: self._on_mask_changed())
+        view_menu.addAction(self.overlay_action)
+
+    def _build_mask_tools(self) -> None:
+        """Mask toolbar (tools + edits) and the Mask menu with the same actions."""
+        bar = QToolBar("Mask tools")
+        bar.setObjectName("mask-tools")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, bar)
+        menu = self.menuBar().addMenu("&Mask")
+        group = QActionGroup(self)
+        self.tool_actions: dict[str, QAction] = {}
+        for name, label, key, tip in TOOL_ACTIONS:
+            action = QAction(label, self, checkable=True, shortcut=QKeySequence(key))
+            action.setToolTip(f"{tip}  ({key})")
+            action.triggered.connect(lambda _c=False, n=name: self.set_tool(n))
+            group.addAction(action)
+            bar.addAction(action)
+            menu.addAction(action)
+            self.tool_actions[name] = action
+        self.tool_actions["pan"].setChecked(True)
+        self.brush_box = QSpinBox()
+        self.brush_box.setRange(0, 20)
+        self.brush_box.setPrefix("r ")
+        self.brush_box.setToolTip("Brush / eraser radius in pixels (0 = one pixel)")
+        self.brush_box.valueChanged.connect(self._on_brush_radius)
+        bar.addWidget(self.brush_box)
+        bar.addSeparator()
+        menu.addSeparator()
+
+        def add(label: str, keys: list[str], slot, tip: str, checkable: bool = False) -> QAction:  # type: ignore[no-untyped-def]
+            action = QAction(label, self, checkable=checkable)
+            action.setShortcuts([QKeySequence(k) for k in keys])
+            action.setToolTip(f"{tip}  ({', '.join(keys)})")
+            action.triggered.connect(slot)
+            bar.addAction(action)
+            menu.addAction(action)
+            return action
+
+        self.undo_action = add("Undo", ["Z", "Ctrl+Z"], self.editor.undo, "Undo the last mask edit")
+        self.redo_action = add(
+            "Redo", ["Shift+Z", "Ctrl+Shift+Z", "Ctrl+Y"], self.editor.redo, "Redo"
+        )
+        self.delete_action = add(
+            "Delete",
+            ["Delete", "Backspace"],
+            self.editor.delete_selected,
+            "Delete the selected shape (click a shape to select it)",
+        )
+        self.invert_action = add(
+            "Invert", ["I"], self.editor.set_inverted, "Invert the mask", checkable=True
+        )
+        self.clear_action = add("Clear", [], self._ask_clear, "Remove the whole mask")
+        bar.addSeparator()
+        menu.addSeparator()
+        self.spec_action = add("Tubes…", ["K"], self._ask_spec, "Mask tubes by number: b3 t10-12")
+        self.threshold_action = add(
+            "Dead/hot…", ["H"], self._ask_threshold, "Mask pixels by counts in the current image"
+        )
+        bar.addSeparator()
+        bar.addAction(self.load_mask_action)
+        bar.addAction(self.save_mask_action)
 
     # -- loading -----------------------------------------------------------
 
@@ -298,7 +417,7 @@ class MainWindow(QMainWindow):
         """New image: re-derive the limits (unless locked) and redraw."""
         if self._image is None:
             return
-        self.scale.limits_for(self._image)
+        self.scale.limits_for(self._image, self._mask)
         self._apply_scale()
 
     def _apply_scale(self) -> None:
@@ -341,13 +460,13 @@ class MainWindow(QMainWindow):
 
     def _on_auto(self) -> None:
         if self._image is not None:
-            self.scale.auto(self._image)
+            self.scale.auto(self._image, self._mask)
         self._save_scale()
         self._apply_scale()
 
     def _on_reset(self) -> None:
         if self._image is not None:
-            self.scale.reset(self._image)
+            self.scale.reset(self._image, self._mask)
         self._save_scale()
         self._apply_scale()
 
@@ -377,11 +496,151 @@ class MainWindow(QMainWindow):
             return
         counts = float(self._image[info.y, info.x])
         approx = "≈" if self.cube is not None and self.cube.is_preview else ""
+        masked = " │ MASKED" if self._mask is not None and self._mask[info.y, info.x] else ""
         self.readout.setText(
             f"x {info.x:3d}  y {info.y:3d} │ {info.panel} bank{info.bank} "
             f"tube{info.tube} pixel{info.pixel} │ ID {info.detid} · DAS bank{info.das_bank} "
-            f"│ {approx}{counts:,.0f} counts"
+            f"│ {approx}{counts:,.0f} counts{masked}"
         )
+
+    # -- mask --------------------------------------------------------------
+
+    def set_tool(self, name: str) -> None:
+        self.editor.set_tool(name)
+        self.tool_actions[name].setChecked(True)
+
+    def _on_brush_radius(self, radius: int) -> None:
+        self.editor.brush_radius = float(radius)
+
+    def _on_escape(self) -> None:
+        if not self.editor.cancel():
+            self.cancel_load()
+
+    def _say(self, message: str) -> None:
+        self.info.setText(message)
+
+    def _on_mask_changed(self) -> None:
+        mask = self.editor.state.build()
+        self._mask = mask if mask.any() else None
+        self.view.set_mask(self._mask if self.overlay_action.isChecked() else None)
+        with QSignalBlocker(self.invert_action):
+            self.invert_action.setChecked(self.editor.state.inverted)
+        self._update_mask_label()
+        self._show_readout(self._hover)
+
+    def _update_mask_label(self) -> None:
+        state = self.editor.state
+        n = 0 if self._mask is None else int(self._mask.sum())
+        parts = [f"mask {n:,} px ({n / NPIX:.1%})"] if n else ["no mask"]
+        if state.inverted:
+            parts.append("inverted")
+        if state.modified and not state.is_empty:
+            parts.append("unsaved")
+        self.mask_label.setText(" · ".join(parts))
+        self.undo_action.setEnabled(state.can_undo)
+        self.redo_action.setEnabled(state.can_redo)
+
+    def _ask_clear(self) -> None:
+        if self.editor.state.is_empty:
+            return
+        answer = QMessageBox.question(self, "Clear mask", "Remove the whole mask? (Z undoes it)")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.editor.clear()
+
+    def _ask_spec(self) -> None:
+        text = ask_spec(self)
+        if text is None or not text.strip():
+            return
+        try:
+            self._say(self.editor.apply_spec(text))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Mask tubes", str(exc))
+
+    def _ask_threshold(self) -> None:
+        if self._image is None:
+            self._say("open a run first")
+            return
+        dialog = ThresholdDialog(self._image, self.tof_panel.label.text(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        low, high = dialog.limits()
+        n = self.editor.threshold(self._image, low, high)
+        self._say(f"threshold masked {n:,} more pixels")
+
+    def _ask_load_mask(self) -> None:
+        start = str(self.cube.path.parent) if self.cube else ""
+        name, _ = QFileDialog.getOpenFileName(self, "Load mask", start, MASK_OPEN_FILTER)
+        if name:
+            self.load_mask(Path(name))
+
+    def load_mask(self, path: Path) -> bool:
+        """Add the mask in ``path`` to the current one (one undo step)."""
+        try:
+            loaded = read_mask_file(path)
+            self.editor.load(loaded)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Load mask", f"Could not load {path.name}:\n{exc}")
+            return False
+        self._say(f"loaded mask {path.name}")
+        return True
+
+    def save_mask(self) -> bool:
+        """Ask where, then save in the background. False if nothing was started."""
+        if self.cube is None:
+            self._say("open a run first: the mask is saved against its file")
+            return False
+        if self._saver is not None:
+            self._say("a save is already running")
+            return False
+        default = self.mask_output or default_output(self.cube.path)
+        name, chosen = QFileDialog.getSaveFileName(
+            self, "Save mask", str(default), ";;".join(MASK_SAVE_FILTERS)
+        )
+        if not name:
+            return False
+        out = Path(name)
+        if out.suffix.lower() not in SAVE_FORMATS:
+            out = out.with_name(out.name + MASK_SAVE_FILTERS.get(chosen, ".nxs"))
+        self.start_save(out)
+        return True
+
+    def start_save(self, out: Path) -> None:
+        """Save to ``out`` on a worker thread (Mantid's ``.nxs`` writer takes ~10 s)."""
+        assert self.cube is not None
+        from sansdir.mask.mantid_writer import is_drtsans_available
+
+        how = "via Mantid, ~10 s" if out.suffix == ".nxs" and is_drtsans_available() else ""
+        self._say(f"saving mask → {out.name}" + (f" ({how})…" if how else "…"))
+        saver = MaskSaver(self.editor.state, self.cube.path, self.cube.run_number, out)
+        saver.saved.connect(self._on_saved)
+        saver.failed.connect(self._on_save_failed)
+        saver.finished.connect(self._on_save_finished)
+        self._saver = saver
+        self.save_mask_action.setEnabled(False)
+        saver.start()
+
+    def _on_saved(self, result: SavedMask) -> None:
+        self.editor.state.mark_saved()
+        self.saved_any = True
+        self.mask_output = result.path
+        self._say(f"mask saved: {result.path} ({result.n_masked:,} px) + {result.log_path.name}")
+        self._update_mask_label()
+
+    def _on_save_failed(self, message: str) -> None:
+        self._close_after_save = False
+        QMessageBox.warning(self, "Save mask", f"Saving failed:\n{message}")
+        self._say("mask NOT saved")
+
+    def _on_save_finished(self) -> None:
+        self._saver = None
+        self.save_mask_action.setEnabled(True)
+        if self._close_after_save:
+            self._close_after_save = False
+            self.close()
+
+    def _unsaved_mask(self) -> bool:
+        state = self.editor.state
+        return state.modified and not state.is_empty
 
     # -- Qt plumbing -------------------------------------------------------
 
@@ -395,6 +654,28 @@ class MainWindow(QMainWindow):
             self.open_path(Path(urls[0].toLocalFile()))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 — Qt override
+        if self._saver is not None:  # never tear a mask file
+            self._close_after_save = True
+            self._say("closing after the mask is saved…")
+            event.ignore()
+            return
+        if self.ask_to_save and self._unsaved_mask():
+            answer = QMessageBox.question(
+                self,
+                "Unsaved mask",
+                "The mask has unsaved changes. Save it before closing?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if answer == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if answer == QMessageBox.StandardButton.Save:
+                event.ignore()
+                if self.save_mask():
+                    self._close_after_save = True
+                return
         # A load stops within ~0.2 s; a cache write in progress (~1 s) is
         # left to finish so it is not torn.
         for loader in list(self._retired):
@@ -457,19 +738,37 @@ def run(
     nbins: int = DEFAULT_NBINS,
     use_cache: bool = True,
     benchmark: bool = False,
+    mask: Path | None = None,
+    output: Path | None = None,
+    tool: str = "pan",
 ) -> int:
-    """Create the application, show the window, start loading ``path``."""
+    """Create the application, show the window, start loading ``path``.
+
+    Returns :data:`EXIT_SAVED` when a mask was saved (so the TUI refreshes
+    its panes), otherwise the event loop's exit code (0).
+    """
     t0 = time.perf_counter()
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     pg.setConfigOptions(antialias=False)
-    win = MainWindow(nbins, CubeCache.default() if use_cache else None, default_settings())
+    win = MainWindow(
+        nbins,
+        CubeCache.default() if use_cache else None,
+        default_settings(),
+        mask_output=output,
+        ask_to_save=not benchmark,
+    )
     win.show()
+    win.set_tool(tool)
+    if mask is not None:
+        win.load_mask(mask)
+        win.editor.state.mark_saved()  # loading a file is not an unsaved edit
     if benchmark:
         _attach_benchmark(app, win, t0)
     if path is not None:
         QTimer.singleShot(0, lambda: win.open_path(path))
-    return int(app.exec())
+    code = int(app.exec())
+    return EXIT_SAVED if win.saved_any and code == 0 else code
 
 
 def _attach_benchmark(app: QApplication, win: MainWindow, t0: float) -> None:

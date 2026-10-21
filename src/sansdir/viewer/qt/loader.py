@@ -1,4 +1,4 @@
-"""Background loading: cache lookup → :func:`load_cube` → cache store, off the UI thread."""
+"""Background work off the UI thread: loading a run (cache → :func:`load_cube` → cache), saving a mask."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from PySide6.QtCore import QThread, Signal
 
 from sansdir.viewer.cache import CubeCache
 from sansdir.viewer.cube import DEFAULT_NBINS, LoadCancelledError, load_cube
+from sansdir.viewer.masking import MaskState, save_mask
 
 # Stages reported on top of cube.STAGE_PREVIEW / STAGE_LOADING.
 STAGE_CACHE_READ = "cache-read"
@@ -79,3 +80,25 @@ class CubeLoader(QThread):
                 self.cache.put(cube, self.nbins)
             except OSError as exc:
                 self.note.emit(f"not cached: {exc}")
+
+
+class MaskSaver(QThread):
+    """Saves a mask off the UI thread: ``.nxs`` goes through Mantid (8-15 s)."""
+
+    saved = Signal(object)  # SavedMask
+    failed = Signal(str)
+
+    def __init__(self, state: MaskState, source: Path, run_number: str, output: Path) -> None:
+        super().__init__()
+        self.state = state
+        self.source = source
+        self.run_number = run_number
+        self.output = output
+
+    def run(self) -> None:
+        try:
+            result = save_mask(self.state, self.source, self.run_number, self.output)
+        except Exception as exc:  # surfaced in a message box, never a traceback
+            self.failed.emit(f"{self.output.name}: {exc}")
+            return
+        self.saved.emit(result)

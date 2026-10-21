@@ -514,8 +514,11 @@ sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
 # MaskWorkspace ready to feed into MaskDetectors.
 ```
 
-**Interactive editor** (TUI `K` keystroke from a file pane *or* the
-catalog): opens a matplotlib window on the cursor's NeXus heatmap.
+**Interactive editor:** `K` (file pane or catalog) opens the Qt
+[detector viewer](#detector-viewer-in-development--phase-910) with its
+mask tools (below). The matplotlib editor described here is the
+**fallback** `K` uses when the `viewer` extra isn't installed; it opens
+a matplotlib window on the cursor's NeXus heatmap.
 Cell aspect is set to `1/1.3` to compensate for the EQSANS detector's
 ~5.2 mm tube pitch / ~3.9 mm pixel pitch, so an Ellipse drawn to
 look round on screen is round on the actual detector. A faint dotted
@@ -583,8 +586,8 @@ on a run in the catalog), type `:viewer`, or start it directly:
 python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
 ```
 
-It opens in its own window and the TUI stays usable. Mask drawing is coming
-to it next; until then `K` still opens the matplotlib mask editor.
+It opens in its own window and the TUI stays usable. `K` opens the same
+viewer with the rectangle tool armed, for masking (see **Masks** below).
 
 - **Hover readout.** Each tube shows x / y, the Mantid name (`front bank8
   tube1 pixel131`), the detector ID, the raw file's DAS bank and the counts.
@@ -612,8 +615,32 @@ to it next; until then `K` still opens the matplotlib mask editor.
   dragging the colour-bar handles locks it, so slices can be compared. The
   colour bar is labelled in counts in log mode. The choices are remembered
   in `~/.config/sansdir/viewer.ini`.
-- Ctrl+O or drag-and-drop opens another file. Masks and image export come
-  next.
+- Ctrl+O or drag-and-drop opens another file. Image export comes next.
+
+**Masks.** The toolbar (also the *Mask* menu) draws the mask over the
+detector in translucent red; the hover readout says `MASKED`, and Auto
+colour limits skip masked pixels. `O` hides the overlay.
+
+| Key | Tool / action |
+|---|---|
+| `V` | Pan / select: drag to pan; drag a shape to move it, its handles to resize |
+| `R` `E` `C` | Rectangle, ellipse, circle (drag; a circle is drawn from its centre) |
+| `P` | Polygon: click the corners, double-click to close; `Esc` cancels |
+| `B` / `X` | Brush / eraser: click or drag; radius `r` in the toolbar (0 = one pixel). The eraser also unmasks inside shapes |
+| `T` | Tube: click masks or unmasks a tube; Shift-click its whole Mantid bank |
+| `K` | Tubes by number: `t50`, `t10-15` (display column) or `b3`, `b5-7` (DAS block from 0, not Mantid's bank) |
+| `H` | Dead / hot pixels: mask counts ≤ N and/or ≥ M in the image on screen |
+| `I` · `Delete` | Invert · delete the selected shape (click a shape to select it) |
+| `Z` / `Shift+Z` | Undo / redo (also Ctrl+Z / Ctrl+Shift+Z) |
+| `Ctrl+L` | Load a mask: `mask_log.json` (shapes stay editable), Mantid `.xml` or `.nxs`, `.npy` |
+| `S` / `Ctrl+S` | Save: `.nxs` (through Mantid when `drtsans` is installed, ~10 s), `.xml` or `.npy`, plus `<name>.mask_log.json` |
+
+Save defaults to `<run>_mask.nxs` in the TUI's other pane, and the panes
+refresh when the viewer closes after a save. Closing with unsaved changes
+asks first. Brush and eraser strokes are stored in `mask_log.json` as a
+`pixels` shape, so `sansdir mask --shapes-json` replays any viewer mask
+exactly. `python -m sansdir.viewer FILE --mask M --output OUT --tool rect`
+does the same from a shell.
 
 Needs the `viewer` extra (`pip install "sansdir[viewer]"`; the shared
 cluster venv already has it). PySide6 is held below 6.12, because 6.12.0
