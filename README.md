@@ -572,6 +572,35 @@ The detector mapping is recovered directly from the source file
 instrument-specific code in `src/`, and no Mantid runtime imports
 anywhere in the package.
 
+### Detector viewer *(in development — Phase 9.10)*
+
+A fast Qt viewer for raw EQSANS event files. It will replace the `K` mask
+editor once masking lands in it. For now, start it directly:
+
+```bash
+python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
+```
+
+- **Hover readout.** Each tube shows x / y, the Mantid name (`front bank8
+  tube1 pixel131`), the detector ID, the raw file's DAS bank and the counts.
+  Hold Shift to outline the whole bank. Mantid's bank numbers are **not**
+  the raw `bank<N>_events` numbers: front `bank1-24` and back `bank25-48`
+  interleave in 1024-ID blocks.
+- **Big runs.** Runs reach billions of events. Above 10⁸ events a scaled
+  preview appears in about 2 s while the full run loads in parallel (about
+  1 min for 6-8 × 10⁹ events). The status bar shows progress, events, time
+  left and **Cancel** (Esc).
+- **Cache.** Slow loads are saved to `~/.cache/sansdir/viewer/` (at most
+  5 GB, oldest dropped first), so reopening takes about 0.25 s. Clear it with
+  File → *Clear viewer cache…* or `python -m sansdir.viewer --clear-cache`.
+  `--no-cache` skips it.
+- `L` switches log/linear; Ctrl+O or drag-and-drop opens another file.
+  The TOF slider, colour-scale panel, masks and image export come next.
+
+Needs the `viewer` extra (`pip install "sansdir[viewer]"`; the shared
+cluster venv already has it). PySide6 is held below 6.12, because 6.12.0
+crashes with pyqtgraph.
+
 ## CLI examples
 
 ```bash
