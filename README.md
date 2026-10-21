@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.11.3** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.12.0** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -723,6 +723,30 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.12.0
+
+- **A fast detector viewer and mask editor (`V`, `K`).** Press `V` on a raw
+  EQSANS run (file pane or run catalog), or run `sansdir view FILE`. It
+  shows the detector at any TOF range: drag a window on the TOF spectrum, or
+  use the slider, `[` / `]` and `Space` (play). Runs of billions of events
+  show a preview in about 2 s and the full histogram in about a minute;
+  reopening a run takes a quarter of a second. Hovering names the pixel the
+  way Mantid does (`front bank8 tube1 pixel131`, detector ID, counts).
+  The colour scale has log/linear, typed Min/Max, Auto, Lock and colour maps.
+  `PgUp` / `PgDn` step between runs, keeping the mask, zoom and TOF window.
+  See [Detector viewer](#detector-viewer-phase-910).
+- **`K` now opens that viewer's mask tools**, replacing the matplotlib
+  editor. It adds editable shapes (rectangle, ellipse, circle, polygon) with
+  move and resize handles, brush and eraser, click-a-tube / Shift-click a
+  bank, dead/hot-pixel threshold and undo/redo. You can load existing masks
+  (`.xml`, `.nxs`, `mask_log.json`, `.npy`). Masks saved as `.xml` or `.nxs`
+  were checked in drtsans: they mask exactly the intended detectors.
+- **Export** figures (PNG / PDF / SVG with axes, colour bar, run and TOF
+  range), the image as `.npy` / `.txt`, or a whole TOF stack.
+- **New requirement:** the viewer needs PySide6 6.11 and pyqtgraph, which
+  are now regular dependencies (installed with sansdir). PySide6 6.12 is
+  excluded: it crashes with pyqtgraph.
 
 ## What's in v0.11.3
 
