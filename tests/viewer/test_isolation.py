@@ -19,6 +19,7 @@ TUI_AND_PURE_MODULES = [
     "sansdir.viewer.cube",
     "sansdir.viewer.geometry",
     "sansdir.viewer.colorscale",
+    "sansdir.viewer.tofrange",
     "sansdir.viewer.__main__",
 ]
 

@@ -594,8 +594,21 @@ python -m sansdir.viewer /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_NNNNNN.nxs.h5
   5 GB, oldest dropped first), so reopening takes about 0.25 s. Clear it with
   File → *Clear viewer cache…* or `python -m sansdir.viewer --clear-cache`.
   `--no-cache` skips it.
-- `L` switches log/linear; Ctrl+O or drag-and-drop opens another file.
-  The TOF slider, colour-scale panel, masks and image export come next.
+- **TOF.** Below the image is the whole-detector TOF spectrum. Drag the
+  shaded window (or its edges) to pick a TOF range, or use the slider and the
+  *width* box (in bins). `[` / `]` step one window back or forward, `Space`
+  plays through the run, and *Full range* goes back to total counts. The
+  image and the hover counts follow the selection while you drag.
+- **Colour scale** (side panel): *Log scale* (also `L`); *Max* / *Min* in
+  counts (type `1500`, `1.5e3` or `1.5k` and press Enter, or scroll; in log
+  mode ten scroll steps make a decade); *Auto* uses the percentiles shown
+  (default 1-99.5 %, zeros left out); *Reset* uses the full data range.
+  With *Lock limits* off, every TOF slice is auto-scaled. Typing a limit or
+  dragging the colour-bar handles locks it, so slices can be compared. The
+  colour bar is labelled in counts in log mode. The choices are remembered
+  in `~/.config/sansdir/viewer.ini`.
+- Ctrl+O or drag-and-drop opens another file. Masks and image export come
+  next.
 
 Needs the `viewer` extra (`pip install "sansdir[viewer]"`; the shared
 cluster venv already has it). PySide6 is held below 6.12, because 6.12.0

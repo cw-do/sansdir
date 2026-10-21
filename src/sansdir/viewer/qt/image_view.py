@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QPointF, Qt, Signal
 from PySide6.QtWidgets import QApplication, QGraphicsRectItem
 
+from sansdir.viewer.colorscale import DEFAULT_CMAP, log_ticks
 from sansdir.viewer.geometry import (
     CELL_ASPECT,
     NCOLS,
@@ -16,7 +19,25 @@ from sansdir.viewer.geometry import (
     pixel_info,
 )
 
-COLORMAP = "viridis"
+# Not among pyqtgraph's bundled maps; matplotlib's jet stops, and a plain grey ramp.
+_EXTRA_CMAPS = {
+    "jet": (
+        [0.0, 0.11, 0.125, 0.34, 0.35, 0.64, 0.65, 0.89, 0.91, 1.0],
+        [
+            (0, 0, 127),
+            (0, 0, 255),
+            (0, 0, 255),
+            (0, 220, 255),
+            (0, 229, 246),
+            (240, 255, 7),
+            (255, 255, 0),
+            (255, 18, 0),
+            (232, 0, 0),
+            (127, 0, 0),
+        ],
+    ),
+    "gray": ([0.0, 1.0], [(0, 0, 0), (255, 255, 255)]),
+}
 HIGHLIGHT_PEN = pg.mkPen((255, 255, 255, 200), width=1)
 
 
@@ -44,7 +65,7 @@ class DetectorView(pg.GraphicsLayoutWidget):
 
         self.lut = pg.HistogramLUTItem()
         self.lut.setImageItem(self.image)
-        self.lut.gradient.setColorMap(pg.colormap.get(COLORMAP))
+        self.set_cmap(DEFAULT_CMAP)
         self.addItem(self.lut)
 
         self._highlights: list[QGraphicsRectItem] = []
@@ -60,8 +81,35 @@ class DetectorView(pg.GraphicsLayoutWidget):
 
     def set_values(self, values: np.ndarray, levels: tuple[float, float]) -> None:
         """Show display values (already log-transformed if wanted)."""
-        self.image.setImage(values, autoLevels=False, levels=levels)
+        with warnings.catch_warnings():
+            # An empty slice in log mode is all NaN; pyqtgraph's histogram warns.
+            warnings.simplefilter("ignore", RuntimeWarning)
+            self.image.setImage(values, autoLevels=False, levels=levels)
         self.lut.setLevels(*levels)
+
+    def set_cmap(self, name: str) -> None:
+        """Colour map by name (pyqtgraph's bundled maps, ``jet`` or ``gray``)."""
+        if name in _EXTRA_CMAPS:
+            pos, colors = _EXTRA_CMAPS[name]
+            cmap = pg.ColorMap(pos, colors)
+        else:
+            cmap = pg.colormap.get(name)
+        self.lut.gradient.setColorMap(cmap)
+        # One draggable marker per colour stop (256 for viridis) is repainted on
+        # every frame: ~2.5 ms of a slider move. The maps are not edited here.
+        self.lut.gradient.showTicks(False)
+
+    def set_count_ticks(self, log: bool, values: np.ndarray, levels: tuple[float, float]) -> None:
+        """Label the colour bar in counts: ``1, 10, 100, …`` in log mode, default otherwise."""
+        if not log:
+            self.lut.axis.setTicks(None)
+            return
+        finite = values[np.isfinite(values)]
+        lo, hi = levels
+        if finite.size:
+            lo, hi = min(lo, float(finite.min())), max(hi, float(finite.max()))
+        major, minor = log_ticks(lo - 1, hi + 1)
+        self.lut.axis.setTicks([major, minor])
 
     def fit(self) -> None:
         """Zoom to the whole detector (aspect-locked, so one axis gets slack)."""

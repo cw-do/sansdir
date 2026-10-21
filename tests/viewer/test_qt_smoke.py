@@ -156,7 +156,7 @@ def test_log_toggle_keeps_the_image(qapp: QApplication, window: MainWindow, raw_
     window._set_cube(load_cube(raw_file))
     window.log_action.toggle()
     assert window.view.image.image is not None
-    assert not window._log
+    assert not window.scale.log
 
 
 def test_hovering_does_not_leak_true(

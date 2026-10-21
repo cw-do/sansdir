@@ -1,14 +1,15 @@
-"""Viewer main window: detector view, status-bar readout, background loading."""
+"""Viewer main window: detector view, colour-scale panel, TOF panel, readout, loading."""
 
 from __future__ import annotations
 
+import statistics
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -21,38 +22,94 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSplitter,
+    QWidget,
 )
 
 from sansdir.viewer.cache import CubeCache, describe
-from sansdir.viewer.colorscale import auto_limits, display_levels, display_values
+from sansdir.viewer.colorscale import (
+    COLORMAPS,
+    ScaleState,
+    counts_from_levels,
+    display_levels,
+    display_values,
+)
 from sansdir.viewer.cube import DEFAULT_NBINS, TofCube
 from sansdir.viewer.geometry import PixelInfo
 from sansdir.viewer.qt.image_view import DetectorView
 from sansdir.viewer.qt.loader import CubeLoader
 from sansdir.viewer.qt.progress import LoadProgress, format_count
+from sansdir.viewer.qt.scale_panel import ScalePanel
+from sansdir.viewer.qt.tof_panel import TofPanel
 
 NEXUS_FILTER = "NeXus files (*.nxs.h5 *.nxs *.h5);;All files (*)"
+SETTINGS_GROUP = "scale"
+
+
+def default_settings() -> QSettings:
+    """``~/.config/sansdir/viewer.ini`` — colour-scale choices kept between sessions."""
+    return QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "sansdir", "viewer")
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, nbins: int = DEFAULT_NBINS, cache: CubeCache | None = None) -> None:
+    # Emitted with each new CubeLoader before it starts (a small run can finish
+    # before open_path returns) and before the window's own slots are connected:
+    # _on_finished drops the last reference to the loader, so slots connected
+    # after it would never run.
+    loader_created = Signal(object)
+
+    def __init__(
+        self,
+        nbins: int = DEFAULT_NBINS,
+        cache: CubeCache | None = None,
+        settings: QSettings | None = None,
+    ) -> None:
         super().__init__()
         self.nbins = nbins
         self.cache = cache
+        self.settings = settings  # None: nothing remembered (tests)
         self.cube: TofCube | None = None
         self._image: np.ndarray | None = None  # counts currently shown
-        self._log = True
+        self.scale = _load_scale(settings)
+        self._applying_levels = False
+        self._hover: PixelInfo | None = None
         self._loader: CubeLoader | None = None
         self._retired: set[CubeLoader] = set()
         self._t_open = 0.0
         self._title = "EQSANS detector viewer"
 
         self.view = DetectorView()
-        self.setCentralWidget(self.view)
         self.view.hovered.connect(self._show_readout)
+        self.view.lut.sigLevelsChanged.connect(self._on_bar_dragged)
+        self.view.set_cmap(self.scale.cmap)
+        self.scale_panel = ScalePanel()
+        self.scale_panel.log_toggled.connect(self._set_log)
+        self.scale_panel.limits_edited.connect(self._on_limits_typed)
+        self.scale_panel.auto_clicked.connect(self._on_auto)
+        self.scale_panel.reset_clicked.connect(self._on_reset)
+        self.scale_panel.lock_toggled.connect(self._on_lock)
+        self.scale_panel.percentiles_edited.connect(self._on_percentiles)
+        self.scale_panel.cmap_changed.connect(self._on_cmap)
+        self.scale_panel.show_state(self.scale)
+        self.tof_panel = TofPanel()
+        self.tof_panel.range_changed.connect(self._on_tof_range)
+
+        top = QWidget()
+        row = QHBoxLayout(top)
+        row.setContentsMargins(0, 0, 4, 0)
+        row.addWidget(self.view, 1)
+        row.addWidget(self.scale_panel)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(top)
+        splitter.addWidget(self.tof_panel)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([720, 240])
+        self.setCentralWidget(splitter)
 
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.readout = QLabel()
@@ -69,7 +126,7 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self.setAcceptDrops(True)
         self._update_title()
-        self.resize(1000, 860)
+        self.resize(1100, 980)
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -90,7 +147,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("&View")
         self.log_action = QAction("&Log scale", self, shortcut=QKeySequence("L"), checkable=True)
-        self.log_action.setChecked(self._log)
+        self.log_action.setChecked(self.scale.log)
         self.log_action.toggled.connect(self._set_log)
         view_menu.addAction(self.log_action)
 
@@ -106,6 +163,7 @@ class MainWindow(QMainWindow):
         if self._loader is not None:
             self._loader.stop()
         loader = CubeLoader(path, self.nbins, self.cache)
+        self.loader_created.emit(loader)
         loader.progressed.connect(self._on_progress)
         loader.preview.connect(self._on_preview)
         loader.loaded.connect(self._on_loaded)
@@ -215,7 +273,10 @@ class MainWindow(QMainWindow):
     def _set_cube(self, cube: TofCube) -> None:
         new_file = self.cube is None or self.cube.path != cube.path
         self.cube = cube
-        self._image = cube.image()
+        # A preview → full load of the same run keeps the TOF selection.
+        spectrum = cube.spectrum() if cube.has_tof else None
+        self.tof_panel.set_cube(cube.tof_edges, spectrum, keep=not new_file)
+        self._image = cube.image(*self.tof_panel.selection) if cube.has_tof else cube.image()
         label = f"run {cube.run_number}" if cube.run_number else cube.path.name
         title = f" — {cube.title}" if cube.title else ""
         self._title = f"{label}{title} — EQSANS detector viewer"
@@ -226,20 +287,91 @@ class MainWindow(QMainWindow):
 
     # -- display -----------------------------------------------------------
 
-    def _set_log(self, log: bool) -> None:
-        self._log = log
+    def _on_tof_range(self, a: int, b: int) -> None:
+        if self.cube is None:
+            return
+        self._image = self.cube.image(a, b)
         self._refresh()
+        self._show_readout(self._hover)  # the readout's counts are per slice
 
     def _refresh(self) -> None:
+        """New image: re-derive the limits (unless locked) and redraw."""
         if self._image is None:
             return
-        vmin, vmax = auto_limits(self._image, log=self._log)
-        self.view.set_values(
-            display_values(self._image, log=self._log),
-            display_levels(vmin, vmax, log=self._log),
-        )
+        self.scale.limits_for(self._image)
+        self._apply_scale()
+
+    def _apply_scale(self) -> None:
+        """Push the current image and :attr:`scale` to the view and the panel."""
+        self.scale_panel.show_state(self.scale)
+        if self._image is None:
+            return
+        log = self.scale.log
+        values = display_values(self._image, log=log)
+        levels = display_levels(self.scale.vmin, self.scale.vmax, log=log)
+        self._applying_levels = True  # our own setLevels is not a handle drag
+        try:
+            self.view.set_values(values, levels)
+        finally:
+            self._applying_levels = False
+        self.view.set_count_ticks(log, values, levels)
+
+    def _set_log(self, log: bool) -> None:
+        self.scale.set_log(log, self._image)
+        with QSignalBlocker(self.log_action):
+            self.log_action.setChecked(log)
+        self._save_scale()
+        self._refresh()
+
+    def _on_bar_dragged(self) -> None:
+        """Colour-bar handles moved: they set (and lock) the limits."""
+        if self._applying_levels:
+            return
+        lo, hi = self.view.lut.getLevels()
+        self.scale.set_limits(*counts_from_levels(lo, hi, log=self.scale.log))
+        self.scale.locked = True
+        self.scale_panel.show_state(self.scale)
+        self._save_scale()
+
+    def _on_limits_typed(self, vmin: float, vmax: float) -> None:
+        self.scale.set_limits(vmin, vmax)
+        self.scale.locked = True
+        self._save_scale()
+        self._apply_scale()
+
+    def _on_auto(self) -> None:
+        if self._image is not None:
+            self.scale.auto(self._image)
+        self._save_scale()
+        self._apply_scale()
+
+    def _on_reset(self) -> None:
+        if self._image is not None:
+            self.scale.reset(self._image)
+        self._save_scale()
+        self._apply_scale()
+
+    def _on_lock(self, locked: bool) -> None:
+        self.scale.locked = locked
+        self._save_scale()
+        self._refresh()
+
+    def _on_percentiles(self, lo: float, hi: float) -> None:
+        self.scale.set_percentiles(lo, hi)
+        self._save_scale()
+        self._refresh()
+
+    def _on_cmap(self, name: str) -> None:
+        self.scale.cmap = name
+        self.view.set_cmap(name)
+        self._save_scale()
+
+    def _save_scale(self) -> None:
+        if self.settings is not None:
+            _store_scale(self.settings, self.scale)
 
     def _show_readout(self, info: PixelInfo | None) -> None:
+        self._hover = info
         if info is None or self._image is None:
             self.readout.clear()
             return
@@ -271,6 +403,54 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _load_scale(settings: QSettings | None) -> ScaleState:
+    """The remembered colour-scale choices; defaults for anything missing or bad."""
+    state = ScaleState()
+    if settings is None:
+        return state
+    settings.beginGroup(SETTINGS_GROUP)
+    try:
+        state.log = _as_bool(settings.value("log"), state.log)
+        state.locked = _as_bool(settings.value("locked"), state.locked)
+        cmap = str(settings.value("cmap", state.cmap))
+        state.cmap = cmap if cmap in COLORMAPS else state.cmap
+        try:
+            state.set_percentiles(
+                float(settings.value("percentile_lo", state.percentiles[0])),  # type: ignore[arg-type]
+                float(settings.value("percentile_hi", state.percentiles[1])),  # type: ignore[arg-type]
+            )
+            state.set_limits(
+                float(settings.value("vmin", state.vmin)),  # type: ignore[arg-type]
+                float(settings.value("vmax", state.vmax)),  # type: ignore[arg-type]
+            )
+        except (TypeError, ValueError):
+            pass
+    finally:
+        settings.endGroup()
+    return state
+
+
+def _store_scale(settings: QSettings, state: ScaleState) -> None:
+    settings.beginGroup(SETTINGS_GROUP)
+    settings.setValue("log", state.log)
+    settings.setValue("locked", state.locked)
+    settings.setValue("cmap", state.cmap)
+    settings.setValue("percentile_lo", state.percentiles[0])
+    settings.setValue("percentile_hi", state.percentiles[1])
+    settings.setValue("vmin", state.vmin)
+    settings.setValue("vmax", state.vmax)
+    settings.endGroup()
+
+
+def _as_bool(value: object, default: bool) -> bool:
+    """QSettings hands booleans back as ``"true"`` / ``"false"`` from an ini file."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("true", "1", "yes")
+
+
 def run(
     path: Path | None,
     *,
@@ -283,7 +463,7 @@ def run(
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     pg.setConfigOptions(antialias=False)
-    win = MainWindow(nbins, CubeCache.default() if use_cache else None)
+    win = MainWindow(nbins, CubeCache.default() if use_cache else None, default_settings())
     win.show()
     if benchmark:
         _attach_benchmark(app, win, t0)
@@ -299,21 +479,16 @@ def _attach_benchmark(app: QApplication, win: MainWindow, t0: float) -> None:
         print(f"{time.perf_counter() - t0:7.2f} s  {what}", file=sys.stderr, flush=True)
 
     mark("window shown")
-    original_open = win.open_path
 
-    def open_and_hook(path: Path) -> None:
-        original_open(path)
-        loader = win._loader
-        if loader is None:
-            return
+    def hook(loader: CubeLoader) -> None:
         loader.preview.connect(
             lambda _c: QTimer.singleShot(0, lambda: mark("preview image on screen"))
         )
-
         loader.loaded.connect(lambda _c: QTimer.singleShot(0, lambda: mark("full image on screen")))
 
         def done() -> None:
             mark("loader finished (cache written if any)")
+            _benchmark_slider(app, win)
             app.quit()
 
         loader.finished.connect(done)
@@ -324,4 +499,29 @@ def _attach_benchmark(app: QApplication, win: MainWindow, t0: float) -> None:
 
         loader.failed.connect(failed)
 
-    win.open_path = open_and_hook  # type: ignore[method-assign]
+    win.loader_created.connect(hook)
+
+
+def _benchmark_slider(app: QApplication, win: MainWindow, frames: int = 200) -> None:
+    """Time slider moves end to end: new slice, limits, image, colour bar, repaint."""
+    panel = win.tof_panel
+    if win.cube is None or not panel.has_tof:
+        return
+    panel.set_full(False)
+    last = panel.slider.maximum()
+    positions = [round(i * last / (frames - 1)) for i in range(frames)]
+    times: list[float] = []
+    for start in positions:
+        t = time.perf_counter()
+        panel.slider.setValue(start)
+        app.processEvents()  # runs the repaint
+        times.append((time.perf_counter() - t) * 1e3)
+    times.sort()
+    p95 = times[int(0.95 * (len(times) - 1))]
+    print(
+        f"   slider: {frames} moves, median {statistics.median(times):.1f} ms, "
+        f"p95 {p95:.1f} ms, max {times[-1]:.1f} ms "
+        f"(width {panel.selection[1] - panel.selection[0]} bins)",
+        file=sys.stderr,
+        flush=True,
+    )
