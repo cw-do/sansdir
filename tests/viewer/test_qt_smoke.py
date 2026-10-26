@@ -90,7 +90,12 @@ def test_background_load_shows_the_run(
 ) -> None:
     stages = _open_and_wait(window, raw_file)
     assert window.cube is not None and window.cube.run_number == "4242"
-    assert "run 4242" in window.windowTitle() and "%]" not in window.windowTitle()
+    title = window.windowTitle()
+    assert title.startswith("EQSANS_4242.nxs.h5 — synthetic run") and "%]" not in title
+    # The file and its run title are also on screen, above the image.
+    header = window.header.text()
+    assert "<b>EQSANS_4242.nxs.h5</b> — synthetic run" in header and "run 4242" in header
+    assert window.header.toolTip() == str(raw_file)
     assert window.loading.isHidden() and window._loader is None
     assert stages[-1] == "loading"
 

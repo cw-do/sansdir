@@ -7,7 +7,7 @@ from typing import Protocol
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QGraphicsRectItem
 
 from sansdir.viewer.colorscale import DEFAULT_CMAP, log_ticks
@@ -41,6 +41,7 @@ _EXTRA_CMAPS = {
 }
 HIGHLIGHT_PEN = pg.mkPen((255, 255, 255, 200), width=1)
 MASK_RGBA = (255, 40, 40, 120)
+FIT_PADDING = 0.02
 
 
 class Tool(Protocol):
@@ -121,6 +122,8 @@ class DetectorView(pg.GraphicsLayoutWidget):
             self.plot.addItem(rect)
             self._highlights.append(rect)
         self._last: PixelInfo | None = None
+        self._fitted = False
+        self.vb.sigRangeChangedManually.connect(self._on_range_changed_manually)
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
     def set_values(self, values: np.ndarray, levels: tuple[float, float]) -> None:
@@ -165,8 +168,27 @@ class DetectorView(pg.GraphicsLayoutWidget):
         self.lut.axis.setTicks([major, minor])
 
     def fit(self) -> None:
-        """Zoom to the whole detector (aspect-locked, so one axis gets slack)."""
-        self.plot.vb.setRange(xRange=(0, NCOLS), yRange=(0, NROWS), padding=0.02)
+        """Zoom to the whole detector; it stays fitted through window resizes.
+
+        The aspect ratio is locked, so only one axis can be set: fit the
+        width, and if the 256 rows then don't fit, fit the height instead
+        (setting both let pyqtgraph keep x and crop y on a short window).
+        """
+        vb = self.plot.vb
+        vb.setRange(xRange=(0, NCOLS), padding=FIT_PADDING)
+        (_x0, _x1), (y0, y1) = vb.viewRange()
+        if y1 - y0 < NROWS * (1 + FIT_PADDING):
+            vb.setRange(yRange=(0, NROWS), padding=FIT_PADDING)
+        self._fitted = True
+
+    def _on_range_changed_manually(self, *_args: object) -> None:
+        self._fitted = False  # the user zoomed or panned: leave their view alone
+
+    def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        super().resizeEvent(event)
+        # pyqtgraph calls this from its own __init__, before _fitted exists.
+        if getattr(self, "_fitted", False):
+            QTimer.singleShot(0, self.fit)  # after the layout has settled
 
     def _on_mouse_moved(self, pos: QPointF) -> None:
         info = None

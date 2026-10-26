@@ -90,6 +90,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `Ctrl+O`       | Maximize the active pane (toggle)                                  |
 | `/`            | Filter active pane (or catalog) by substring; `Esc` clears         |
 | `g` / `G`      | `:cd <path>` prompt / fullscreen folder-tree picker                |
+| `f`            | Find a run by number alone (`find 176669`): any IPTS, then viewer  |
 | `:`            | Command line — every action is also a `:command` (see `?`)         |
 | `:instrument`  | Switch SANS ⇄ USANS mode (`:instrument usans`); see below           |
 | `?`            | Help overlay (auto-generated from the registry)                    |
@@ -547,6 +548,18 @@ sansdir view --help          # all options (same as python -m sansdir.viewer)
 It opens in its own window and the TUI stays usable. `K` opens the same
 viewer with the rectangle tool armed, for masking (see **Masks** below);
 both need the `viewer` extra.
+
+**Don't know the IPTS?** Press `f` and type the run number (`find 176669`,
+or `:find EQSANS_176669`), as you would in Mantid. sansdir checks every
+`/SNS/EQSANS/IPTS-*` folder for `nexus/EQSANS_<run>.nxs.h5` (or the older
+`data/EQSANS_<run>_event.nxs`), moves the right pane there with the cursor
+on the file, and opens it in the viewer. It takes ~0.15 s for all ~1100
+IPTS folders, and is instant for another run of the same experiment. No
+OnCat sign-in is needed; nothing is written.
+
+The file name and the run title are always shown above the image (with the
+IPTS and run number) and in the window title, so you know which run you
+are looking at.
 
 - **Hover readout.** Each tube shows x / y, the Mantid name (`front bank8
   tube1 pixel131`), the detector ID, the raw file's DAS bank and the counts.

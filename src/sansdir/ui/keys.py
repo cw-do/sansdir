@@ -100,6 +100,10 @@ def _prompt_jump(_app: AppProtocol) -> dict[str, Any]:
     return {"text": "cd "}
 
 
+def _prompt_find(_app: AppProtocol) -> dict[str, Any]:
+    return {"text": "find "}
+
+
 def _filter_open(_app: AppProtocol) -> dict[str, Any]:
     return {"text": "filter "}
 
@@ -204,6 +208,7 @@ def default_keymap(mode: str = "SANS") -> list[KeyBinding]:
         # Jump (Phase 2)
         KeyBinding("g", "app.cmdline_prompt", "Jump to path", _prompt_jump),
         KeyBinding("G", "app.browse_tree", "Browse filesystem tree"),
+        KeyBinding("f", "app.cmdline_prompt", "Find run by number (any IPTS)", _prompt_find),
         # OnCat IPTS search (Phase 4)
         KeyBinding("i", "oncat.search", "OnCat IPTS search"),
         # F2 = Rename (mc convention). The catalog toggle moved off F2

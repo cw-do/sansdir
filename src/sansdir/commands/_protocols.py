@@ -109,6 +109,10 @@ class AppProtocol(Protocol):
 
     def show_dir_in_other_pane(self, path: Path) -> None: ...
 
+    def reveal_in_pane(self, path: Path, panel_id: str = "right") -> bool:
+        """List ``path``'s folder in that pane, cursor on ``path``, and make it active."""
+        ...
+
     def revalidate_panes(self) -> None:
         """Re-sync both panes with the filesystem after a destructive op."""
 

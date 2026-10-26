@@ -424,6 +424,23 @@ class SansdirApp(App[int]):
         self.focus_active_surface()
         self._refresh_status()
 
+    def reveal_in_pane(self, path: Path, panel_id: str = "right") -> bool:
+        """List ``path``'s folder in the ``panel_id`` pane with the cursor on ``path``.
+
+        That pane becomes the active one, so the next key (``V``, ``m``, ``p``)
+        acts on the file. A catalog / viewer / prompt in that slot is swapped
+        for the file list first. Returns False if the file isn't in the listing.
+        """
+        slot = self._left_slot if panel_id == "left" else self._right_slot
+        if slot.mode != "list":
+            slot.show_panel()
+        slot.panel.set_cwd(path.parent)
+        # set_cwd resolves the folder (/SNS → /gpfs/...); resolve only the folder
+        # so a symlinked file (older runs' data/*_event.nxs) keeps its own entry.
+        found = slot.panel.move_cursor_to_path(slot.panel.cwd / path.name)
+        self.set_active(panel_id)
+        return found
+
     async def pick_file_in_other_pane(
         self,
         message: str,

@@ -1385,6 +1385,70 @@ def _make_ui_view(app: AppProtocol) -> Command:
     )
 
 
+def _make_run_find(app: AppProtocol) -> Command:
+    """``f`` / ``:find 176669`` — find a run's raw file without knowing its IPTS.
+
+    Like Mantid's file finder: every ``/SNS/EQSANS/IPTS-*`` folder is checked
+    for ``nexus/EQSANS_<run>.nxs.h5`` (or the older ``data/…_event.nxs``),
+    existence checks only (:mod:`sansdir.core.runfind`). The right pane moves
+    to that folder with the cursor on the file, and the file opens in the
+    detector viewer, as ``V`` would.
+    """
+
+    async def handler(run: str, view: bool = True) -> str | None:
+        from sansdir.core.runfind import find_run, ipts_of, parse_run, search_root
+
+        number = parse_run(run)
+        if number is None:
+            app.notify_user("type a run number, e.g.  find 176669", severity="warning")
+            return None
+        root = search_root()
+        hits = await asyncio.to_thread(find_run, number, near=app.working_panel.cwd)
+        if not hits:
+            app.notify_user(
+                f"run {number}: no EQSANS_{number}.nxs.h5 under {root}/IPTS-*/nexus "
+                "(nor an older data/…_event.nxs)",
+                severity="warning",
+            )
+            return None
+        path = hits[0]
+        app.reveal_in_pane(path, "right")
+        ipts = ipts_of(path)
+        where = f"{ipts.name}/{path.parent.name}" if ipts is not None else str(path.parent)
+        elsewhere = {ipts_of(p) for p in hits[1:]} - {ipts, None}
+        others = sorted(d.name for d in elsewhere if d is not None)
+        also = f" (also in {', '.join(others)})" if others else ""
+        app.notify_user(f"run {number}: {where}/{path.name}{also}")
+        if view:
+            await app.registry.dispatch("ui.view", path=str(path))
+        return str(path)
+
+    return Command(
+        name="run.find",
+        description=(
+            "Find a run's raw NeXus file by run number alone (all IPTS folders), "
+            "show it in the right pane and open it in the detector viewer."
+        ),
+        params=(
+            CommandParam(
+                name="run",
+                type="string",
+                description="Run number, e.g. 176669 (EQSANS_176669 works too).",
+            ),
+            CommandParam(
+                name="view",
+                type="bool",
+                description="Open the file in the detector viewer (default yes).",
+                required=False,
+                default=True,
+            ),
+        ),
+        handler=handler,
+        aliases=("find",),
+        examples=("find 176669", "find EQSANS_176669", "run.find 176669 view=false"),
+    )
+
+
 def _make_ui_mask(app: AppProtocol) -> Command:
     """``K`` / ``:mask`` — the same viewer, with the rectangle tool armed for masking.
 
@@ -2982,6 +3046,7 @@ def _phase1_bound_commands(app: AppProtocol) -> list[Command]:
         _make_hdf_show_keys(app),
         _make_ui_mask(app),
         _make_ui_view(app),
+        _make_run_find(app),
         _make_hdf_batch_extract(app),
         _make_ui_batch_extract(app),
         _make_ui_plot_auto(app),

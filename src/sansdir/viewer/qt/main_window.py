@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import os
 import statistics
 import sys
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QToolBar,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -173,11 +175,20 @@ class MainWindow(QMainWindow):
         self.editor.changed.connect(self._on_mask_changed)
         self.editor.message.connect(self._say)
 
+        # Which file is this? File name + run title, always on screen.
+        self.header = QLabel("no file open — File → Open, drag a file in, or press PgDn")
+        self.header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.header.setContentsMargins(6, 2, 6, 2)
         top = QWidget()
-        row = QHBoxLayout(top)
+        column = QVBoxLayout(top)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.header)
+        row = QHBoxLayout()
         row.setContentsMargins(0, 0, 4, 0)
         row.addWidget(self.view, 1)
         row.addWidget(self.scale_panel)
+        column.addLayout(row, 1)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(top)
         splitter.addWidget(self.tof_panel)
@@ -361,6 +372,7 @@ class MainWindow(QMainWindow):
         self.info.setText("")
         self.info.setToolTip("")
         self._title = f"{path.name} — EQSANS detector viewer"
+        self._show_header(path, "", "", loading=True)
         self._update_title()
         loader.start()
 
@@ -471,13 +483,38 @@ class MainWindow(QMainWindow):
         spectrum = cube.spectrum() if cube.has_tof else None
         self.tof_panel.set_cube(cube.tof_edges, spectrum, keep=keep)
         self._image = cube.image(*self.tof_panel.selection) if cube.has_tof else cube.image()
-        label = f"run {cube.run_number}" if cube.run_number else cube.path.name
+        # Window title: file name and run title (what users look for in the taskbar).
         title = f" — {cube.title}" if cube.title else ""
-        self._title = f"{label}{title} — EQSANS detector viewer"
+        self._title = f"{cube.path.name}{title} — EQSANS detector viewer"
+        self._show_header(cube.path, cube.title, cube.run_number, preview=cube.is_preview)
         self._update_title()
         self._refresh()
         if previous is None:  # later runs keep the zoom
             self.view.fit()
+
+    def _show_header(
+        self,
+        path: Path,
+        title: str,
+        run_number: str,
+        *,
+        loading: bool = False,
+        preview: bool = False,
+    ) -> None:
+        """``EQSANS_176669.nxs.h5 — S-PMMA 1.3m 2.5a   IPTS-37425 · run 176669``."""
+        parts = [f"<b>{html.escape(path.name)}</b>"]
+        if title:
+            parts.append(html.escape(title))
+        where = [p.name for p in (path, *path.parents) if p.name.startswith("IPTS-")][:1]
+        if run_number:
+            where.append(f"run {html.escape(run_number)}")
+        if loading:
+            where.append("loading…")
+        elif preview:
+            where.append("preview")
+        extra = f"&nbsp;&nbsp;&nbsp;<span style='color:gray'>{' · '.join(where)}</span>"
+        self.header.setText(" — ".join(parts) + (extra if where else ""))
+        self.header.setToolTip(str(path))
 
     # -- previous / next run --------------------------------------------------
 
