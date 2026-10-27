@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.12.0** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.12.1** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -736,6 +736,19 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.12.1
+
+- **`f` finds a run by its number alone**, as in Mantid: press `f`, type
+  `176669`, Enter. sansdir looks through every `/SNS/EQSANS/IPTS-*` folder
+  (also the older `data/…_event.nxs` layout), moves the right pane to the
+  run's folder with the cursor on the file, and opens it in the detector
+  viewer. About 0.15 s; instant for another run of the same experiment.
+  Press `=` afterwards to bring the left pane to the same folder.
+- **The viewer shows which file you are looking at:** the file name and run
+  title (with IPTS and run number) above the image and in the window title.
+- **Zoom-to-fit shows the whole detector** in any window shape; before, a
+  short window cut off the top and bottom rows.
 
 ## What's in v0.12.0
 
