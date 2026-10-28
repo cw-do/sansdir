@@ -70,7 +70,10 @@ def detect_kind(path: Path) -> Detected:
         return Detected(kind=KIND_UNKNOWN, columns=0)
 
     name_says_trans = bool(_TRANS_NAME_RE.search(path.name))
-    header = _read_header(path)
+    header = _read_header(path)  # "#" comments: the transmission keywords look here
+    # Un-commented text before the data only ever upgrades to 2D (old NIST .dat);
+    # keeping it out of the transmission check leaves every other verdict as it was.
+    text_header = _read_header(path, text_lines=True)
     cols = _peek_columns(path)
 
     # USANS reduced curves are unambiguous from their filename — decide
@@ -81,7 +84,7 @@ def detect_kind(path: Path) -> Detected:
         return Detected(kind=KIND_TRANSMISSION, columns=cols)
     if cols == 0:
         return Detected(kind=KIND_UNKNOWN, columns=0)
-    if _IQXQY_NAME_RE.search(path.name) or _IQXQY_HEADER_RE.search(header):
+    if _IQXQY_NAME_RE.search(path.name) or _IQXQY_HEADER_RE.search(text_header):
         return Detected(kind=KIND_IQXQY, columns=cols)
     if cols in (4, 6) and _looks_2d(path):
         return Detected(kind=KIND_IQXQY, columns=cols)
@@ -172,13 +175,13 @@ def _is_numeric_row(line: str) -> bool:
     return True
 
 
-def _read_header(path: Path, *, max_lines: int = 8) -> str:
-    """Concatenate the header lines before the data into one string.
+def _read_header(path: Path, *, max_lines: int = 8, text_lines: bool = False) -> str:
+    """Concatenate the ``#`` comment lines before the data into one string.
 
-    ``#`` comments, and also plain text lines before the first numeric row
-    (Mantid's NIST-style 2D ``.dat`` starts ``Data columns Qx - Qy - …``).
-    Used for keyword-based kind detection when the filename and column
-    count alone aren't decisive.
+    With ``text_lines``, plain (un-commented) text lines before the first
+    numeric row count too — Mantid's old NIST-style 2D ``.dat`` starts
+    ``Data columns Qx - Qy - …``. Used for keyword-based kind detection when
+    the filename and column count alone aren't decisive.
     """
     out: list[str] = []
     try:
@@ -187,7 +190,7 @@ def _read_header(path: Path, *, max_lines: int = 8) -> str:
                 stripped = line.strip()
                 if not stripped:
                     continue
-                if not stripped.startswith("#") and _is_numeric_row(stripped):
+                if not stripped.startswith("#") and (not text_lines or _is_numeric_row(stripped)):
                     break
                 out.append(stripped.lstrip("#").strip())
                 if len(out) >= max_lines:

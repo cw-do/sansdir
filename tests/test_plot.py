@@ -136,11 +136,13 @@ def test_detect_2d_by_iqxy_name(tmp_path: Path) -> None:
     assert detect.detect_kind(f).kind == detect.KIND_IQXQY
 
 
-def test_detect_wavelength_header_without_hash(tmp_path: Path) -> None:
-    f = tmp_path / "inelastic_b1d.dat"
+def test_uncommented_text_header_never_makes_a_transmission_file(tmp_path: Path) -> None:
+    """Text lines before the data may only upgrade to 2D: recent drtsans
+    `*_inelastic_b1d_*.dat` (`lambda,b,delta_b`) keep plotting as before."""
+    f = tmp_path / "H2O_inelastic_b1d_EQSANS_182094.dat"
     rows = [f"{10 + 0.2 * k:.6g},{0.4:.6g},{0.016:.6g}" for k in range(10)]
     f.write_text("lambda,b,delta_b\n" + "\n".join(rows) + "\n", encoding="utf-8")
-    assert detect.detect_kind(f).kind == detect.KIND_TRANSMISSION
+    assert detect.detect_kind(f).kind == detect.KIND_IQ
 
 
 def test_detect_transmission_by_name(tmp_path: Path) -> None:
