@@ -38,7 +38,10 @@ _TRANS_NAME_RE = re.compile(r"trans", re.IGNORECASE)
 # transmission plotter.
 _USANS_REDUCED_RE = re.compile(r"^UN_.+_det_\d+.*\.txt$", re.IGNORECASE)
 _TRANS_HEADER_RE = re.compile(r"\b(lambda|wavelength|T\s*\(|transmission)\b", re.IGNORECASE)
-_IQXQY_HEADER_RE = re.compile(r"\b(iqxqy|qx\s*qy|qx,\s*qy|2d)\b", re.IGNORECASE)
+# "Qx Qy", "Qx,Qy" and the NIST-style "Data columns Qx - Qy - I(Qx,Qy) - err(I)".
+_IQXQY_HEADER_RE = re.compile(r"\b(iqxqy|qx\W{0,5}qy|2d)\b", re.IGNORECASE)
+# drtsans / Mantid name 2D output *_Iqxy.dat / *_Iqxqy.dat.
+_IQXQY_NAME_RE = re.compile(r"iq\s*x\s*q?\s*y", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +81,7 @@ def detect_kind(path: Path) -> Detected:
         return Detected(kind=KIND_TRANSMISSION, columns=cols)
     if cols == 0:
         return Detected(kind=KIND_UNKNOWN, columns=0)
-    if _IQXQY_HEADER_RE.search(header):
+    if _IQXQY_NAME_RE.search(path.name) or _IQXQY_HEADER_RE.search(header):
         return Detected(kind=KIND_IQXQY, columns=cols)
     if cols in (4, 6) and _looks_2d(path):
         return Detected(kind=KIND_IQXQY, columns=cols)
@@ -125,23 +128,57 @@ def _iter_data_lines(path: Path, *, max_lines: int = 8) -> Iterable[str]:
         return
 
 
-def _peek_columns(path: Path) -> int:
-    """Return the column count of the first non-comment line, or 0 on failure.
+_PEEK_LINES: int = 8
 
-    Sniffs comma-delimited files too — a CSV row counts its commas, a
-    whitespace row counts its tokens.
+
+def _split(line: str) -> list[str]:
+    """One data row's fields: comma-separated if it has commas, else whitespace."""
+    if "," in line:
+        return [f.strip() for f in line.split(",") if f.strip()]
+    return line.split()
+
+
+def _data_rows(path: Path, *, max_lines: int = _PEEK_LINES) -> list[list[str]]:
+    """The first data rows that share the most common column count.
+
+    Mantid's ``SaveAscii`` writes a lone spectrum number (``1``) before the
+    data, and transmission files a sample count; taking the dominant column
+    count over a few rows drops those, as :func:`sansdir.plot.ascii1d`'s
+    loader does — otherwise a 4-column I(q) file sniffs as 1 column.
     """
-    for line in _iter_data_lines(path, max_lines=1):
-        return len(line.split(",")) if "," in line else len(line.split())
-    return 0
+    from collections import Counter
+
+    rows = [_split(line) for line in _iter_data_lines(path, max_lines=max_lines)]
+    rows = [r for r in rows if r]
+    if not rows:
+        return []
+    width = Counter(len(r) for r in rows).most_common(1)[0][0]
+    return [r for r in rows if len(r) == width]
+
+
+def _peek_columns(path: Path) -> int:
+    """The data's column count (comma or whitespace separated), or 0 if none."""
+    rows = _data_rows(path)
+    return len(rows[0]) if rows else 0
+
+
+def _is_numeric_row(line: str) -> bool:
+    """Whether a line starts with a number (a data row, not a text header)."""
+    fields = _split(line)
+    try:
+        float(fields[0])
+    except (ValueError, IndexError):
+        return False
+    return True
 
 
 def _read_header(path: Path, *, max_lines: int = 8) -> str:
-    """Concatenate the first few ``#``-prefixed comment lines into one string.
+    """Concatenate the header lines before the data into one string.
 
+    ``#`` comments, and also plain text lines before the first numeric row
+    (Mantid's NIST-style 2D ``.dat`` starts ``Data columns Qx - Qy - …``).
     Used for keyword-based kind detection when the filename and column
-    count alone aren't decisive (e.g. CSV transmission files where the
-    column count comes back as 1).
+    count alone aren't decisive.
     """
     out: list[str] = []
     try:
@@ -150,7 +187,7 @@ def _read_header(path: Path, *, max_lines: int = 8) -> str:
                 stripped = line.strip()
                 if not stripped:
                     continue
-                if not stripped.startswith("#"):
+                if not stripped.startswith("#") and _is_numeric_row(stripped):
                     break
                 out.append(stripped.lstrip("#").strip())
                 if len(out) >= max_lines:
@@ -170,12 +207,12 @@ def _looks_2d(path: Path) -> bool:
     """
     import itertools
 
-    rows = list(_iter_data_lines(path, max_lines=4))
+    rows = _data_rows(path)[:4]
     if len(rows) < 3:
         return False
     try:
-        first_cols = [float(r.split()[0]) for r in rows]
-    except (ValueError, IndexError):
+        first_cols = [float(r[0]) for r in rows]
+    except ValueError:
         return False
     # 1D Iq: q is strictly increasing. 2D Iqxqy: qx repeats or is non-monotonic.
     return not all(b > a for a, b in itertools.pairwise(first_cols))

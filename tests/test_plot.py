@@ -97,6 +97,52 @@ def test_detect_iq_4col(tmp_path: Path) -> None:
     assert d.columns == 4
 
 
+def test_detect_mantid_saveascii_iq_with_spectrum_line(tmp_path: Path) -> None:
+    """Old Mantid SaveAscii: a lone spectrum number before comma-separated
+    q, I, dI, dq rows (IPTS-16594/shared/2/sHS_8m8a.txt). It sniffed as 1 column."""
+    f = tmp_path / "sHS_8m8a.txt"
+    rows = [
+        f"{0.0005 + 0.0004 * k:.6g},{100.0 / (k + 1):.6g},{1.5:.6g},{0.0004:.6g}" for k in range(20)
+    ]
+    f.write_text("# X , Y , E , DX\n1\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    d = detect.detect_kind(f)
+    assert (d.kind, d.columns) == (detect.KIND_IQ, 4)
+    assert len(ascii1d.read_iq(f).q) == 20  # the "1" row is not a data point
+
+
+def test_detect_count_row_does_not_make_1d_look_2d(tmp_path: Path) -> None:
+    """A leading count row (``3``) is not the first q value: still 1D."""
+    f = tmp_path / "sample.txt"
+    rows = [f"{0.001 * (k + 1):.6g} {10.0 / (k + 1):.6g} 0.1 0.0002" for k in range(10)]
+    f.write_text("3\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    assert detect.detect_kind(f).kind == detect.KIND_IQ
+
+
+def test_detect_nist_style_2d_text_header(tmp_path: Path) -> None:
+    """Mantid's NIST-style 2D .dat: un-commented text header, then qx qy I dI
+    with qx increasing along the first rows (looked 1D to the column check)."""
+    f = tmp_path / "110114.dat"
+    rows = [f"{-0.9 + 0.05 * k:.6g}  -2.47  {50 + k}  5.0" for k in range(10)]
+    f.write_text(
+        "Data columns Qx - Qy - I(Qx,Qy) - err(I)\nASCII data\n" + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+    assert detect.detect_kind(f) == detect.Detected(kind=detect.KIND_IQXQY, columns=4)
+
+
+def test_detect_2d_by_iqxy_name(tmp_path: Path) -> None:
+    f = tmp_path / "110114_Iqxy.dat"
+    _write_iq(f, 4)  # monotonic first column: only the name says 2D
+    assert detect.detect_kind(f).kind == detect.KIND_IQXQY
+
+
+def test_detect_wavelength_header_without_hash(tmp_path: Path) -> None:
+    f = tmp_path / "inelastic_b1d.dat"
+    rows = [f"{10 + 0.2 * k:.6g},{0.4:.6g},{0.016:.6g}" for k in range(10)]
+    f.write_text("lambda,b,delta_b\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    assert detect.detect_kind(f).kind == detect.KIND_TRANSMISSION
+
+
 def test_detect_transmission_by_name(tmp_path: Path) -> None:
     f = tmp_path / "sample_trans.txt"
     _write_iq(f, 3)
