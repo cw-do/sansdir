@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.12.1** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.12.2** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -736,6 +736,15 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.12.2
+
+- **`p` plots older reduced files again.** I(q) files saved by older Mantid
+  (`SaveAscii`: a lone `1` line before comma-separated q, I, dI, dq rows,
+  e.g. IPTS-16594) were rejected as an unknown format; they now plot as
+  I(q). Older 2D `*_Iqxy.dat` files (`Data columns Qx - Qy - …` header) now
+  plot as 2D maps instead of a 1D curve. Recent reductions plot exactly as
+  before.
 
 ## What's in v0.12.1
 
