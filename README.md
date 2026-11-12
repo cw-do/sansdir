@@ -1,6 +1,6 @@
 # SansDIR
 
-▣ **SansDIR v0.12.2** — a fast, keyboard-driven dual-pane terminal file manager
+▣ **SansDIR v0.12.3** — a fast, keyboard-driven dual-pane terminal file manager
 for Small-Angle Neutron Scattering data on the ORNL analysis cluster.
 Inspired by the DOS-era **MDIR** and Norton Commander.
 
@@ -737,6 +737,16 @@ default_subject = "[sansdir] data"
 Switch theme live: `:theme monokai` (bare `:theme` lists available names).
 
 ---
+
+## What's in v0.12.3
+
+- **`:plot.iqxqy colorbar_mode=independent` works on your selection.** With
+  no file names it plots the tagged files (or the file under the cursor),
+  like `p`; typed names and wildcards (`*Iqxqy.dat`) are taken from the
+  active pane. Before, it needed the files typed out and looked for them in
+  the folder sansdir was started from.
+- **`Tab` completes arguments on the `:` line**: `colorbar_mode=` and its
+  values (`shared` / `independent`), and other option names and choices.
 
 ## What's in v0.12.2
 
