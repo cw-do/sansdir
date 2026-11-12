@@ -92,6 +92,7 @@ Inside the TUI, press `?` for the live keymap. The most-used keys:
 | `g` / `G`      | `:cd <path>` prompt / fullscreen folder-tree picker                |
 | `f`            | Find a run by number alone (`find 176669`): any IPTS, then viewer  |
 | `:`            | Command line — every action is also a `:command` (see `?`)         |
+|                | `Tab` completes command names, `key=` and choices (`colorbar_mode=`)|
 | `:instrument`  | Switch SANS ⇄ USANS mode (`:instrument usans`); see below           |
 | `?`            | Help overlay (auto-generated from the registry)                    |
 | `q`            | Quit                                                               |

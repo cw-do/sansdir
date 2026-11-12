@@ -148,6 +148,42 @@ def complete_command_name(prefix: str, registry: CommandRegistry) -> list[str]:
     return names + aliases
 
 
+def complete_argument(line: str, registry: CommandRegistry) -> list[str]:
+    """Tab candidates for the token being typed after a command name.
+
+    Each candidate replaces the last token:
+
+    * ``col`` → ``colorbar_mode=`` (parameter names not used yet);
+    * ``colorbar_mode=i`` → ``colorbar_mode=independent`` (enum choices),
+      and ``true`` / ``false`` for bool parameters.
+
+    Returns ``[]`` when there is nothing to offer (unknown command, a free
+    value like a path, or the first token still being typed).
+    """
+    tokens = line.split(" ")
+    if len(tokens) < 2:
+        return []
+    try:
+        cmd = registry.get(tokens[0])
+    except KeyError:
+        return []
+    current = tokens[-1]
+    if "=" in current:
+        key, partial = current.split("=", 1)
+        param = next((p for p in cmd.params if p.name == key), None)
+        if param is None:
+            return []
+        if param.type == "enum":
+            values = list(param.choices or [])
+        elif param.type == "bool":
+            values = ["true", "false"]
+        else:
+            return []
+        return [f"{key}={v}" for v in values if v.startswith(partial)]
+    used = {t.split("=", 1)[0] for t in tokens[1:-1] if "=" in t}
+    return [f"{p.name}=" for p in cmd.params if p.name not in used and p.name.startswith(current)]
+
+
 def common_prefix(strings: list[str]) -> str:
     """Longest common prefix of ``strings`` (empty if list is empty)."""
     if not strings:

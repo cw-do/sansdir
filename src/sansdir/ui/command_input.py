@@ -6,7 +6,9 @@ Behaves like a shell prompt:
   ``~/.cache/sansdir/cmd_history``).
 * ``Tab`` — complete the first token against registered command names;
   hitting Tab on a unique completion fills the rest of the name plus a
-  trailing space; a multi-match shows them in the status notifier.
+  trailing space; a multi-match shows them in the status notifier. After
+  the name, Tab completes parameter names (``colorbar_mode=``) and the
+  values of enum / bool parameters (``colorbar_mode=independent``).
 * ``Esc`` — cancel and return focus to the active pane.
 * ``Enter`` — submit; the App's :meth:`SansdirApp.run_command_line` handles
   parsing and dispatch.
@@ -26,7 +28,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal
 from textual.widgets import Input, Static
 
-from sansdir.commands.parser import common_prefix, complete_command_name
+from sansdir.commands.parser import common_prefix, complete_argument, complete_command_name
 from sansdir.core.history import CommandHistory
 
 if TYPE_CHECKING:
@@ -108,12 +110,11 @@ class CommandInput(Input):
     # ---- completion ----------------------------------------------------------
 
     def action_complete(self) -> None:
-        text = self.value
-        if " " in text.rstrip():
-            # Past the first token — Phase 2 only completes command names;
-            # path completion is Phase 6+.
+        text = self.value.lstrip()
+        if " " in text:
+            self._complete_argument(text)
             return
-        prefix = text.lstrip()
+        prefix = text
         matches = complete_command_name(prefix, self._registry)
         if not matches:
             return
@@ -128,6 +129,30 @@ class CommandInput(Input):
         # Show candidates without forcing the user to dismiss a popup.
         self.app.notify(
             "  ".join(matches[:12]) + (" ..." if len(matches) > 12 else ""),
+            title="completions",
+            timeout=4,
+        )
+
+    def _complete_argument(self, text: str) -> None:
+        """Tab after the command name: ``key=`` names and enum / bool values."""
+        matches = complete_argument(text, self._registry)
+        if not matches:
+            return
+        head, _sep, current = text.rpartition(" ")
+        if len(matches) == 1:
+            done = matches[0]
+            # A finished value gets a space for the next argument; "key=" waits for its value.
+            self.value = f"{head} {done}" + ("" if done.endswith("=") else " ")
+            self.cursor_position = len(self.value)
+            if done.endswith("="):
+                self._complete_argument(self.value)  # show the choices right away
+            return
+        common = common_prefix(matches)
+        if common and common != current:
+            self.value = f"{head} {common}"
+            self.cursor_position = len(self.value)
+        self.app.notify(
+            "  ".join(m.split("=", 1)[1] or m for m in matches[:12]),
             title="completions",
             timeout=4,
         )

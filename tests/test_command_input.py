@@ -246,3 +246,46 @@ async def test_tab_extends_to_common_prefix(tmp_path: Path) -> None:
         assert app._cmdline.value == "pane."
         await pilot.press("escape")
         await pilot.press("q")
+
+
+# ---------------------------------------------------------------------------
+# Tab after the command name: parameter names and enum values (2026-11-12)
+# ---------------------------------------------------------------------------
+
+
+def test_complete_argument_rules() -> None:
+    from sansdir.commands.builtins import build_default_registry
+    from sansdir.commands.parser import complete_argument
+    from tests.test_phase1_commands import FakeApp, FakePanel
+
+    reg = build_default_registry(
+        app=FakeApp(left=FakePanel(cwd=Path(".")), right=FakePanel(cwd=Path(".")))
+    )
+    assert complete_argument("plot.iqxqy col", reg) == ["colorbar_mode="]
+    assert complete_argument("plot.iqxqy colorbar_mode=", reg) == [
+        "colorbar_mode=shared",
+        "colorbar_mode=independent",
+    ]
+    assert complete_argument("plot.iqxqy colorbar_mode=i", reg) == ["colorbar_mode=independent"]
+    assert complete_argument("plot.iqxqy colorbar_mode=x", reg) == []
+    assert complete_argument("plot.iqxqy a.dat colorbar_mode=shared ", reg) == ["paths="]
+    assert complete_argument("run.find 1 view=", reg) == ["view=true", "view=false"]
+    assert complete_argument("nosuchcommand x", reg) == []
+    assert complete_argument("plot.iqxqy", reg) == []
+
+
+async def test_tab_completes_a_colorbar_mode_value(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press(":")
+        for ch in "plot.iqxqy col":
+            await pilot.press(ch if ch != " " else "space")
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._cmdline.value == "plot.iqxqy colorbar_mode="
+        await pilot.press("i")
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app._cmdline.value == "plot.iqxqy colorbar_mode=independent "
+        assert app.focused is app._cmdline  # Tab did not leave the line
