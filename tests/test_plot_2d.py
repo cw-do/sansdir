@@ -381,3 +381,94 @@ def test_plot_iqxqy_command_exposes_colorbar_mode(tmp_path: Path) -> None:
     param = {p.name: p for p in cmd.params}["colorbar_mode"]
     assert param.choices == ["shared", "independent"]
     assert not param.required
+
+
+# ---------------------------------------------------------------------------
+# `:plot.iqxqy colorbar_mode=…` from the command line (user report 2026-11-12)
+# ---------------------------------------------------------------------------
+
+
+def _tui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[object, list[tuple]]:
+    from sansdir.app import SansdirApp
+    from sansdir.core.history import CommandHistory
+
+    data = tmp_path / "data"
+    data.mkdir()
+    for t in (20, 30, 40):
+        _write_iqxqy(data / f"S_{t}C_conf1_Iqxqy.dat")
+    (data / "notes.txt").write_text("x")
+    other = tmp_path / "other"
+    other.mkdir()
+    opened: list[tuple] = []
+
+    def fake_spawn(kind, paths, **kwargs):  # type: ignore[no-untyped-def]
+        opened.append((kind, [Path(p).name for p in paths], kwargs.get("colorbar_mode")))
+        return backend.BackendInfo(name="QtAgg", interactive=True, reason="test")
+
+    monkeypatch.setattr(backend, "has_display", lambda: True)
+    monkeypatch.setattr(backend, "spawn_plot_window", fake_spawn)
+    monkeypatch.chdir(other)  # the TUI's own cwd is NOT where the files are
+    app = SansdirApp(
+        start_path=data,
+        right_path=other,
+        history=CommandHistory(path=tmp_path / "hist", load=False),
+    )
+    return app, opened
+
+
+async def _type(pilot, text: str) -> None:  # type: ignore[no-untyped-def]
+    await pilot.press(":")
+    for ch in text:
+        await pilot.press(ch if ch != " " else "space")
+    await pilot.press("enter")
+    await pilot.pause(0.2)
+
+
+async def test_colorbar_mode_applies_to_the_tagged_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, opened = _tui(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        app.active_panel.tag_glob("*Iqxqy.dat")  # type: ignore[attr-defined]
+        await _type(pilot, "plot.iqxqy colorbar_mode=independent")
+        await pilot.press("q")
+    assert opened == [
+        (
+            "iqxqy",
+            ["S_20C_conf1_Iqxqy.dat", "S_30C_conf1_Iqxqy.dat", "S_40C_conf1_Iqxqy.dat"],
+            "independent",
+        )
+    ]
+
+
+async def test_typed_glob_is_relative_to_the_active_pane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, opened = _tui(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        await _type(pilot, "plot.iqxqy S_*0C_conf1_Iqxqy.dat colorbar_mode=shared")
+        await pilot.press("q")
+    assert len(opened) == 1 and len(opened[0][1]) == 3 and opened[0][2] == "shared"
+
+
+async def test_nothing_to_plot_says_what_to_do(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, opened = _tui(tmp_path, monkeypatch)
+    notes: list[str] = []
+    async with app.run_test() as pilot:  # type: ignore[attr-defined]
+        await pilot.pause()
+        original = app.notify_user  # type: ignore[attr-defined]
+
+        def record(message: str, **kwargs):  # type: ignore[no-untyped-def]
+            notes.append(message)
+            return original(message, **kwargs)
+
+        app.notify_user = record  # type: ignore[attr-defined]
+        app.active_panel.move_cursor(row=0)  # type: ignore[attr-defined]  # ".."
+        await _type(pilot, "plot.iqxqy colorbar_mode=independent")
+        await pilot.press("q")
+    assert opened == []
+    assert any("tag the I(qx,qy) files" in n for n in notes)

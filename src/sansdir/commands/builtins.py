@@ -1050,18 +1050,47 @@ def _plot_user_message(png: Path | None, info, paths: list[str]) -> str:  # type
     return f"plot saved → {png}"
 
 
+def _expand_paths(items: list[str], cwd: Path) -> list[Path]:
+    """Typed file names / globs → existing paths; relative ones are taken from ``cwd``.
+
+    A glob (``*Iqxqy.dat``) expands to its sorted matches; a name that matches
+    nothing is kept as given so the plotter can report it.
+    """
+    import glob
+
+    out: list[Path] = []
+    for item in items:
+        path = Path(item).expanduser()
+        if not path.is_absolute():
+            path = cwd / path
+        if glob.has_magic(str(path)):
+            out.extend(Path(m) for m in sorted(glob.glob(str(path))))
+        else:
+            out.append(path)
+    return out
+
+
 def _make_plot_iqxqy(app: AppProtocol) -> Command:
     from sansdir.config import load_config as _load_config
 
     _default_mode = _load_config().ui.colorbar_mode
 
-    def handler(paths: list[str], colorbar_mode: str = _default_mode) -> str:
+    def handler(paths: list[str] | None = None, colorbar_mode: str = _default_mode) -> str | None:
         from sansdir.plot.backend import has_display, save_figure_to_png, spawn_plot_window
         from sansdir.plot.tile import make_iqxqy_figure, make_tile_figure
 
-        path_list = [Path(p) for p in paths]
+        # Typed names / globs resolve in the active pane (not the TUI's launch
+        # directory); with none, plot the selection like `p` does.
+        path_list = _expand_paths(paths or [], app.active_panel.cwd)
+        if not paths:
+            path_list = app.active_panel.selection()
         if not path_list:
-            raise ValueError("plot.iqxqy: at least one file required")
+            app.notify_user(
+                "plot.iqxqy: tag the I(qx,qy) files (or put the cursor on one), "
+                "or name them:  plot.iqxqy *Iqxqy.dat colorbar_mode=independent",
+                severity="warning",
+            )
+            return None
         if has_display():
             info = spawn_plot_window("iqxqy", path_list, colorbar_mode=colorbar_mode)
             return f"plot opened ({info.name})"
@@ -1078,8 +1107,20 @@ def _make_plot_iqxqy(app: AppProtocol) -> Command:
     return Command(
         name="plot.iqxqy",
         description="Plot 4/6-col Iqxqy ASCII files (single pcolormesh or tile).",
+        examples=(
+            "plot.iqxqy colorbar_mode=independent",
+            "plot.iqxqy *C_conf1_Iqxqy.dat colorbar_mode=shared",
+        ),
         params=(
-            CommandParam(name="paths", type="files", description="File(s) to plot."),
+            CommandParam(
+                name="paths",
+                type="files",
+                description=(
+                    "File(s) or globs, relative to the active pane; "
+                    "blank → the tagged files (or the cursor file), as `p` uses."
+                ),
+                required=False,
+            ),
             CommandParam(
                 name="colorbar_mode",
                 type="enum",
