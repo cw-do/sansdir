@@ -12,6 +12,7 @@ ORNL Technical Memorandum describing sansdir, built on the ORNL report template
 | `sansdir.bib` | Bibliography. |
 | `figures/` | Generated figures (see below). |
 | `Makefile` | Build targets. |
+| `ORNL-851.pdf` | The ORNL-851 publication form. |
 | `make_figures.py` | Regenerates every figure from the live code. |
 | `ornltm.cls`, `ornltm-style.sty`, `luggage/` | The ORNL template, unmodified. |
 | `ornl-report-example.tex`, `abbreviations.tex`, `example.bib` | The template's own example, left pristine for reference. |
@@ -80,6 +81,22 @@ what is actually installed, symlinks a `libnsl.so.1` shim next to the fetched
 tree, and prints the `export LD_LIBRARY_PATH=...` line to `eval`. If it exits
 with "no libnsl.so.\* found," install `libnsl2` (or your distro's equivalent)
 first.
+
+## Overleaf
+
+`docs/` is also the root of the ORNL Overleaf project
+(`https://latex.ornl.gov/git/6a6cff314d4a53890cc75518`, git remote `overleaf`),
+kept in sync with `git subtree`. Its main document is `sansdir-report-do.tex`.
+
+```bash
+git remote add overleaf https://git@latex.ornl.gov/git/6a6cff314d4a53890cc75518  # once per clone
+make overleaf-push   # commit first; pushes docs/ history to Overleaf
+make overleaf-pull   # merges edits made on Overleaf back into docs/
+```
+
+Overleaf asks for a Git token (Overleaf → Account → Git integration); store it
+in `~/.git-credentials` as `https://git:<TOKEN>@latex.ornl.gov`. Pull before
+editing locally if the report was touched on Overleaf, or the push is rejected.
 
 ## Figures
 

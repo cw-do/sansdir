@@ -4,6 +4,7 @@
 #   make figures    -> regenerate screenshots and plots from the live code
 #   make clean      -> remove LaTeX intermediates
 #   make distclean  -> also remove the PDF and generated figures
+#   make overleaf-push / overleaf-pull -> sync docs/ with the Overleaf project
 #
 # Requires a full TeX Live (the ornltm class pulls in wallpaper, adjustbox,
 # acro, tocloft, framed, seqsplit, biblatex-chicago) and biber. Overleaf has
@@ -23,7 +24,7 @@ GENFIGS  := $(FIGDIR)/tui-panes.pdf \
             $(FIGDIR)/plot-iq.pdf \
             $(FIGDIR)/plot-detector.pdf
 
-.PHONY: all figures clean distclean
+.PHONY: all figures clean distclean overleaf-push overleaf-pull
 
 all: $(DOC).pdf
 
@@ -46,3 +47,13 @@ clean:
 
 distclean: clean
 	rm -f $(DOC).pdf $(GENFIGS) $(FIGDIR)/*.svg
+
+# docs/ is a git subtree of the sansdir repo that is also the root of the ORNL
+# Overleaf project (remote `overleaf`, branch master). Commit first; these act
+# on committed history only.
+overleaf-push:
+	cd .. && git subtree push --prefix=docs overleaf master
+
+overleaf-pull:
+	cd .. && git subtree pull --prefix=docs overleaf master \
+	    -m "docs: pull edits from Overleaf"
