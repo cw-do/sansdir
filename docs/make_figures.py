@@ -7,6 +7,7 @@ drawn by hand, so the report cannot drift from the program it documents:
 * Terminal screenshots are captured by driving the real :class:`SansdirApp`
   through Textual's headless pilot and calling ``save_screenshot``.
 * Plots are produced by calling sansdir's own figure factories.
+* The detector viewer is rendered on Qt's offscreen platform and grabbed.
 
 Run from the repository root::
 
@@ -392,6 +393,54 @@ async def _capture_usans_workflow() -> None:
         _svg_to_pdf(stem)
 
 
+def _capture_viewer() -> None:
+    """Figure: the Qt detector viewer on a real run, with a mask and a TOF window.
+
+    Cluster-only, like the worked examples: it needs IPTS-37425 run 176669
+    (6.15e9 events). The histogram cache makes this ~1 s; a cache miss loads
+    the run in the viewer's process pool (~1 min). Rendered on Qt's offscreen
+    platform, so no display is needed, and the window is built without
+    settings, so nothing is written to ~/.config.
+    """
+    run = Path("/SNS/EQSANS/IPTS-37425/nexus/EQSANS_176669.nxs.h5")
+    if not run.is_file():
+        print(f"  ! {run} not reachable; skipping viewer figure")
+        return
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    from PySide6.QtWidgets import QApplication
+
+    from sansdir.mask.core import Circle, Rectangle
+    from sansdir.viewer.cache import CubeCache
+    from sansdir.viewer.cube import DEFAULT_NBINS, load_cube
+    from sansdir.viewer.geometry import pixel_info
+    from sansdir.viewer.qt.main_window import MainWindow
+
+    cube = CubeCache.default().get(run, DEFAULT_NBINS) or load_cube(run)
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    win.resize(1500, 950)
+    win.show()
+    win._set_cube(cube)
+    app.processEvents()
+    # A 60-bin TOF window on the short-wavelength side of the frame gap.
+    win.tof_panel.full_box.setChecked(False)
+    win.tof_panel.width_box.setValue(60)
+    win.tof_panel.slider.setValue(170)
+    # Beam stop plus the top and bottom rows: the usual first mask.
+    win.set_tool("rect")
+    win.editor.add_shape(Circle(xc=91, yc=134, r=8))
+    win.editor.add_shape(Rectangle(x0=0, y0=0, x1=191, y1=7))
+    win.editor.add_shape(Rectangle(x0=0, y0=248, x1=191, y1=255))
+    app.processEvents()
+    win.view.fit()
+    win._show_readout(pixel_info(120.0, 150.0))
+    for _ in range(5):
+        app.processEvents()
+    win.grab().save(str(FIG_DIR / "viewer.png"))
+    win.close()
+
+
 def _make_plots() -> None:
     """Figures: a reduced I(q) curve and a raw detector heat map."""
     import matplotlib
@@ -446,6 +495,9 @@ def main() -> int:
 
     print("Capturing USANS reduction worked example (cluster-only) ...")
     asyncio.run(_capture_usans_workflow())
+
+    print("Capturing the detector viewer (cluster-only) ...")
+    _capture_viewer()
 
     print("Rendering plots ...")
     _make_plots()

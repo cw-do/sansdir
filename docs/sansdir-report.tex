@@ -1,6 +1,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % File: sansdir-report.tex
-% Technical report describing the sansdir terminal application.
+% Technical report describing the sansdir terminal application, rewritten in
+% the author's preferred direct English style.
 % Built on the ORNL report template (ornltm.cls) supplied in this directory.
 %
 % Build:  pdflatex sansdir-report
@@ -106,20 +107,19 @@ Small-Angle Neutron Scattering Data}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{foreword}
 
-This report documents \textbf{sansdir}, a terminal application developed in the
-Neutron Scattering Division at \ac{ornl} to support the day-to-day data-handling
-work of \ac{sans} instrument scientists and users. The software is in production
-use for \ac{sns} \ac{sans} workflows and is installed cluster-wide on the
-analysis cluster, launched simply as \texttt{sansdir}.
+This report describes \textbf{sansdir}, a terminal application developed in the
+Neutron Scattering Division at \ac{ornl}. It supports the daily data-handling
+work of \ac{sans} instrument scientists and users. The software is used in
+production for \ac{sns} \ac{sans} workflows. It is installed across the analysis
+cluster and starts with the command \texttt{sansdir}.
 
-The report is written for two audiences. Sections~\ref{sec:intro}
-through~\ref{sec:config} are a user manual: they describe what the program does,
-how to install and run it, and how each feature behaves. Sections
-\ref{sec:formats} through \ref{sec:future} are a developer and reviewer
-reference: they document the internal architecture, the testing strategy, and
-measured performance. Readers who
-only want to use the program can stop after Section~\ref{sec:config}; the
-appendices provide condensed reference tables of every command and key binding.
+The report serves users, developers, and reviewers. Section~\ref{sec:intro}
+gives the motivation, and Section~\ref{sec:arch} describes the software design.
+User procedures are given in Section~\ref{sec:install} and
+Sections~\ref{sec:ui} through~\ref{sec:usans}. Sections~\ref{sec:formats}
+through~\ref{sec:future} document the data formats, tests, performance, and
+current limitations. The appendices give short reference tables for every
+command and key binding.
 
 \end{foreword}
 
@@ -129,35 +129,40 @@ appendices provide condensed reference tables of every command and key binding.
 \mainmatter
 \begin{abstract}
 
-\Ac{sans} users at the \ac{sns} spend a substantial fraction of their beam-time
-and post-experiment effort on tasks that are neither data reduction nor data
-analysis: locating runs across \ac{ipts} directories, triaging reduced data by
-inspecting plots, reading instrument logs out of NeXus files, exporting selected
-metadata to tables, and packaging results for collaborators. These tasks are
-performed over \ac{ssh} on the analysis cluster, where \ac{gui} tools that
-require X11 forwarding respond slowly.
+\Ac{sans} users at the \ac{sns} spend a substantial part of their beam-time and
+post-experiment effort on tasks other than data reduction and analysis. They
+locate runs across \ac{ipts} directories, inspect plots to check reduced data,
+read instrument logs from NeXus files, export selected metadata to tables, and
+package results for collaborators. These tasks are performed over \ac{ssh} on
+the analysis cluster. In this environment, \ac{gui} tools that require X11
+forwarding respond slowly.
 
-This report describes \textbf{sansdir}, a dual-pane, keyboard-driven \ac{tui}
-that consolidates these tasks into a single application requiring no display
+This report describes \textbf{sansdir}, a keyboard-driven \ac{tui} with two
+panes. It places these tasks in one application and does not require a display
 server. The program follows the interaction model of the MDIR and Norton
-Commander file managers: two independent directory panes, function-key actions,
-and file operations that default to moving data from the active pane to the
-opposite one. It adds \ac{sans}-specific capability: automatic classification and
-plotting of reduced one- and two-dimensional data, detector heat maps computed
-directly from raw NeXus event files without a Mantid runtime, a searchable
-\ac{hdf} tree browser, batch metadata extraction to \ac{csv} and \ac{tsv}, an
-interactive detector-mask editor whose output is compatible with the
-\texttt{drtsans} reduction pipeline, and catalog search through the \ac{ornl}
-OnCat service.
+Commander file managers. It provides two independent directory panes,
+function-key actions, and file operations that move data from the active pane to
+the opposite pane by default. It also provides functions specific to \ac{sans}:
+automatic classification and plotting of reduced one- and two-dimensional data,
+detector heat maps calculated directly from raw NeXus event files without a
+Mantid runtime, a searchable \ac{hdf} tree browser, batch metadata extraction to
+\ac{csv} and \ac{tsv}, catalog search through the \ac{ornl} OnCat service, and
+a lookup that finds a run in any \ac{ipts} from its run number alone. A separate
+detector viewer slices raw event data by \ac{tof} interactively, even for runs
+of several billion events, and contains a mask editor whose output is
+compatible with the \texttt{drtsans} reduction pipeline. In \ac{usans} mode, it also prepares a setup table for
+review, invokes the established reduction engine, and provides truncated-Abel
+desmearing.
 
-The central architectural decision is that every user-facing action is a typed
-command in a single registry. Key bindings, the interactive command line, and
-the non-interactive \ac{cli} are all thin callers of that registry, which makes
-the interaction surface uniform, self-documenting, and testable, and which
-positions a future natural-language layer as an additional caller rather than a
-rewrite. The implementation is approximately 18,400 lines of Python across 58
-modules, covered by 799 automated tests, and starts in well under the
-300~ms budget.
+The main architectural decision is to define each interactive action as a typed
+command in one registry. Key bindings and the interactive command line call this
+registry. The non-interactive \ac{cli} has a separate Click dispatch path but
+uses the same service functions. The registry also exports a tool schema that
+can support a future natural-language layer. The implementation contains
+approximately 24,000 lines of Python in 89 modules. The current test suite
+collects 1,079 tests. On an analysis node, the measured
+\texttt{sansdir --help} path has a median startup time of about 40~ms, within
+its 300~ms budget.
 
 \end{abstract}
 
@@ -170,110 +175,120 @@ modules, covered by 799 automated tests, and starts in well under the
 
 \subsection{MOTIVATION}
 
-A \ac{sans} experiment at the \ac{sns} produces raw event-mode NeXus files, one
-per run, that are written into an \ac{ipts} directory tree of the form
+A \ac{sans} experiment at the \ac{sns} produces one raw event-mode NeXus file
+for each run. These files are written to an \ac{ipts} directory tree of the form
 \texttt{/SNS/EQSANS/IPTS-NNNNN/nexus/}. Reduction---performed by
 \texttt{drtsans} \autocite{drtsans} or by the automatic reduction service---emits
 one-dimensional $I(q)$ profiles, two-dimensional $I(q_x,q_y)$ arrays,
-transmission curves, and log files into a parallel \texttt{shared/} tree. A
-single proposal routinely accumulates hundreds of runs and several thousand
-derived files.
+transmission curves, and log files to a parallel \texttt{shared/} tree. One
+proposal routinely contains hundreds of runs and several thousand derived
+files.
 
 Between measurement and publication, the instrument scientist and the user
-perform a set of tasks that are repetitive, unglamorous, and poorly served by
-existing software:
+perform several repetitive tasks. Existing software does not connect these
+tasks well:
 
 \begin{itemize}
-  \item \textbf{Navigation.} Moving between \ac{ipts} directories, between the
+  \item \textbf{Navigation.} Move between \ac{ipts} directories, between the
     \texttt{nexus/} and \texttt{shared/} subtrees of one proposal, and between a
     proposal directory and a personal scratch area.
-  \item \textbf{Triage.} Opening a reduced $I(q)$ file to check whether a
-    measurement worked, comparing two or three curves on the same axes, or
-    looking at a raw detector image to confirm beam-center and beam-stop
+  \item \textbf{Triage.} Open a reduced $I(q)$ file to check whether a
+    measurement worked, compare two or three curves on the same axes, or look
+    at a raw detector image to confirm beam-center and beam-stop
     placement.
-  \item \textbf{Log inspection.} Reading sample environment values---temperature,
-    shear rate, sample position---out of the \ac{das} logs stored inside a NeXus
+  \item \textbf{Log inspection.} Read sample environment values---temperature,
+    shear rate, sample position---from the \ac{das} logs stored inside a NeXus
     file, either for one run or as a table across many runs.
-  \item \textbf{Packaging.} Selecting a subset of results, compressing them, and
-    emailing them to a collaborator.
+  \item \textbf{Packaging.} Select a subset of results, compress the files, and
+    email them to a collaborator.
 \end{itemize}
 
-None of these is difficult in isolation. What makes them costly is that they are
-performed dozens of times a day, from a terminal session on the analysis cluster,
-and that the available tools each address only one of them. Mantid Workbench
-\autocite{mantid} is a full analysis environment and is correspondingly heavy to
-launch for the purpose of glancing at one curve. A file manager handles
-navigation but knows nothing about \ac{sans} file formats. Reading \ac{das} logs
-means writing a short \texttt{h5py} \autocite{h5py} script. Any \ac{gui} tool
-launched over \ac{ssh} with X11 forwarding responds with a latency that makes
-rapid iteration unpleasant.
+Each task is simple by itself. However, these tasks are repeated dozens of times
+each day from a terminal session on the analysis cluster, and each available
+tool addresses only one task. Mantid Workbench \autocite{mantid} is a full
+analysis environment and is heavy to launch only to inspect one curve. A file
+manager supports navigation but does not understand \ac{sans} file formats.
+Reading \ac{das} logs requires a short \texttt{h5py} \autocite{h5py} script. A
+\ac{gui} tool launched over \ac{ssh} with X11 forwarding also has enough latency
+to make rapid iteration difficult.
 
-The economic argument for \textbf{sansdir} is therefore not that it does
-something impossible, but that it collapses a dozen context switches per hour
-into a single keyboard-driven application that runs natively in the terminal the
-scientist is already using.
+The value of \textbf{sansdir} is not that it performs an impossible task. It
+places these repeated operations in one keyboard-driven application and reduces
+context switching. The application runs in the terminal that the scientist is
+already using.
 
 \subsection{DESIGN PRINCIPLES}
 \label{sec:principles}
 
-Four principles govern the implementation. They are recorded here because they
-are binding on future contributions, not merely descriptive.
+Four principles guide the implementation. They also apply to future
+contributions.
 
 \begin{enumerate}
-  \item \textbf{Speed first.} Every interaction must feel instantaneous. No
-    blocking input/output is permitted on the user-interface thread; catalog
-    queries, \ac{hdf} reads, and plot rendering run on worker threads or in
-    separate processes.
-  \item \textbf{Keyboard-driven.} Every action has a single-key or short-chord
-    binding. Mouse support is acceptable but never required.
+  \item \textbf{Speed first.} Every interaction should feel immediate. Blocking
+    input/output is not allowed on the user-interface thread. Catalog queries,
+    \ac{hdf} reads, and plot rendering run on worker threads or in separate
+    processes.
+  \item \textbf{Keyboard-driven.} Common operations have a single-key or
+    short-chord binding. Other registered actions are available from the
+    interactive command line. Mouse support is acceptable but never required.
   \item \textbf{Predictable.} A user familiar with MDIR, Norton Commander, or
-    \ac{mc}-style file managers \autocite{midnightcommander} should be productive
-    within minutes. This dictates two panes, function-key actions, and
-    ``operate from the active pane into the opposite pane'' semantics.
-  \item \textbf{The command registry is the single source of truth.} Every
-    user-facing action is a registered command with a name, typed parameters, a
-    description, and examples. Key bindings, the command line, and the \ac{cli}
-    all dispatch through it. No key handler is ever wired directly to
-    business logic.
+    \ac{mc}-style file managers \autocite{midnightcommander} should be able to
+    recognize the interaction model. This requires two panes, function-key
+    actions, and ``operate from the active pane into the opposite pane''
+    semantics.
+  \item \textbf{The command registry is the single source of truth for
+    interactive actions.} Every interactive action is a registered command with
+    a name, typed parameters, a description, and examples. Key bindings and the
+    interactive command line dispatch through this registry. The \ac{cli} uses
+    a separate Click path to the same service functions. A key handler never
+    calls business logic directly.
 \end{enumerate}
+
+A fifth rule concerns plots. Plots are drawn with matplotlib in their own
+windows, never as character graphics in the terminal. There is one exception.
+The detector viewer of Section~\ref{sec:viewer} uses Qt through PySide6 and
+\texttt{pyqtgraph}, because \ac{tof} slicing and mask editing need redraws of a
+few milliseconds over a remote desktop. Qt is imported only in the viewer's own
+process, and figures exported from the viewer are still drawn by matplotlib.
 
 \subsection{HERITAGE AND RELATED TOOLS}
 
-The interaction model descends from MDIR, a DOS-era file manager, and from the
-Norton Commander family that includes \ac{mc}. The defining feature of that
-family is the dual-pane layout: two independent directory views, exactly one of
-which is active, with copy and move operations defaulting to ``from the active
-pane to the other pane.'' This convention eliminates the source-and-destination
-dialog that dominates single-pane and graphical file managers, and it is the
-reason experienced Norton Commander users move files faster than mouse-driven
-equivalents. Preserving it is treated as a hard constraint rather than an
-aesthetic preference.
+The interaction model comes from MDIR, a DOS-era file manager, and the Norton
+Commander family that includes \ac{mc}. These file managers use two independent
+directory views, with exactly one active pane. Copy and move operations use
+``from the active pane to the other pane'' as their default. This convention
+removes the source-and-destination dialog used by single-pane and graphical file
+managers. It is familiar to experienced Norton Commander users. The program
+therefore treats this behavior as a fixed requirement, not an aesthetic choice.
 
-\textbf{sansdir} is complementary to, not a replacement for, the existing
-\ac{sns} software stack. It performs no data reduction; \texttt{drtsans} remains
-the reduction engine. It performs no model fitting. It does not replace Mantid
-Workbench for interactive analysis. Its scope is deliberately the layer
-\emph{around} reduction and analysis: finding files, looking at them, extracting
-metadata from them, and moving them. Where the boundary is crossed---the
-detector-mask editor of Section~\ref{sec:mask} produces an input to
-reduction---the output format is defined by what \texttt{drtsans} consumes.
+\textbf{sansdir} supports the existing \ac{sns} software stack and does not
+replace it. It does not perform native \ac{sans} reduction;
+\texttt{drtsans} remains the reduction engine. For \ac{usans}, it invokes the
+instrument team's \texttt{usansred} engine but does not reimplement its reduction
+physics. The program does not perform model fitting or replace Mantid Workbench
+for interactive analysis. Its main scope is the layer \emph{around} reduction
+and analysis: finding files, viewing them, extracting metadata, and moving them.
+The mask editor in Section~\ref{sec:viewer} also produces an input for
+reduction, using the format accepted by \texttt{drtsans}.
 
 An earlier tool by the same author, \texttt{eqsanscli} \autocite{eqsanscli},
-provided command-line access to OnCat catalog search. Its \ac{api} endpoints and
-authentication flow informed the OnCat client described in
-Section~\ref{sec:oncat}; that client was written fresh for this program rather
-than by copying \texttt{eqsanscli}'s source code into it.
+provided command-line access to OnCat catalog search. The OnCat client in
+Section~\ref{sec:oncat} uses the same \ac{api} endpoints. It was written for
+this program and did not copy the \texttt{eqsanscli} source code. Since
+version~0.11, it also signs in to OnCat as the individual user instead of with
+a shared service account.
 
 \subsection{SCOPE OF THIS REPORT}
 
-This report describes version 0.11.2. Section~\ref{sec:install} covers
-installation and deployment. Section~\ref{sec:arch} describes the software
+This report describes version 0.12.3. Section~\ref{sec:install} describes
+installation and deployment. Section~\ref{sec:arch} presents the software
 architecture, with emphasis on the command registry. Sections~\ref{sec:ui}
-through~\ref{sec:mask} document the user-facing feature set. Section~\ref{sec:cli}
-covers non-interactive use, and Section~\ref{sec:config} the configuration file.
-Sections~\ref{sec:formats} through~\ref{sec:perf} cover the supported data
-formats, the test suite, and measured performance. Section~\ref{sec:future}
-summarizes the work and states the limitations that bound it.
+through~\ref{sec:viewer} describe the user-facing features. Section~\ref{sec:cli}
+describes non-interactive use, and Section~\ref{sec:config} describes the
+configuration file. Section~\ref{sec:usans} describes reduction setup and
+desmearing for \ac{usans}. Sections~\ref{sec:formats} through~\ref{sec:perf}
+describe the supported data formats, test suite, and measured performance.
+Section~\ref{sec:future} summarizes the work and its limitations.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 2. INSTALLATION
@@ -283,61 +298,63 @@ summarizes the work and states the limitations that bound it.
 
 \subsection{ZERO-INSTALL DEPLOYMENT ON THE ANALYSIS CLUSTER}
 
-The primary deployment target is the \ac{ornl} analysis cluster, where the
-program is installed cluster-wide as the command \texttt{sansdir}: a released,
-non-editable install with its own self-contained Python environment, so no
-per-user installation step is required. It is launched from any terminal on
-the cluster---a login node, a web-terminal session, or an \ac{ssh}
-connection:
+The main deployment target is the \ac{ornl} analysis cluster. The program is
+installed across the cluster as the command \texttt{sansdir}. This is a
+released, non-editable installation with its own Python environment, so users do
+not need to install it. The program can be started from any terminal on the
+cluster: a login node, a web-terminal session, or an \ac{ssh} connection:
 
 \begin{lstlisting}[language=shellsession]
 sansdir
 sansdir /SNS/EQSANS/IPTS-12345/shared
 \end{lstlisting}
 
-The first form opens the interface in the current working directory. The optional
-argument is a starting path: the directory the left pane opens into, so a
-user can jump straight to a proposal's \texttt{shared} folder without navigating
-there by hand. The right pane mirrors it initially. Any readable directory is
-accepted; a path under \texttt{/SNS/USANS} additionally starts the program in
-\ac{usans} mode (Section~\ref{sec:usans}).
+The first form opens the interface in the current working directory. The
+optional argument gives the starting path for the left pane. This allows the
+user to open a proposal's \texttt{shared} folder directly. The right pane starts
+in the same directory. Any readable directory is accepted. A path under
+\texttt{/SNS/USANS} also starts the program in \ac{usans} mode
+(Section~\ref{sec:usans}).
 
-Should \texttt{sansdir} not be on \texttt{PATH} on a particular machine, the
-same launcher is always reachable as
-\texttt{/SNS/EQSANS/shared/bin/sansdir}.
+If \texttt{sansdir} is not on \texttt{PATH} on a particular machine, the same
+launcher is available at \texttt{/SNS/EQSANS/shared/bin/sansdir}.
 
 \subsection{PORTABILITY OF THE LAUNCHER}
 
-The entry-point script may also simply be copied or symlinked anywhere on the
-filesystem and executed from there. This works because the script's shebang
-line names an \emph{absolute} interpreter path inside the shared virtual
-environment, so the kernel executes the bundled Python regardless of where
-the script file itself resides. The resulting execution chain is:
+The installation contains two launch scripts with different behavior. The
+Python console script at \texttt{.venv/bin/sansdir} has an \emph{absolute}
+interpreter path in its shebang. This script can be copied or symbolically linked
+to another location. The kernel still uses the bundled Python. Its execution
+chain is:
 
 \begin{lstlisting}
-[user's copy of the script]
+[copy or symlink of <install>/.venv/bin/sansdir]
   -> <install>/.venv/bin/python        (via absolute shebang)
-     -> the installed sansdir package  (inside that venv)
+     -> the installed sansdir package  (inside that environment)
 \end{lstlisting}
 
-Two consequences follow. First, the copy is independent of the user's active
-conda environment, current working directory, and whichever Python happens to be
-first on \texttt{PATH}. Second, a \emph{symbolic link is preferable to a copy}
-in practice: when the shared environment is rebuilt, every user holding a symlink
-picks up the new build automatically, whereas holders of copies do not.
+The shell wrapper at \texttt{bin/sansdir} is different. It resolves the real
+location of the wrapper and looks for \texttt{../.venv} relative to that path.
+It can be run in place or reached through a symbolic link, but copying the
+wrapper alone to another directory breaks this relative lookup.
 
-The base interpreter of that virtual environment also lives on the shared
-mount, in \texttt{<install>/.python/}, a self-contained conda-forge Python~3.11
-that links only against the C library. A virtual environment built on the
-node's own \texttt{/bin/python3.11} would run only on nodes whose
-administrators had installed that package; analysis nodes on RHEL~9 ship
-Python~3.9 by default, below the 3.10 minimum. The launcher further invokes
-the interpreter in isolated mode (\texttt{-I}), so the caller's
-\texttt{PYTHONPATH}, user site-packages and working directory cannot shadow
-the bundled packages.
+Neither launcher uses the user's active conda environment, current working
+directory, or the first Python on \texttt{PATH}. A symbolic link is normally
+preferred. When the shared installation is replaced, the link follows the
+current launcher, while a copied console script can continue to point to an old
+environment.
 
-Table~\ref{tab:portable} summarizes which components must remain on the shared
-mount and which are freely relocatable.
+The base interpreter of the environment is also on the shared mount, in
+\texttt{<install>/.python/}. It is a self-contained conda-forge Python~3.11 that
+links only against the C library. An environment built on a node's own
+\texttt{/bin/python3.11} runs only on nodes where that package is installed.
+Some analysis nodes on RHEL~9 provide only Python~3.9, which is below the
+3.10 minimum. The launcher also starts the interpreter in isolated mode
+(\texttt{-I}). The user's \texttt{PYTHONPATH}, user site packages, and working
+directory therefore cannot hide the installed packages.
+
+Table~\ref{tab:portable} shows which components must remain on the shared mount
+and which can be moved.
 
 \begin{table}[ht]
   \centering
@@ -348,14 +365,14 @@ mount and which are freely relocatable.
     \toprule
     Path & Status & Note \\
     \midrule
-    \texttt{.venv/} & Fixed & Virtual environment: dependencies and the installed package. \\
-    \texttt{.python/} & Fixed & Self-contained base interpreter for \texttt{.venv}. \\
-    \texttt{src/sansdir/} & Fixed & Source tree that the editable install
-      points to. \\
-    \texttt{.venv/bin/sansdir} & Portable & Python entry point; shebang is
-      absolute. \\
-    \texttt{bin/sansdir} & Portable & Shell launcher; self-locates relative to
-      the shared root. \\
+    \texttt{.venv/} & Fixed & Virtual environment: dependencies and the
+      installed release. \\
+    \texttt{.python/} & Fixed & Self-contained base interpreter for
+      \texttt{.venv}. \\
+    \texttt{.venv/bin/sansdir} & Copy or link & Python entry point with an
+      absolute shebang. \\
+    \texttt{bin/sansdir} & Link only & Shell wrapper; locates
+      \texttt{../.venv} from its resolved source location. \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -363,10 +380,13 @@ mount and which are freely relocatable.
 \subsection{DEPENDENCIES}
 
 Python 3.10 or newer is required. Table~\ref{tab:deps} lists the runtime
-dependencies and the role each plays. The dependency set is deliberately small;
-proposals to add libraries---in particular \texttt{pandas}, \texttt{scipy}, or
-any character-cell plotting library---require justification against the startup
-budget of Section~\ref{sec:startup}.
+dependencies and their roles. The dependency set is kept small. The two Qt
+packages became regular dependencies in version~0.12.0, when the viewer replaced
+the matplotlib mask editor. An optional extra would be skipped by the plain
+\texttt{pip install} used to update the shared installation. A proposal to
+add a library---especially \texttt{pandas}, \texttt{scipy}, or a character-cell
+plotting library---must be justified against the startup budget in
+Section~\ref{sec:startup}.
 
 \begin{table}[ht]
   \centering
@@ -386,7 +406,13 @@ budget of Section~\ref{sec:startup}.
     \texttt{numpy}      & 1.24  & Array input/output for ASCII and NeXus data
       \autocite{numpy}. \\
     \texttt{h5py}       & 3.9   & NeXus and \ac{hdf} access \autocite{h5py}. \\
-    \texttt{pyoncat}    & 2.6   & Per-user OnCat catalog access (device sign-in). \\
+    \texttt{pyoncat}    & 2.6   & Per-user OnCat sign-in and catalog access;
+      \texttt{oauthlib} and \texttt{requests-oauthlib} are listed explicitly
+      because \texttt{pyoncat} imports them without declaring them. \\
+    \texttt{PySide6-Essentials} & 6.5 & Qt bindings for the detector viewer;
+      held below 6.12.\tnote{a} \\
+    \texttt{pyqtgraph}  & 0.13  & Fast image, spectrum, and \ac{roi} items for
+      the detector viewer. \\
     \texttt{send2trash} & 1.8   & Recoverable delete, with a fallback for
       cluster filesystems that provide no trash directory. \\
     \texttt{tomli}      & 2.0   & \Ac{toml} parsing on Python 3.10 only;
@@ -394,6 +420,9 @@ budget of Section~\ref{sec:startup}.
     \bottomrule
   \end{tabular}
   \begin{tablenotes}
+    \item[a] PySide6 6.12.0 with \texttt{pyqtgraph} 0.14 corrupts Python
+    reference counts while painting, and the viewer stops within minutes.
+    Version 6.11 is not affected; a regression test guards against it.
     \item \emph{Note:} Optional extras are \texttt{qt} (installs PyQt5 for an
     interactive matplotlib backend), \texttt{tk} (a marker extra; the
     \texttt{tkinter} module ships with most Python builds), \texttt{llm} (the
@@ -408,12 +437,13 @@ budget of Section~\ref{sec:startup}.
 sansdir --version           # prints the version and exits
 sansdir --help              # subcommands and worked examples
 sansdir extract --help      # per-subcommand help
+sansdir view --help         # detector viewer options
 \end{lstlisting}
 
-A successful \texttt{--version} invocation confirms that the interpreter,
-package, and entry point resolve correctly. It deliberately does not import
-Textual, matplotlib, or \texttt{h5py}, so it also serves as a check that the
-lazy-import discipline of Section~\ref{sec:startup} is intact.
+A successful \texttt{--version} command confirms that the interpreter, package,
+and entry point are resolved correctly. This command does not import Textual,
+matplotlib, or \texttt{h5py}. Therefore, it also checks the lazy-import design
+described in Section~\ref{sec:startup}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 3. ARCHITECTURE
@@ -423,69 +453,72 @@ lazy-import discipline of Section~\ref{sec:startup} is intact.
 
 \subsection{LAYERED STRUCTURE}
 
-The program is organized in four layers, shown in Figure~\ref{fig:arch}. Entry
-points at the top translate user intent into a command name and arguments. The
-command registry in the middle is the sole dispatch mechanism. The service layer
-below it contains all business logic, grouped by concern. External resources sit
-at the bottom.
+Figure~\ref{fig:arch} summarizes the main call paths. Interactive key bindings
+and the \key{:} line convert a user action into a command name and arguments,
+then use the command registry. The non-interactive \ac{cli} uses a separate
+Click path. Both paths use reusable modules for files, metadata, plotting,
+masks, the detector viewer, and \ac{usans}. External resources are shown at the
+bottom.
 
 \begin{figure}[ht]
   \centering
   \resizebox{\textwidth}{!}{\input{figures/fig-architecture.tex}}
-  \longcaption{Layered architecture of sansdir.}{Every entry point---key
-  bindings, the interactive command line, \ac{cli} subcommands, and the planned
-  natural-language layer---converges on a single command registry. The
-  application shell owns no business logic; the service layer below the registry
-  contains all of it.}
+  \longcaption{Layered architecture of sansdir.}{Key bindings and the
+  interactive command line use one command registry. The \ac{cli} uses a
+  separate Click path to the same service functions, and the natural-language
+  layer is planned but not implemented. Reusable data operations are kept in
+  service modules, while the application and interface modules coordinate the
+  current session and views.}
   \label{fig:arch}
 \end{figure}
 
-The Textual application object owns presentation state only: which pane is
-active, what the cursor and tags are, which modal screen is on the stack. It
-contains no file, plotting, or catalog logic. This separation is what makes the
-service layer testable without instantiating a terminal application, and it is
-enforced by code review.
+The Textual application object keeps presentation and session state, including
+the active pane, cursor and tags, and the modal screen stack. Interface modules
+also use several lightweight helpers directly for file listings, history, and
+read-only HDF views. The larger data operations are kept in reusable modules so
+that they can be tested without creating a terminal application.
 
 \subsection{THE COMMAND REGISTRY}
 \label{sec:registry}
 
-The registry is the most consequential design decision in the project. Every
-user-facing action---change directory, tag, copy, plot, extract metadata, search
-the catalog, create a mask---is represented as a \texttt{Command} object holding
-a dotted name, a one-sentence description, a tuple of typed parameters, a
-handler, optional aliases and examples, and a \texttt{danger} flag marking
-destructive operations. Parameters are themselves typed objects with a name, a
-type drawn from a fixed vocabulary (\texttt{path}, \texttt{glob},
+The registry is the main design decision for the interactive interface. Each
+interactive action---change directory, tag, copy, plot, extract metadata, search
+the catalog, create a mask---is a \texttt{Command} object. The object contains a
+dotted name, a one-sentence description, a tuple of typed parameters, a handler,
+optional aliases and examples, and a \texttt{danger} flag for destructive
+operations. Each parameter is also a typed object. It has a name, a type from a
+fixed vocabulary (\texttt{path}, \texttt{glob},
 \texttt{string}, \texttt{int}, \texttt{float}, \texttt{bool}, \texttt{enum},
 \texttt{files}), a description, a required flag, a default, and---for
 enumerations---a list of permitted values.
 
-Validation is performed at construction time and at dispatch time. A parameter
-declaring an unknown type, or an enumeration without choices, raises
-immediately when the command is built, so a malformed command definition fails
-at import rather than when a user first presses the key. At dispatch, unknown
-keyword arguments and missing required arguments both raise \texttt{TypeError}
-before the handler runs.
+Validation occurs when a command is constructed and when it is dispatched. A
+parameter with an unknown type, or an enumeration without choices, raises an
+error when the command is built. Therefore, a malformed command definition
+fails during import instead of when a user first presses the key. During
+dispatch, an unknown keyword argument or a missing required argument raises
+\texttt{TypeError} before the handler runs.
 
-Handlers may be synchronous or asynchronous. \texttt{dispatch} is itself
-asynchronous and awaits the handler's result if it is awaitable, so callers have
-exactly one calling convention regardless of how a particular handler is
-implemented. A synchronous convenience wrapper exists for call sites that are not
-already inside an event loop; it raises rather than silently misbehaving if
-invoked from within one.
+Handlers can be synchronous or asynchronous. \texttt{dispatch} is asynchronous
+and awaits the result when the handler is awaitable. Thus, callers use one
+calling convention for both types of handlers. A synchronous convenience
+wrapper is provided for call sites outside an event loop. It raises an error if
+it is called from inside an event loop.
 
-Version 0.11.2 registers 61 commands. Appendix~\ref{sec:appcommands} lists them
+Version 0.12.3 registers 63 commands. Appendix~\ref{sec:appcommands} lists them
 in full.
 
 \subsection{DISPATCH PATHS}
 
-Four callers use the registry, as summarized in Table~\ref{tab:dispatch}. There
-is intentionally no fifth path: no code in the user-interface layer calls a
-service function directly.
+Table~\ref{tab:dispatch} shows the two implemented callers of the registry and
+two related interfaces. Key bindings and the interactive command line dispatch
+through the registry. The \ac{cli} uses the same service modules through a
+separate Click path, and the \ac{llm} layer is planned. Some interface modules
+also call read-only helpers directly when they build or update a view.
 
 \begin{table}[ht]
   \centering
-  \caption{Callers of the command registry}
+  \caption{Interfaces related to the command registry}
   \label{tab:dispatch}
   \small
   \begin{tabular}{p{0.20\textwidth} p{0.72\textwidth}}
@@ -501,121 +534,135 @@ service function directly.
       command name \cmd{nav.cd} and the argument \texttt{path}, then
       dispatches. \\
     \Ac{cli} &
-      \texttt{sansdir extract -k ...} builds arguments and calls the same
-      extraction code path used by the interactive dialog. \\
+      \texttt{sansdir extract -k ...} builds arguments in a separate Click
+      dispatch path and calls the same extraction service used by the
+      interactive dialog. \\
     \Ac{llm} layer &
-      Planned. The registry already exports a \ac{json} tool schema; a
-      natural-language front end would emit command names with typed arguments,
-      display them for confirmation, and dispatch. \\
+      Planned, not implemented. The registry already exports a \ac{json} tool
+      schema; a natural-language front end would emit command names with typed
+      arguments, display them for confirmation, and dispatch. \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Three properties follow from this discipline, and they are the practical
-justification for it. First, the interactive and non-interactive interfaces
-cannot drift apart, because they are the same code. Second, the help overlay is
-generated from registry metadata rather than maintained by hand, so it cannot
-become stale---Figure~\ref{fig:help} shows the generated output. Third, the
-future natural-language layer is an additional caller rather than a
-reimplementation.
+This design has three practical benefits. First, key bindings and the
+interactive command line use the same commands, while the \ac{cli} reuses the
+same underlying service functions. Second, the help overlay is generated from
+registry metadata instead of being maintained by hand.
+Figure~\ref{fig:help} shows this generated output. Third, the exported schema
+provides a defined input for a future natural-language caller.
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\textwidth]{figures/help-overlay.pdf}
-  \longcaption{The help overlay, generated from the registry.}{Each row pairs a
-  keystroke with its human-readable action and the underlying command name. The
-  third column is what makes the mapping between the two interaction surfaces
-  discoverable: any key can be re-issued as a typed command, and any command can
-  be rebound to a key.}
+  \longcaption{The help overlay, generated from the registry.}{Each row shows a
+  keystroke, its readable action, and the underlying command name. The third
+  column shows the connection between the two interfaces. A key action can also
+  be entered as a typed command. A compatible command that needs no unresolved
+  arguments can be assigned to a key.}
   \label{fig:help}
 \end{figure}
 
 \subsection{KEY BINDINGS AS DATA}
 
-The key map is a plain list of immutable \texttt{KeyBinding} records, each naming
-a key, a command, a description, and an optional \emph{argument resolver}---a
-small named function that converts the running application's state into the
-keyword arguments the command expects. For example, the resolver bound to
-\key{m} extracts the path under the cursor in the active pane and returns it as
-the \texttt{path} argument to \cmd{hdf.show\_keys}.
+The key map is a list of immutable \texttt{KeyBinding} records. Each record has
+a key, a command, a description, and an optional \emph{argument resolver}. The
+resolver is a small named function that converts the application state into the
+keyword arguments required by the command. For example, the resolver for
+\key{m} obtains the path under the cursor in the active pane and returns it as
+the \texttt{path} argument for \cmd{hdf.show\_keys}.
 
-Python allows defining a one-line helper function without giving it a name (a
-\emph{lambda}), but a nameless function identifies itself in error messages
-only as \texttt{<lambda>}. Every resolver here is therefore an ordinary
-function with a descriptive name, so an error traceback and the help overlay
-can both say which resolver was involved. The default map contains 48
-bindings, of which 38 are shown in the help overlay; the remainder are duplicate
-encodings of the same key. Duplicates exist because terminals disagree on how to
-report certain keys: the equals sign arrives as \texttt{equals\_sign} on most
-terminals and as \texttt{=} on others, so both are registered and the redundant
-entry is hidden from help.
+Python can define a one-line helper function without a name (a \emph{lambda}),
+but this function appears only as \texttt{<lambda>} in an error message. Each
+resolver is therefore an ordinary function with a descriptive name. The error
+traceback and help overlay can then identify the resolver. The default map has
+50 bindings, and 40 of them are shown in the help overlay. The remaining
+bindings are duplicate encodings of the same key. These duplicates are needed
+because terminals report some keys differently. For example, most terminals
+report the equals sign as \texttt{equals\_sign}, while others report
+\texttt{=}. Both forms are registered, but the duplicate entry is hidden from
+help.
 
-A test asserts that every binding names a command that exists in a fully bound
-registry, so a typo in the key map fails in \ac{ci} rather than at runtime.
+A test checks that every binding names a command in the fully bound registry.
+Therefore, a typo in the key map fails in \ac{ci} instead of at runtime.
 
-Users may override or extend the map through the \texttt{[keys]} section of the
-configuration file. Entries naming an unknown command are dropped at startup with
-a notification rather than aborting the launch.
+Users can replace or add bindings through the \texttt{[keys]} section of the
+configuration file. An entry with an unknown command is removed at startup with
+a notification, instead of stopping the launch.
 
 \subsection{THE COMMAND LINE PARSER}
 
-The \key{:} line accepts registered command names and aliases with positional and
-keyword arguments. It performs no natural-language interpretation and contains no
-\texttt{eval} or \texttt{exec}; this is a deliberate safety boundary, and
-natural-language input is reserved for the future \ac{llm} layer, which can emit
-only registry-defined commands with typed arguments.
+The \key{:} line accepts registered command names and aliases with positional
+and keyword arguments. It does not interpret natural language and does not use
+\texttt{eval} or \texttt{exec}. This is a safety boundary. Natural-language
+input is reserved for the future \ac{llm} layer, which can produce only
+registry-defined commands with typed arguments.
 
-Aliases keep the typed interface terse. \cmd{nav.cd} is reachable as
+Aliases keep the typed interface short. \cmd{nav.cd} is available as
 \texttt{cd}, \cmd{hdf.batch\_extract} as \texttt{extract},
-\cmd{oncat.search} as \texttt{ipts}, and \cmd{shell.run} as \texttt{!}.
-Command history persists across sessions.
+\cmd{oncat.search} as \texttt{ipts}, \cmd{run.find} as \texttt{find}, and
+\cmd{shell.run} as \texttt{!}. Command history persists across sessions.
+
+\key{Tab} completes the line from the registry. It completes command names, the
+names of a command's parameters in \texttt{key=} form, and the permitted values
+of enumeration and Boolean parameters. For example, \texttt{:plot.iqxqy co}
+followed by \key{Tab} becomes \texttt{colorbar\_mode=}, and a second \key{Tab}
+offers \texttt{shared} and \texttt{independent}. The completion uses the same
+parameter metadata that validates the call, so it cannot offer a value that
+dispatch would reject.
 
 \subsection{STARTUP BUDGET AND LAZY IMPORTS}
 \label{sec:startup}
 
-The design budget is 300~ms from invocation to first paint. Re-measured after
-the interface grew the \ac{usans} reduction and desmearing features, the cold
-start for \texttt{sansdir --help} remains well inside that budget: the median
-end-to-end wall-clock time on an analysis node is about 120~ms, of which roughly
-40~ms is Python interpreter start-up and about 40~ms is importing the command
-module; the best case is near 60~ms. The figure did not grow with the new
-features because the fast path imports none of them---a check confirms that
-\texttt{numpy}, \texttt{h5py}, \texttt{matplotlib}, Textual, and \texttt{httpx}
-are all absent from \texttt{sys.modules} after \texttt{import sansdir.cli}.
+The startup budget is 300~ms. The measured value in this report is for
+\texttt{sansdir --help}, not for the first paint of the \ac{tui}. This path was
+measured again for version 0.12.3. Its median end-to-end wall-clock time on an
+analysis node is about 40~ms when the files are in the filesystem cache; earlier
+measurements with a cold cache gave 70--120~ms. The detector viewer, \ac{usans}
+reduction, and desmearing did not increase this value because the help path
+does not import them. A check confirms that \texttt{numpy}, \texttt{h5py},
+\texttt{matplotlib}, Textual, \texttt{pyoncat}, PySide6, and \texttt{pyqtgraph}
+are absent from \texttt{sys.modules} after \texttt{import sansdir.cli}. The
+\ac{tui} first-paint time has not been measured for this report.
 
-This is achieved by importing only \texttt{click} and the version constant at
-module scope in the \ac{cli}. Textual, matplotlib, \texttt{h5py}, \texttt{httpx},
-and the registry itself are imported inside the subcommand bodies that need them.
-The practical effect is that \texttt{sansdir version} and \texttt{sansdir --help}
-never pay for the scientific stack, and that the \ac{tui}'s own startup imports
-Textual but still defers matplotlib and \texttt{h5py} until the first plot or
-metadata operation.
+The \ac{cli} imports only \texttt{click} and the version constant at module
+scope. Textual, matplotlib, \texttt{h5py}, \texttt{pyoncat}, and the registry are
+imported inside the subcommands that need them. Therefore, the commands
+\texttt{sansdir version} and \texttt{sansdir --help} do not load the scientific
+stack. The \ac{tui} loads Textual at startup but delays matplotlib and
+\texttt{h5py} until the first plot or metadata operation. The \ac{tui} never
+imports Qt. A test fails if any module outside \texttt{viewer/qt/} imports
+PySide6 or \texttt{pyqtgraph}, and the \ac{tui} checks that the viewer is
+installed with \texttt{importlib.util.find\_spec}, which does not import it.
 
-The budget is checked after any change that touches the import graph.
+The \texttt{--help} startup time is checked after a change to the import graph.
 
 \subsection{CONCURRENCY MODEL}
 
 Three mechanisms keep the interface responsive:
 
 \begin{itemize}
-  \item \textbf{Thread offload.} Blocking library calls---principally
-    \texttt{h5py} reads---run through \texttt{asyncio.to\_thread}. The \ac{hdf}
-    key search of Section~\ref{sec:hdfsearch} is a representative case: walking a
-    large raw NeXus file takes seconds, so the walk runs on a thread and the
-    result is cached on the screen object for subsequent queries.
+  \item \textbf{Thread offload.} Blocking library calls, mainly \texttt{h5py}
+    reads, run through \texttt{asyncio.to\_thread}. The \ac{hdf} key search in
+    Section~\ref{sec:hdfsearch} is an example. Walking through a large raw NeXus
+    file takes seconds, so the walk runs on a thread. The result is stored in the
+    screen object for later queries.
   \item \textbf{Textual workers.} Longer interactive operations run as
-    background workers so that the event loop continues to service keystrokes.
-    The mask editor's launcher, for instance, awaits the editor subprocess in a
-    worker and refreshes both panes when it exits with a save.
-  \item \textbf{Subprocesses.} Plot windows run in a separate process, which
-    is the only reliable way to give matplotlib its own \ac{gui} event loop
-    without contending with Textual's.
+    background workers, while the event loop continues to process keystrokes.
+    For example, the viewer launcher waits for the detector-viewer subprocess
+    in a worker and refreshes both panes when a mask was saved.
+  \item \textbf{Subprocesses.} Plot windows and the detector viewer run in
+    separate processes. This is the only reliable way to give matplotlib or Qt
+    its own \ac{gui} event loop without competing with the Textual event loop.
+    The viewer itself uses a pool of worker processes to histogram large runs
+    (Section~\ref{sec:viewer-load}).
 \end{itemize}
 
 \subsection{REPOSITORY LAYOUT}
 
-Table~\ref{tab:layout} lists the package structure. The implementation totals
-approximately 18,400 lines across 58 modules.
+Table~\ref{tab:layout} lists the package structure. The implementation contains
+approximately 24,000 lines in 89 Python modules. The detector viewer accounts for
+about 4,800 of these lines.
 
 \begin{table}[ht]
   \centering
@@ -627,25 +674,29 @@ approximately 18,400 lines across 58 modules.
     Path & Contents \\
     \midrule
     \texttt{cli.py} & Click entry point; \texttt{tui}, \texttt{extract},
-      \texttt{mask}, \texttt{usans}, and \texttt{version} subcommands. \\
+      \texttt{view}, \texttt{mask}, \texttt{usans}, \texttt{oncat}, and
+      \texttt{version} subcommands. \\
     \texttt{app.py} & The Textual application shell. \\
     \texttt{config.py} & Configuration loader for \ac{toml}
       \autocite{toml} (``Tom's Obvious Minimal Language,'' the format's real
       name), read with the standard-library \texttt{tomllib}. \\
     \texttt{commands/} & \texttt{registry.py} (the \texttt{Command} model and
-      dispatch), \texttt{builtins.py} (all 56 registrations),
+      dispatch), \texttt{builtins.py} (62 app-bound registrations plus
+      \texttt{app.quit}, 63 total),
       \texttt{parser.py} (the \key{:} line), \texttt{schema.py} (\ac{json} tool
       schema export). \\
     \texttt{core/} & \texttt{filesystem.py} (listing and sorting),
       \texttt{fileops.py} (copy, move, delete), \texttt{archive.py},
       \texttt{mailer.py}, \texttt{oncat.py}, \texttt{history.py},
-      \texttt{instrument.py} (\ac{sans}/\ac{usans} mode resolution). \\
+      \texttt{editor.py}, \texttt{instrument.py} (\ac{sans}/\ac{usans} mode
+      resolution), \texttt{runfind.py} (run number to raw file). \\
     \texttt{hdf/} & \texttt{reader.py} (safe open, tree walk, value previews),
       \texttt{metadata.py}, \texttt{batch.py} (parallel extraction). \\
     \texttt{plot/} & \texttt{detect.py} (file-kind classification),
       \texttt{ascii1d.py}, \texttt{ascii2d.py}, \texttt{tile.py},
       \texttt{generic.py}, \texttt{image.py}, \texttt{hdf5\_detector.py},
-      \texttt{backend.py}, \texttt{window.py} (the plot subprocess). \\
+      \texttt{\_mantid\_render.py}, \texttt{backend.py}, \texttt{window.py}
+      (the plot subprocess). \\
     \texttt{usans/} & \texttt{grouping.py} (title blocks), \texttt{reconcile.py}
       (scan counts derived from disk), \texttt{table.py} (the setup \ac{csv}),
       \texttt{catalog.py} (table and notes), \texttt{runner.py} (invoking the
@@ -654,7 +705,18 @@ approximately 18,400 lines across 58 modules.
       interface or network module. \\
     \texttt{mask/} & \texttt{core.py} (shapes and the mask builder),
       \texttt{detector.py}, \texttt{banktube.py}, \texttt{writers.py},
-      \texttt{mantid\_writer.py}, \texttt{gui.py}, \texttt{api.py}. \\
+      \texttt{mantid\_writer.py}, \texttt{api.py}. Free of Qt. \\
+    \texttt{viewer/} & \texttt{cube.py} (cumulative \ac{tof} histogram and
+      parallel loading), \texttt{cache.py}, \texttt{geometry.py} (display cell,
+      detector identifier, and Mantid bank, tube, and pixel),
+      \texttt{colorscale.py}, \texttt{tofrange.py}, \texttt{masking.py} (mask
+      state, undo, reading and saving), \texttt{runs.py}, \texttt{export.py},
+      \texttt{settings.py}. Free of Qt and tested without a display. \\
+    \texttt{viewer/qt/} & The only modules that import PySide6 and
+      \texttt{pyqtgraph}: \texttt{main\_window.py}, \texttt{image\_view.py},
+      \texttt{tof\_panel.py}, \texttt{scale\_panel.py},
+      \texttt{mask\_editor.py}, \texttt{roi\_tools.py}, \texttt{dialogs.py},
+      \texttt{loader.py}, \texttt{progress.py}. \\
     \texttt{ui/} & \texttt{panel.py}, \texttt{pane\_slot.py},
       \texttt{keys.py}, \texttt{command\_input.py}, \texttt{dialogs.py},
       \texttt{hdf\_tree.py}, \texttt{run\_catalog.py},
@@ -674,47 +736,47 @@ approximately 18,400 lines across 58 modules.
 
 \subsection{SCREEN ANATOMY}
 
-Figure~\ref{fig:panes} shows a running session. From top to bottom the screen
-comprises a title bar carrying the program name and version; a two-up path bar
-showing each pane's working directory, with the active pane's path highlighted;
-the two file panes themselves; a status line reporting the entry count and the
-number of tagged files; a two-row key hint bar in the Norton Commander tradition;
-and the command line.
+Figure~\ref{fig:panes} shows a running session. From top to bottom, the screen
+contains a title bar with the program name and version; a two-part path bar that
+shows the working directory of each pane and highlights the active path; the two
+file panes; a status line with the entry count and number of tagged files; a
+two-row key hint bar in the Norton Commander style; and the command line.
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\textwidth]{figures/tui-panes.pdf}
-  \longcaption{The dual-pane interface.}{The left pane is active, indicated by
-  the highlighted border and path. Three files are tagged, shown by the leading
-  asterisk and the bold rendering; the status line reports the count. File kinds
-  are distinguished by color: directories, one-dimensional reduced data,
-  two-dimensional reduced data, transmission files, and NeXus files each have a
-  distinct hue.}
+  \longcaption{The dual-pane interface.}{The highlighted border and path show
+  that the left pane is active. Three files are tagged. They have a leading
+  asterisk and bold text, and the status line gives the count. Color identifies
+  the file kind. Directories, one-dimensional reduced data, two-dimensional
+  reduced data, transmission files, and NeXus files each have a different
+  color.}
   \label{fig:panes}
 \end{figure}
 
-The path bar rewrites the \texttt{/gpfs/neutronsfs/instruments} prefix to
-\texttt{/SNS}, which is how the same location is conventionally written and how
-users expect to see it, at no cost in accuracy since the two are the same mount.
+The path bar displays the \texttt{/gpfs/neutronsfs/instruments} prefix as
+\texttt{/SNS}. Users normally write and recognize the location in this form.
+The two paths refer to the same mount, so this display does not change the
+location.
 
 \subsection{PANES AND ACTIVATION}
 
-The two panes are instances of the same widget class holding independent state:
-working directory, cursor position, tag set, sort key, and filter. Exactly one is
-active at any moment, distinguished by border color. \key{Tab} switches
-activation.
+The two panes are instances of the same widget class, but they have independent
+states: working directory, cursor position, tag set, sort key, and filter. One
+pane is active at a time and is identified by its border color. \key{Tab}
+changes the active pane.
 
-Several commands manipulate the pair rather than a single pane. \key{Ctrl+U}
-swaps the two panes' contents, which is the fastest way to reverse the direction
-of a copy. \key{=} synchronizes the inactive pane to the active pane's directory,
-which is the usual preparation for a same-directory operation. \key{Ctrl+O}
-maximizes the active pane to full width and restores it on a second press; this
-is a toggle, never a default, because the dual-pane layout is the point.
+Several commands act on both panes. \key{Ctrl+U} swaps their contents and quickly
+reverses the direction of a copy. \key{=} changes the inactive pane to the
+directory of the active pane. This is the usual preparation for an operation in
+the same directory. \key{Ctrl+O} expands the active pane to full width, and a
+second press restores both panes. Full width is a toggle and not the default
+because the program is designed around two panes.
 
-The run catalog described in Section~\ref{sec:oncat} always occupies the right
-pane regardless of which pane was active when it was requested. This keeps the
-layout predictable: users learn that the catalog is on the right, and \key{Ctrl+U}
-swaps file panes without disturbing it.
+The run catalog described in Section~\ref{sec:oncat} always appears in the right
+pane, independent of which pane was active when it was requested. This keeps the
+layout consistent. The catalog remains on the right, and \key{Ctrl+U} swaps file
+panes without changing it.
 
 \subsection{FILE LISTING AND COLOR CODING}
 
@@ -723,7 +785,7 @@ Sorting is by name, modification time, size, or extension, selected with the
 number keys \key{1} through \key{4}. Hidden files are suppressed by default and
 toggled with \key{h}. Symbolic links are followed but flagged.
 
-Color encodes file kind so that a directory can be scanned at a glance
+Color identifies the file kind and helps the user scan a directory quickly
 (Table~\ref{tab:colors}).
 
 \begin{table}[ht]
@@ -749,36 +811,36 @@ Color encodes file kind so that a directory can be scanned at a glance
 
 \subsection{TAGGING}
 
-Tagging is the selection mechanism for every multi-file operation.
-\key{Space} toggles the tag on the row under the cursor. \key{+} prompts for a
-glob and tags every visible entry matching it; \key{-} untags by glob; \key{u}
-clears all tags in the active pane. Tags are per-pane and are cleared when that
-pane changes directory.
+Tags select files for every multi-file operation. \key{Space} changes the tag
+on the row under the cursor. \key{+} asks for a glob and tags each visible entry
+that matches it. \key{-} removes tags by glob, and \key{u} removes all tags in
+the active pane. Each pane has its own tags, which are cleared when the pane
+changes directory.
 
-The universal rule is that an operation acts on the active pane's tagged files
-if there are any, and otherwise on the single file under the cursor. This means
-the common single-file case requires no tagging at all, while the multi-file case
-requires no separate ``select mode.''
+All operations follow the same rule. If the active pane has tagged files, the
+operation acts on them. Otherwise, it acts on the file under the cursor. Thus, a
+single-file operation does not require a tag, and a multi-file operation does
+not require a separate ``select mode.''
 
-\key{/} filters the active pane by substring, which composes naturally with
-glob tagging: filter to a subset, tag everything visible, then act.
+\key{/} filters the active pane by substring. It can be used with glob tagging:
+filter to a subset, tag all visible files, and then perform the operation.
 
 \subsection{COMMAND LINE AND HISTORY}
 
-The command line is always visible at the bottom of the screen and is focused
-with \key{:}. It accepts any registered command name or alias. Several keys are
-shortcuts that pre-fill it rather than acting directly---\key{+} opens it
-containing \texttt{tag.glob}, \key{g} containing \texttt{cd}, \key{F9}
-containing \texttt{mkdir}---so that the relationship between a key and its
-command is visible at the moment of use rather than only in the help overlay.
+The command line is always visible at the bottom of the screen. \key{:} moves
+the focus to it. It accepts any registered command name or alias. Some shortcut
+keys fill the command line instead of immediately performing an action.
+\key{+} opens it with \texttt{tag.glob}, \key{g} with \texttt{cd}, and \key{F9}
+with \texttt{mkdir}. Therefore, the connection between a key and its command is
+visible during use and not only in the help overlay.
 
 History persists across sessions in the cache directory.
 
 \subsection{HELP OVERLAY}
 
-\key{?} opens the help overlay of Figure~\ref{fig:help}. It is generated from the
-registry and the key map at runtime. Because both are data, the overlay reflects
-user key rebindings and cannot become inconsistent with the code.
+\key{?} opens the help overlay in Figure~\ref{fig:help}. The program generates
+it from the registry and key map at runtime. Therefore, the overlay includes
+user key rebindings and remains consistent with the code.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 5. NAVIGATION AND FILE OPERATIONS
@@ -788,9 +850,10 @@ user key rebindings and cannot become inconsistent with the code.
 
 \subsection{NAVIGATION}
 
-Table~\ref{tab:nav} lists the navigation keys. \key{Enter} is context-sensitive:
-on a directory it descends, on an image it opens a viewer, and in the run catalog
-it plots the run under the cursor.
+Table~\ref{tab:nav} lists the navigation keys. The action of \key{Enter} depends
+on the selected item. It opens a directory, opens an image viewer, previews a
+text file in the other pane, or plots the run under the cursor in the run
+catalog.
 
 \begin{table}[ht]
   \centering
@@ -803,11 +866,12 @@ it plots the run under the cursor.
     \midrule
     \key{Tab} & Switch the active pane \\
     Arrow keys, \key{j} \key{k} & Move the cursor \\
-    \key{Enter} & Descend into a directory, open an image, or plot a catalog
-      row \\
+    \key{Enter} & Descend into a directory, open an image, preview text, or plot
+      a catalog row \\
     \key{Backspace} & Ascend one directory \\
     \key{g} & Prompt for a path \\
     \key{G} & Full-screen directory-tree browser \\
+    \key{f} & Find a raw run by run number in any \ac{ipts} \\
     \key{/} & Filter the active pane by substring \\
     \key{=} & Synchronize the inactive pane to the active pane's directory \\
     \key{Ctrl+U} & Swap the two panes \\
@@ -816,11 +880,32 @@ it plots the run under the cursor.
   \end{tabular}
 \end{table}
 
+\subsection{FINDING A RUN BY NUMBER}
+\label{sec:runfind}
+
+Mantid locates \texttt{EQSANS\_176669} from the run number alone, while a file
+manager needs the \ac{ipts} directory. \key{f} closes this gap. It opens the
+command line with \texttt{find}, and the user types the run number, either as
+\texttt{176669} or as \texttt{EQSANS\_176669}. The program checks every
+\texttt{/SNS/EQSANS/IPTS-*} directory for
+\texttt{nexus/EQSANS\_<run>.nxs.h5} and for the older layout
+\texttt{data/EQSANS\_<run>\_event.nxs}. It then moves the right pane to the
+run's directory with the cursor on the file and opens the file in the detector
+viewer. \key{=} afterwards brings the left pane to the same directory.
+
+The search uses only file-existence checks. It opens and writes nothing and
+makes no catalog request, so it needs no OnCat sign-in. The checks run on a
+pool of 32 threads, newest proposal first. The proposal of the previous result
+and the proposal containing the active pane are checked before the others. A
+complete search of about 1,100 proposal directories takes 0.11--0.16~s on the
+cluster filesystem, and a second run from the same experiment is found almost
+immediately.
+
 \subsection{FILE OPERATION SEMANTICS}
 
-File operations follow the Norton Commander convention: they act on the active
-pane's selection, and the default destination is the \emph{inactive} pane's
-working directory. Table~\ref{tab:fkeys} lists the function-key assignments.
+File operations follow the Norton Commander convention. They use the selection
+in the active pane, and the working directory of the \emph{inactive} pane is the
+default destination. Table~\ref{tab:fkeys} lists the function-key assignments.
 
 \begin{table}[ht]
   \centering
@@ -855,39 +940,37 @@ working directory. Table~\ref{tab:fkeys} lists the function-key assignments.
   \end{threeparttable}
 \end{table}
 
-Two behaviors deserve specific mention because they were adopted after user
-feedback. First, after a delete the cursor remains adjacent to the deleted
-entry---on the row that took its place, or on the new last row if the deleted
-file was last---rather than jumping to the top of the list. Cleaning up several
-files individually is otherwise punishing. Second, all destructive operations
-confirm before acting, and all are logged.
+Two behaviors were added after user feedback. After a file is deleted, the
+cursor remains near its previous position. It stays on the replacement row, or
+on the new last row if the deleted file was last. This makes it easier to remove
+several files individually. Also, every destructive operation requires
+confirmation and is logged.
 
 \subsection{REFRESH BEHAVIOR}
 
-Operations performed inside the application---copy, move, rename, make
-directory, batch extract, archive creation---refresh the affected panes
-automatically. \key{F5} is the manual fallback for changes made by an external
-agent: a second shell session writing into a pane's directory, an autoreduction
-job depositing new output, or \ac{nfs} attribute caching catching up.
+Operations performed in the application, including copy, move, rename, directory
+creation, batch extraction, and archive creation, refresh the affected panes
+automatically. \key{F5} provides a manual refresh for external changes. These
+can come from another shell session, an autoreduction job writing new output, or
+delayed \ac{nfs} attribute updates.
 
-The mask editor is a hybrid case. It runs as a detached subprocess so the
-interface stays responsive, but its launcher awaits the exit code in a worker;
-an exit indicating a save triggers a refresh of both panes so the new mask file
-appears without user action.
+The detector viewer runs as a separate subprocess so that the interface remains
+responsive. A worker waits for its exit code. If the viewer reports that a mask
+was saved, both panes are refreshed and the new mask file appears.
 
 \subsection{ARCHIVING AND EMAIL}
 
-\key{z} creates a zip archive of the selection, prompting for the archive name
-and defaulting to the inactive pane's directory. A gzip-compressed tar
-alternative is available as \cmd{archive.tar\_gz} on the command line. \key{e}
-opens a dialog that sends the selection as attachments by shelling out to
-\texttt{mail} or \texttt{mutt}, whichever is configured.
+\key{z} creates a zip archive from the selection. It asks for the archive name
+and uses the inactive pane's directory by default. The command line also provides
+\cmd{archive.tar\_gz} for a gzip-compressed tar archive. \key{e} opens a dialog
+and sends the selection as attachments through the configured \texttt{mail} or
+\texttt{mutt} program.
 
 \subsection{SHELL ESCAPE}
 
-\cmd{shell.run}, aliased to \texttt{!}, runs an arbitrary shell command with the
-interface suspended, restoring it when the command exits. This is the escape
-hatch for the operations the program does not implement.
+\cmd{shell.run}, with the alias \texttt{!}, suspends the interface and runs a
+shell command. The interface returns when the command finishes. This provides
+access to operations that are not implemented in the program.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 6. PLOTTING
@@ -897,11 +980,10 @@ hatch for the operations the program does not implement.
 
 \subsection{PLOTTING THE SELECTION}
 
-Plotting is invoked with a single key, \key{p}, on the active selection: the
-tagged files if there are any, otherwise the file under the cursor. The program
-decides what to draw from the file itself rather than asking, so the same
-keystroke serves every kind of \ac{sans} data. Table~\ref{tab:plotrouting}
-summarizes what each kind produces.
+\key{p} plots the active selection. It uses the tagged files when tags are
+present and otherwise uses the file under the cursor. The program determines the
+plot from the file, so the same key works for each supported type of \ac{sans}
+data. Table~\ref{tab:plotrouting} lists the resulting plots.
 
 \begin{table}[ht]
   \centering
@@ -928,25 +1010,39 @@ summarizes what each kind produces.
   \end{tabular}
 \end{table}
 
-Plots open in their own windows, so the terminal stays usable while a figure is
-on screen and several figures can be open at once. On a host with no display
-the figure is instead written as a \ac{png} under
-\texttt{\hme/.cache/sansdir/plots/} and the path is reported in the status bar,
-so the same keystroke works over a plain \ac{ssh} session with no forwarding.
+Plots open in separate windows, and the terminal remains available while the
+figures are open. Several figures can be shown at the same time. On a host
+without a display, the figure is written as a \ac{png} under
+\texttt{\hme/.cache/sansdir/plots/}, and the status bar reports its path. Thus,
+the same key also works in a plain \ac{ssh} session without forwarding.
 
-Classification does not rely on the file extension alone, which matters because
-Mantid writes processed output as \texttt{.nxs} without the \texttt{.h5} suffix
-and reduced files are not always named predictably. A file whose contents are
-\ac{hdf} is treated as NeXus whatever it is called, and column count and header
-keywords disambiguate the ASCII kinds.
+Classification does not use only the file extension. Mantid writes processed
+output as \texttt{.nxs} without the \texttt{.h5} suffix, and reduced files do not
+always have predictable names. A file containing \ac{hdf} data is treated as a
+NeXus file regardless of its name. Column counts and header keywords distinguish
+the ASCII formats.
+
+The column count is the most common count over the first rows, split on commas
+or whitespace in the same way as the loader. A single first line therefore does
+not decide the format. Older Mantid \texttt{SaveAscii} output, for example,
+begins with a line holding only the spectrum number \texttt{1} before the
+comma-separated $q$, $I$, $\sigma_I$, $\sigma_q$ rows. Older two-dimensional
+files written in the \ac{nist} style, such as \texttt{*\_Iqxy.dat}, have an
+uncommented header line \texttt{Data columns Qx - Qy - I(Qx,Qy) - err(I)}. This
+text, and a filename containing \texttt{Iqxy} or \texttt{Iqxqy}, marks a file as
+two-dimensional. Uncommented header text is not used for any other decision, so
+current \texttt{drtsans} output keeps exactly its previous plot type. On a
+sample of 1,500 real reduced files, these rules made 34 previously unplottable
+files plot as $I(q)$ and moved 154 \texttt{*\_Iqxy.dat} files from a
+one-dimensional curve to a two-dimensional map.
 
 \subsection{ONE-DIMENSIONAL PLOTS}
 
-Reduced $I(q)$ files are drawn on logarithmic axes by default, with error bars
-when a third column is present. Tagging several files overlays them on shared
-axes with a filename legend, which is the common comparison case: the same sample
-at two temperatures, or the same measurement at two detector distances.
-Figure~\ref{fig:iq} shows a representative single-curve plot.
+Reduced $I(q)$ files use logarithmic axes by default and include error bars when
+a third column is present. Several tagged files are overlaid on shared axes with
+a filename legend. This supports common comparisons such as one sample at two
+temperatures or one measurement at two detector distances.
+Figure~\ref{fig:iq} shows an example with one curve.
 
 \begin{figure}[ht]
   \centering
@@ -958,33 +1054,32 @@ Figure~\ref{fig:iq} shows a representative single-curve plot.
   \label{fig:iq}
 \end{figure}
 
-Transmission files are treated differently: linear axes, wavelength in \AA{} on
-the abscissa, and transmission on the ordinate, with labels and title to match.
+Transmission files use linear axes, with wavelength in \AA{} on the abscissa and
+transmission on the ordinate. The labels and title are set accordingly.
 
 \subsection{TWO-DIMENSIONAL PLOTS}
 
-Four- and six-column $I(q_x,q_y)$ files are drawn as a heat map on proper $q_x$
-and $q_y$ axes. A logarithmic color scale is the default, which for scattering
-data is almost always what is wanted.
+Four- and six-column $I(q_x,q_y)$ files are drawn as heat maps on $q_x$ and
+$q_y$ axes. A logarithmic color scale is used by default.
 
-Tagging more than one two-dimensional file tiles them into a single window with
-the filename as each subplot title. Two color-bar modes are available. In
-\emph{shared} mode a single scale spans all panels, so intensities are directly
-comparable; in \emph{independent} mode each panel is scaled to itself, so weak
-patterns remain visible. Shared is the default, on the reasoning that
-side-by-side panels are usually being compared. The choice is made through the
-\texttt{[ui].colorbar\_mode} configuration key, which the \key{p} key reads as a
-standing preference; a single plot can override it from the command line with
-\texttt{:plot.iqxqy colorbar\_mode=independent}, whose argument tab-completes to
-the two valid values.
+When several two-dimensional files are tagged, they are tiled in one window and
+each subplot uses its filename as the title. Two color-bar modes are available.
+In \emph{shared} mode, one scale is used for all panels and their intensities can
+be compared directly. In \emph{independent} mode, each panel has its own scale,
+which can make weak patterns more visible. Shared mode is the default because
+the panels are normally being compared. The standing preference is set with
+\texttt{[ui].colorbar\_mode}. One plot can override it with
+\texttt{:plot.iqxqy colorbar\_mode=independent}. Without file names, this
+command plots the selection in the same way as \key{p}. File names and wildcards
+such as \texttt{*Iqxqy.dat} are resolved in the active pane.
 
-Figure~\ref{fig:iqxqy-tile} shows the tiled view on a real temperature series:
-eight reduced $I(q_x,q_y)$ files from one sample measured from 20 to
-55\,$^{\circ}$C. In the file pane the whole series is selected with one glob
-tag---\key{+}, then \texttt{*C\_conf1\_Iqxqy.dat}---and \key{p} does the rest:
-the files sort in natural order, tile four across, and share one logarithmic
-color scale, so the evolution of the scattering ring with temperature reads
-directly across the panels.
+Figure~\ref{fig:iqxqy-tile} shows a real temperature series in the tiled view.
+It contains eight reduced $I(q_x,q_y)$ files from one sample measured from 20 to
+55\,$^{\circ}$C. The whole series is selected in the file pane with one glob:
+\key{+}, followed by \texttt{*C\_conf1\_Iqxqy.dat}. After \key{p} is pressed,
+the files are placed in natural order, four panels per row, with one logarithmic
+color scale. The temperature-dependent change in the scattering ring can then
+be compared across the panels.
 
 \begin{figure}[ht]
   \centering
@@ -1015,20 +1110,22 @@ event-workspace masks---render through the same view.
   \label{fig:detector}
 \end{figure}
 
-The image is reconstructed from the event arrays without invoking Mantid, so the
-detector view stays available on hosts where no Mantid environment is installed
-or where one is mid-upgrade.
+The image is reconstructed from the event arrays without starting Mantid.
+Therefore, the detector view is available on hosts without a Mantid environment
+and while a Mantid installation is being upgraded. This plot shows the counts
+summed over all \ac{tof} values. The detector viewer of
+Section~\ref{sec:viewer} shows any \ac{tof} range interactively.
 
 \subsection{GENERIC TABULAR PLOTS}
 
-\key{l} plots any whitespace-, comma-, or tab-delimited table on linear axes,
-taking axis labels from the header row. This is the companion to the batch
-metadata extractor of Section~\ref{sec:meta}: extract temperature against time
-across a series of runs, then plot the resulting table without leaving the
-program.
+\key{l} plots whitespace-, comma-, or tab-delimited tables on linear axes and
+uses the header row for axis labels. This operation can be used with the batch
+metadata extractor in Section~\ref{sec:meta}. For example, the user can extract
+temperature against time across a run series and plot the resulting table in the
+same program.
 
-Static images---\ac{png}, JPEG, TIFF, and similar---open in a matplotlib window
-on \key{Enter}, which is convenient for the figures deposited by autoreduction.
+\key{Enter} opens static images, including \ac{png}, JPEG, and TIFF files, in a
+matplotlib window. This can be used for figures written by autoreduction.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 7. METADATA
@@ -1038,31 +1135,31 @@ on \key{Enter}, which is convenient for the figures deposited by autoreduction.
 
 \subsection{SINGLE-FILE TREE BROWSER}
 
-\key{m} opens the file under the cursor in a modal tree browser. The hierarchy
-expands lazily: only the direct children of an expanded group are read. This is
-necessary rather than merely efficient---an exhaustive walk of a
-several-hundred-megabyte raw file yields tens of thousands of entries and takes
-seconds, which is both slow and unreadable.
+\key{m} opens the file under the cursor in a tree browser. The hierarchy is
+loaded as needed, and only the direct children of an expanded group are read.
+A complete walk of a raw file that is several hundred megabytes can produce tens
+of thousands of entries and take several seconds. Loading only the opened groups
+avoids this delay and keeps the tree readable.
 
-Selecting a leaf displays its full path, dtype, shape, units taken from the
-\texttt{units} attribute, and a one-line value preview.
+Selecting a leaf shows its full path, data type, shape, units from the
+\texttt{units} attribute, and a one-line preview of its value.
 
 \subsection{KEYWORD SEARCH}
 \label{sec:hdfsearch}
 
-Lazy expansion solves the loading problem but creates a navigation one. Sample
-environment logs live at paths such as
-\texttt{/entry/DASlogs/BL6:SE:QNTC1:ReadProbeTemperature/value}, and reaching one
-by expanding groups requires knowing the instrument's device naming scheme.
+Loading only expanded groups reduces the file-reading cost, but the user still
+needs to find a path. Sample-environment logs can be stored at paths such as
+\path{/entry/DASlogs/BL6:SE:QNTC1:ReadProbeTemperature/value}, and reaching one by
+expanding groups requires knowing the instrument's device naming scheme.
 
-Pressing \key{/} in the tree browser therefore switches to keyword search. The
-full key list is walked once, on a worker thread, and cached; subsequent queries
-filter it by case-insensitive substring. Results are shown as a table of matching
-paths with their shapes, and the detail pane follows the highlighted row, so
-\key{Up} and \key{Down} scan candidates without leaving the search box.
-Figure~\ref{fig:hdfsearch} shows the result of searching a real EQ-SANS file for
-\texttt{temperature}: 28 matches across three distinct devices, located without
-any knowledge of the naming convention.
+Therefore, \key{/} in the tree browser opens a keyword search. A worker thread
+walks the full key list once and caches it. Later queries use a case-insensitive
+substring filter on the cached list. The results table shows matching paths and
+their shapes. The detail pane follows the highlighted row, so \key{Up} and
+\key{Down} can examine candidates while the search box remains open.
+Figure~\ref{fig:hdfsearch} shows a search for \texttt{temperature} in a real
+EQ-SANS file. It finds 28 matches from three devices without requiring knowledge
+of their complete paths.
 
 \begin{figure}[ht]
   \centering
@@ -1078,90 +1175,85 @@ any knowledge of the naming convention.
   \label{fig:hdfsearch}
 \end{figure}
 
-Two bounds keep the feature responsive on large files. Rendered matches are
-capped at 500, with the hint line stating explicitly when a query was truncated
-rather than silently discarding the remainder. Value previews slice before
-materializing, so previewing a multi-million-element event array reads five
-values rather than the whole array.
+Two limits keep the search responsive for large files. At most 500 matches are
+rendered. If more matches exist, the hint line reports that the results were
+truncated. Value previews also take a slice before an array is materialized.
+Thus, a preview of an event array with millions of elements reads five values
+instead of the full array.
 
 \subsection{BATCH EXTRACTION}
 
-\key{M} extracts selected keys from many files at once. The dialog opens with a
-full-screen key picker in which \key{Space} toggles a key and \key{/} searches
-across all keys in the file, using the same search mechanism as the single-file
-browser. \key{Ctrl+S} returns to the output form.
+\key{M} extracts selected keys from several files. It first opens a full-screen
+key picker. \key{Space} selects a key, and \key{/} searches all keys in the file
+with the same method used by the single-file browser. \key{Ctrl+S} returns to
+the output form.
 
-Extraction is parallel: \texttt{h5py} releases the interpreter lock during reads,
-so a thread pool---eight workers by default---scales nearly linearly with file
-count.
+Extraction uses a thread pool with eight workers by default, allowing several
+files to be read concurrently. The worker count can be changed for the available
+filesystem and host.
 
-The key picker accepts a group as well as a dataset when the group contains a
-\texttt{value} child, which is the \ac{sns} \ac{das} log convention. Selecting the
-group is equivalent to selecting \texttt{<group>/value}, which is what the user
-means.
+The key picker accepts either a dataset or a group containing a \texttt{value}
+child, as used by the \ac{sns} \ac{das} log convention. Selecting such a group
+is the same as selecting \texttt{<group>/value}.
 
 \subsection{OUTPUT MODES}
 
-Two output modes cover the two distinct questions users ask.
+Two output modes support different questions.
 
-\textbf{Summary mode} produces one row per input file, with time-series values
-reduced to their mean. This answers ``what was the temperature for each of these
-40 runs.'' Optional \texttt{\_stdev} and \texttt{\_n} columns report the spread
-and sample count behind each mean.
+\textbf{Summary mode} produces one row for each input file and reduces
+time-series values to their mean. It can answer, for example, what the
+temperature was for each of 40 runs. Optional \texttt{\_stdev} and \texttt{\_n}
+columns give the spread and sample count for each mean.
 
-\textbf{Per-file mode} produces one table per input file with the full arrays
-preserved. This answers ``how did temperature evolve during this run.'' It is
-selected by including the placeholder \texttt{<filename>} in the output template,
-for example \texttt{<filename>\_temp.csv}. If the user requests per-file mode but
-omits the placeholder, the program prepends \texttt{<filename>\_} rather than
-overwriting one file repeatedly.
+\textbf{Per-file mode} produces one table per input file and keeps the full
+arrays. It can show, for example, how temperature changed during one run. The
+placeholder \texttt{<filename>} in the output template selects this mode, as in
+\texttt{<filename>\_temp.csv}. If per-file mode is requested without the
+placeholder, the program adds \texttt{<filename>\_} to avoid repeatedly
+overwriting one file.
 
-Output is written to the inactive pane's working directory by default, because
-the active pane is typically the read-only proposal directory and defaulting
-there would produce a permission error on every attempt.
+By default, output is written to the working directory of the inactive pane.
+The active pane often contains a read-only proposal directory, where writing the
+output would cause a permission error.
 
 \subsection{A WORKED EXAMPLE}
 \label{sec:metadata-example}
 
-Figures~\ref{fig:metadata-workflow} and~\ref{fig:metadata-workflow-2} walk through a complete extract-and-plot
-session on a real experiment file, exactly as a user at the terminal would see
-it. The file is a Mantid-processed workspace from an EQ-SANS measurement with an
-in-situ mechanical load frame, and the quantity of interest is the load-cell
-record from that sample environment---a \ac{das} log named
-\texttt{BL6:SE:PsyloTech:SGLC}---which the user wants as a plottable time
-series.
+Figures~\ref{fig:metadata-workflow} and~\ref{fig:metadata-workflow-2} show a
+complete extraction and plotting example using a real experiment file. The file
+is a Mantid-processed workspace from an EQ-SANS measurement with an in-situ
+mechanical load frame. The required quantity is the load-cell record, stored in
+the \ac{das} log \texttt{BL6:SE:PsyloTech:SGLC}. The goal is to extract this
+record as a time series that can be plotted.
 
 \begin{enumerate}
-  \item Navigate the active pane to the file
+  \item In the active pane, navigate to the file
     (\texttt{IPTS-37828/shared/output/.../*\_processed.nxs}) and point the
     other pane at the directory that should receive the output, here the
     proposal's writable \texttt{shared/} folder.
-  \item Press \key{M}. The key picker opens on the file's HDF5 tree. Nobody
-    remembers a full \ac{das} log path, so press \key{/} and type a fragment
-    of the name: \texttt{LC}. Three rows match; \key{Space} on
-    \texttt{.../SGLC/time} and \texttt{.../SGLC/value} stars both, and the
-    status line confirms \emph{selected: 2 key(s)}
-    (panel~a).
+  \item Press \key{M} to open the key picker on the file's HDF5 tree. Because
+    the full \ac{das} log path is not known, press \key{/} and enter the
+    fragment \texttt{LC}. Three rows match. Press \key{Space} on
+    \texttt{.../SGLC/time} and \texttt{.../SGLC/value}. Both rows are marked,
+    and the status line shows \emph{selected: 2 key(s)} (panel~a).
   \item Press \key{Ctrl+S}. The picker folds back into the output form with
     both keys filled in. Per-file mode and the
-    \texttt{<filename>\_extracted} template are already the defaults; switch
-    the format to \ac{csv} and press \key{Ctrl+S} again to run
-    (panel~b).
+    \texttt{<filename>\_extracted} template are the defaults. Change the format
+    to \ac{csv} and press \key{Ctrl+S} again to run the extraction (panel~b).
   \item The extractor writes
-    \texttt{<filename>\_extracted.csv}---two columns, \texttt{time} and
-    \texttt{value}, 5\,644 rows---into the inactive pane's directory, and
-    that pane refreshes with the cursor ready to move onto the new file
-    (panel~c).
+    \texttt{<filename>\_extracted.csv} in the inactive pane's directory. The
+    file has two columns, \texttt{time} and \texttt{value}, and 5\,644 rows.
+    The pane refreshes and the new file appears (panel~c).
   \item Press \key{Tab} to switch panes, put the cursor on the new \ac{csv},
     and press \key{l}. The generic linear plotter reads the header row for
-    axis labels and draws value against time (panel~d): the load ramps
-    during the first 450~seconds of the run and releases sharply---precisely
-    the kind of sanity check that would otherwise require exporting the file
-    and opening a separate analysis tool.
+    axis labels and draws value against time (panel~d). The load increases
+    during the first 450~seconds of the run and then releases sharply. Without
+    this workflow, the file would need to be exported and opened in a separate
+    plotting tool for the same check.
 \end{enumerate}
 
-The four panels were captured from the running program, so fonts, colors, and
-layout are what the terminal actually shows.
+The four panels were captured from the running program and show its actual
+fonts, colors, and layout.
 
 \begin{figure}[p]
   \centering
@@ -1197,156 +1289,296 @@ layout are what the terminal actually shows.
 
 \subsection{AUTHENTICATION}
 
-OnCat requires an \ac{oauth} bearer token even for read-only endpoints, and it
-scopes results to the signed-in user. sansdir therefore signs in \emph{as the
-user}, through the OAuth Device Authorization Grant: a one-time browser approval
-that works over \ac{ssh} (a verification \ac{url} and short code are shown; the
-user opens the \ac{url}, signs in with their UCAMS/XCAMS, and approves). A
-personal token is then cached under the user's home directory and reused
-silently, so the catalog shows exactly the experiments that user is entitled to.
-The sign-in is driven with the ORNL \texttt{pyoncat} library using a
-\emph{public} client identifier, which carries no access on its own; no secret
-is stored in the source or the configuration.
+OnCat \autocite{oncat} requires an \ac{oauth} bearer token for read-only
+endpoints, and it limits the results to what the signed-in user may see. The
+program therefore signs in \emph{as the user}, with the \ac{oauth} device
+authorization grant. This is a one-time approval in a browser and works over
+\ac{ssh}. The program shows a verification \ac{url} and a short code; the user
+opens the \ac{url}, signs in with an \ac{ornl} account, and approves. The
+personal token is then stored in \texttt{\hme/.config/sansdir/oncat\_token.json}
+and reused without further prompts. The catalog then lists exactly the
+experiments that the user is entitled to see. The sign-in uses the \ac{ornl}
+\texttt{pyoncat} library with a \emph{public} client identifier, which gives no
+access by itself. No secret is stored in the source code or in the
+configuration.
 
-This replaces an earlier machine-to-machine \texttt{client\_credentials} login
-whose shared identifier and secret were committed to the source tree. That
-posture is not recommended by ORNL: a committed secret is a leak risk, and every
-user shared one identity rather than seeing their own entitlements.
+Before version~0.11, the program used a machine-to-machine
+client-credentials login with a shared identifier and secret in the source
+tree. \ac{ornl} does not recommend this approach. A secret in the source tree can
+leak, and all users shared one identity instead of seeing their own
+entitlements.
 
-Sign-in is exposed as \texttt{:oncat login} in the \ac{tui} and
-\texttt{sansdir oncat login} on the command line, with \texttt{:oncat status}
-and \texttt{:oncat logout} alongside. In the \ac{tui} the verification
-\ac{url} is shown in a \emph{centered modal} that stays up until sign-in
-completes, with explicit copy-paste guidance (a terminal click typically does
-nothing over \ac{ssh}), because a transient corner notification proved too easy
-to miss. Pressing \key{i} while signed out opens that same modal automatically
-and resumes the catalog search once sign-in succeeds. Data calls are
-\emph{token-first}: they never open a browser themselves, and when no token is
-present they raise ``not signed in'' rather than failing obscurely. For
-unattended, browserless services (cron jobs, gateway deployments) a deprecated
-Password Grant is available only when \texttt{ONCAT\_USERNAME},
-\texttt{ONCAT\_PASSWORD}, \texttt{ONCAT\_CLIENT\_ID}, and
-\texttt{ONCAT\_CLIENT\_SECRET} are all set in the environment --- again, nothing
-secret lives in the code. The endpoint and token path are configurable so the
-client can be pointed at a staging instance.
+The \key{:} commands \texttt{oncat login}, \texttt{oncat status}, and
+\texttt{oncat logout} manage the session, and the \ac{cli} provides the same
+operations. The verification \ac{url} appears in a centered dialog that stays
+open until sign-in completes, with instructions to copy the \ac{url}; clicking
+a link in a terminal usually does nothing over \ac{ssh}. An earlier version
+showed the \ac{url} in a short notification, which users missed. \key{i} opens
+the same dialog when the user is not signed in, or when the stored token has
+expired, and continues the catalog search after a successful sign-in. Data
+requests never open a browser themselves. Without a valid token they report
+``not signed in.''
+
+For unattended services such as scheduled jobs, a deprecated password grant is
+used only when \texttt{ONCAT\_USERNAME}, \texttt{ONCAT\_PASSWORD},
+\texttt{ONCAT\_CLIENT\_ID}, and \texttt{ONCAT\_CLIENT\_SECRET} are all set in the
+environment. Again, nothing secret is stored in the code. The endpoint and
+token path are configurable, so the client can use a staging instance.
 
 \subsection{SEARCH MODEL AND CACHING}
 
-OnCat exposes no fuzzy keyword endpoint. The client therefore lists all
-experiments for the configured instrument once, caches the listing on disk for a
-configurable \ac{ttl} defaulting to 24~hours, and filters client-side on
-substring matches against the proposal identifier, the title, and the member
-list. The first search pays one server round trip; every subsequent search is
-served from cache and completes in well under a second.
+OnCat does not provide a fuzzy keyword endpoint. Therefore, the client requests
+all experiments for the configured instrument, stores the list on disk, and
+filters it locally. The filter uses substring matches against the proposal
+identifier, title, and member list. The configurable cache \ac{ttl} is 24~hours
+by default. The first search requires one server request, while later searches
+use the cache and complete in well under a second.
 
-Because a stale cache can hide a newly allocated proposal, \key{r} in the browser
-forces a cache-bypassing refetch.
+A stale cache may not contain a newly allocated proposal. The \key{r} key in the
+browser therefore requests a new list without using the cache.
 
-The browser keeps typing responsive on large catalogs in two ways. The filter
-input is debounced with a 200~ms quiet window, so a fast typist causes one
-rebuild rather than one per keystroke. The rendered result set is capped at 200
-rows, with an overflow hint reporting how many further matches exist.
+Two measures keep the browser responsive for large catalogs. A 200~ms quiet
+period is applied to the filter input, so the result list is not rebuilt after
+every keystroke during fast typing. The browser also renders at most 200 rows
+and reports how many additional matches exist.
 
 \subsection{RUN CATALOG PANE}
 
-Selecting a proposal changes the active pane into that proposal's
-\texttt{shared/} directory and loads its run list into a catalog view on the
-right pane. \key{c} toggles the catalog. Within it, \key{Space} tags runs and the
-familiar keys operate on the selection: \key{Enter} or \key{p} plots the raw
-detector image, \key{m} opens the \ac{hdf} tree, \key{M} extracts metadata, and
-\key{K} opens the mask editor. The catalog is thus a third selection surface
-sharing the same command vocabulary as the two file panes.
+Selecting a proposal opens its \texttt{shared/} directory in the active pane and
+loads its run list in the right pane. \key{c} shows or hides the catalog. In the
+catalog, \key{Space} tags runs and the same keys used in the file panes act on
+the selection. \key{Enter} or \key{p} plots the raw detector image, \key{m}
+opens the \ac{hdf} tree, \key{M} extracts metadata, \key{V} opens the detector
+viewer, and \key{K} opens it with the mask tools. Thus, the catalog provides
+another selection view with the same commands
+as the file panes.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 9. MASK
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{DETECTOR MASK CREATION}
-\label{sec:mask}
+\section{DETECTOR VIEWER AND MASK EDITOR}
+\label{sec:viewer}
+
+The heat map of Section~\ref{sec:plot} shows the total counts of a run. Many
+checks need more: the detector at one \ac{tof} range, a comparison of slices
+across runs, or a mask drawn on top of the image. Version~0.12.0 adds a detector
+viewer for these tasks. It replaces the earlier matplotlib mask editor.
+\key{V} opens the viewer on the NeXus file under the cursor, in a file pane or
+the run catalog. \key{K} opens the same viewer with the rectangle mask tool
+selected. Outside the \ac{tui}, \texttt{sansdir view FILE} starts it from a
+shell. Figure~\ref{fig:viewer} shows the window.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\textwidth]{figures/viewer.png}
+  \longcaption{The detector viewer.}{A raw EQ-SANS run shown at one \ac{tof}
+  range. The header gives the file, run title, \ac{ipts}, and run number. The
+  mask tools are on the toolbar, the color scale is in the side panel, and the
+  whole-detector \ac{tof} spectrum with its draggable selection window is below
+  the image. The status bar shows the hover readout with the Mantid pixel
+  name.}
+  \label{fig:viewer}
+\end{figure}
 
 \subsection{ARCHITECTURAL CONSTRAINTS}
 
-Detector masking is the one feature that produces an input to reduction rather
-than a view of its output. Three constraints bound the implementation:
+The viewer is the only part of the program with a Qt \ac{gui}. Its design
+follows five constraints:
 
 \begin{itemize}
-  \item \textbf{No Mantid runtime imports in the package.} Searching the source
-    tree for Mantid imports returns nothing. Mask \emph{creation} is pure Python.
-    A Mantid environment is invoked only as an external subprocess, and only at
-    save time, as described below.
-  \item \textbf{No instrument-specific geometry in the source.} There is no
-    per-instrument pixel-to-detector formula. The detector mapping is recovered
-    from the source NeXus file itself, from its event-identifier-to-detector
-    correspondence.
-  \item \textbf{Pixel ordering is defined in exactly one place.} The invariant
-    that the flattened mask array aligns element-for-element with the pixel
-    identifier array is established in a single module, and the writers consume
-    that invariant rather than re-deriving it.
+  \item \textbf{Qt stays in the viewer process.} The viewer is a separate
+    process, started by the \ac{tui} or from a shell. Only the modules under
+    \texttt{viewer/qt/} import PySide6 or \texttt{pyqtgraph}, and a test
+    enforces this. The data model, color scale, \ac{tof} selection, geometry,
+    and mask state are ordinary Python modules that are tested without a
+    display.
+  \item \textbf{No Mantid import in the main process.} Images and masks are
+    computed with Python, \texttt{numpy}, and \texttt{h5py}. Only the
+    \texttt{.nxs} mask writer starts Mantid, inside an external
+    \texttt{drtsans} subprocess (Section~\ref{sec:maskformats}).
+  \item \textbf{EQ-SANS geometry is defined in one module.} The detector has
+    192 tubes of 256 pixels. Mantid numbers its banks differently from the raw
+    \texttt{bank<N>\_events} groups: front banks 1--24 hold the even blocks of
+    1,024 detector identifiers and back banks 25--48 the odd blocks. The
+    bank-and-tube notation of the mask editor counts raw blocks from zero, a
+    third numbering. All conversions go through \texttt{viewer/geometry.py}.
+  \item \textbf{Pixel ordering is defined in exactly one place.} The flattened
+    mask array and the pixel-identifier array are aligned element by element.
+    The output writers use this ordering instead of calculating it again.
+  \item \textbf{Preferences avoid file locks on the home directory.} Qt's
+    \texttt{QSettings} uses lock files. On the \ac{nfs} home directories of the
+    cluster these locks stalled the window, first during a color-bar drag and
+    then in the file dialog. The viewer writes its own settings file with an
+    atomic rename and moves Qt's settings to node-local storage.
 \end{itemize}
 
-The masking convention follows Mantid: 1 denotes a masked, excluded pixel and 0 a
-kept one, so that passing the output to \texttt{MaskDetectors} excludes exactly
-the cells the user drew. Inverting the final mask is a single flag.
+The mask uses the Mantid convention: 1 is a masked pixel and 0 is a retained
+pixel. Therefore, \texttt{MaskDetectors} excludes the cells selected by the
+user.
 
-\subsection{INTERACTIVE EDITOR}
+\subsection{LOADING LARGE RUNS}
+\label{sec:viewer-load}
 
-\key{K}, from a file pane or the run catalog, opens a matplotlib window showing
-the detector heat map of the selected file. The user draws shapes on it.
+The viewer reads the \texttt{event\_id} and \texttt{event\_time\_offset}
+arrays of each bank in fixed-size chunks and histograms them on a grid of up to 500
+\ac{tof} bins. It stores the result as a \emph{cumulative} sum over \ac{tof},
+with one row per bin edge and one column per pixel. The counts for any \ac{tof}
+range are then the difference of two rows. This takes about 0.1~ms, so moving
+the \ac{tof} window never reads the events again.
 
-The cell aspect ratio is set to $1/1.3$ to compensate for the EQ-SANS detector's
-tube pitch of roughly 5.2~mm against a pixel pitch of roughly 3.9~mm. Without
-this correction an ellipse drawn to look circular on screen is not circular on
-the detector. The canvas extends a few cells beyond the detector boundary, which
-is marked with a faint dotted line, so that a rubber-band selection can be
-dragged from outside the active area---otherwise masking the outermost row
-requires landing the first click exactly on pixel zero.
+EQ-SANS runs can contain several billion events. The largest run tested holds
+$7.7\times10^{9}$ events in a 60~GB file. One process reads about
+$7.5\times10^{7}$ events per second, so a serial load would take minutes. Above
+$10^{8}$ events, the viewer uses a pool of up to 12 worker processes. It first
+histograms an evenly spaced sample of every bank and scales the result up. This
+preview appears in about 2~s. The full load then runs as slices of
+$5\times10^{7}$ events and replaces the preview. The status bar shows the stage,
+the number of events read, the estimated time left, and a Cancel button
+(\key{Esc}). The preview is accurate enough for orientation: on a
+$6\times10^{9}$-event run its total equals the full total, and the two images
+have a correlation of 0.992.
 
-Table~\ref{tab:maskkeys} lists the editor's controls.
+A load that takes at least 2~s is saved in a histogram cache under
+\texttt{\hme/.cache/sansdir/viewer/}. The cache holds at most 5~GB and removes
+the oldest entries first. Table~\ref{tab:viewerperf} lists measured times.
 
 \begin{table}[ht]
   \centering
-  \caption{Interactive mask editor controls}
+  \caption{Detector viewer load times on an analysis node}
+  \label{tab:viewerperf}
+  \small
+  \begin{tabular}{l r r r r}
+    \toprule
+    Run & Events & Preview & Full load & Reopen (cache) \\
+    \midrule
+    IPTS-37618, run 189919 (60~GB) & $7.67\times10^{9}$ & 1.7~s & 64~s & --- \\
+    IPTS-37425, run 176669 (47~GB) & $6.15\times10^{9}$ & 1.7--2.0~s & 51~s & 0.24~s \\
+    Test file, run 172749 & $7.5\times10^{5}$ & --- & 0.12~s & not cached \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{TIME-OF-FLIGHT SELECTION AND COLOR SCALE}
+
+The whole-detector \ac{tof} spectrum is drawn below the image. The user drags a
+shaded window, or its edges, to select a \ac{tof} range. A slider and a width
+box set the same range in bins. \key{[} and \key{]} step one window backward or
+forward, \key{Space} plays through the run, and \emph{Full range} returns to the
+total counts. The image and the hover readout follow the selection during the
+drag. On a $6\times10^{9}$-event run, a slider step takes a median of 7.5~ms,
+within the 16~ms of one display frame.
+
+The side panel controls the color scale. \key{L} switches between logarithmic
+and linear scales. The minimum and maximum can be typed in counts, for example
+\texttt{1500}, \texttt{1.5e3}, or \texttt{1.5k}, or changed with the scroll
+wheel. \emph{Auto} sets the limits from percentiles of the non-zero pixels,
+1 and 99.5 by default, and ignores masked pixels. With \emph{Lock limits} off,
+every slice is scaled on its own. Typing a limit or dragging a color-bar handle
+locks the limits so that slices can be compared. The color bar is labeled in
+counts in both modes. The scale settings and color map are remembered between
+sessions.
+
+The image keeps the physical aspect ratio of the detector. Neighboring tubes
+are about 5.5~mm apart, while pixels are 1.042~m/255, about 4.1~mm, apart along
+a tube. Without this correction, a circle on the screen would not be circular on
+the detector.
+
+\subsection{HOVER READOUT AND NAVIGATION BETWEEN RUNS}
+
+As the pointer moves, the status bar shows the cell position, the Mantid name of
+the pixel (for example \texttt{front bank8 tube1 pixel131}), the detector
+identifier, the raw \texttt{bank<N>\_events} group, and the counts in the
+current range. Holding \key{Shift} outlines the whole bank. Pixel~1 is at the
+bottom of a tube, as in Mantid. The window title and a header above the image
+give the file name, run title, \ac{ipts}, and run number.
+
+\key{PgDn} and \key{PgUp} open the next and previous run in the same directory
+and skip gaps in the numbering. The mask, zoom, and \ac{tof} window are kept, so
+two runs can be compared slice by slice. When the next run is cheap to load,
+because it is cached or its file is smaller than 1~GB, it is loaded in the
+background while the user looks at the current run. Multi-gigabyte runs load
+only when the user steps to them.
+
+\subsection{MASK EDITING}
+\label{sec:mask}
+
+The toolbar and the \emph{Mask} menu draw the mask over the image in
+translucent red. Table~\ref{tab:maskkeys} lists the tools. Rectangles,
+ellipses, circles, and polygons are editable shapes with handles; they can be
+moved and resized after they are drawn. The hover readout reports
+\texttt{MASKED} on a masked pixel, and \key{O} hides the overlay.
+
+\begin{table}[ht]
+  \centering
+  \caption{Mask editor tools and keys}
   \label{tab:maskkeys}
   \small
   \begin{tabular}{l p{0.72\textwidth}}
     \toprule
     Key & Action \\
     \midrule
-    \key{r} & Rectangle draw mode \\
-    \key{e} & Ellipse draw mode \\
-    \key{v} & Edit mode: click to select a shape, drag to move it, \key{Delete}
-      to remove it \\
-    \key{k} & Open the bank and tube specification dialog \\
-    \key{z} & Undo \\
-    \key{i} & Invert the mask \\
-    \key{s} & Save, through a file chooser \\
-    \key{Esc} & Quit without saving \\
+    \key{V} & Pan and select: drag the image to pan; drag a shape to move it or
+      its handles to resize it \\
+    \key{R} \key{E} \key{C} & Rectangle, ellipse, circle (a circle is drawn
+      from its center) \\
+    \key{P} & Polygon: click the corners and double-click to close \\
+    \key{B} / \key{X} & Brush and eraser with an adjustable radius; the eraser
+      also unmasks pixels inside shapes \\
+    \key{T} & Mask or unmask the tube under a click; \key{Shift}-click for its
+      Mantid bank \\
+    \key{K} & Tubes by number, for example \texttt{t50}, \texttt{t10-15},
+      \texttt{b3}, or \texttt{b5-7} \\
+    \key{H} & Dead and hot pixels: mask counts at or below $N$ and/or at or
+      above $M$ in the displayed image \\
+    \key{I} / \key{Delete} & Invert the mask; delete the selected shape \\
+    \key{Z} / \key{Shift+Z} & Undo and redo \\
+    \key{Ctrl+L} & Load a mask: \texttt{mask\_log.json} (shapes stay
+      editable), Mantid \texttt{.xml} or \texttt{.nxs}, or \texttt{.npy} \\
+    \key{S} & Save as \texttt{.nxs}, \texttt{.xml}, or \texttt{.npy}, with a
+      \texttt{mask\_log.json} sidecar \\
+    \key{Esc} & Cancel a polygon, a stack export, or a load \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The bank and tube dialog accepts a compact specification language---\texttt{b3}
-for a whole bank, \texttt{t50} for a tube, \texttt{b5-7 t10-15} for mixed
-ranges---which covers the strip-masking case far better than freehand drawing.
-The resulting rectangles are ordinary shapes and round-trip through the mask log
-like any other.
+The tube notation is useful for strip masks that are difficult to draw by hand:
+\texttt{t50} selects one display column, \texttt{b3} selects a raw block of four
+tubes counted from zero, and ranges can be mixed, as in \texttt{b5-7 t10-15}.
+Brush and eraser strokes are recorded in the sidecar log as a set of pixels.
+The log therefore reproduces any mask drawn in the viewer, and
+\texttt{sansdir mask --shapes-json} can apply it to other runs.
 
-Two responsiveness measures are worth recording because both replaced an
-implementation that was correct but unusable. Moving a shape in edit mode
-snapshots the static canvas on mouse-down and re-blits only the moving patch on
-each motion event, rather than redrawing the full heat map. And the bank and tube
-input is a dialog rather than an inline matplotlib text widget, because that
-widget redraws on every keystroke, which on a logarithmically scaled
-$256\times192$ image is visible per-character lag.
+When the viewer is started with \key{K}, the default output is
+\texttt{<run>\_mask.nxs} in the \ac{tui}'s other pane. Closing the window with
+unsaved changes asks for confirmation. When the window is closed after a save,
+the viewer exits with a distinct status code, and the \ac{tui} refreshes both
+panes so that the new file appears.
 
-A cursor readout reports \texttt{tube}, \texttt{pixel}, \texttt{counts},
-\texttt{bank}, and the tube index within its bank as the pointer moves, which is
-what allows a user to translate a visual feature into a bank and tube
-specification.
+\subsection{EXPORT}
+
+The \emph{File} menu exports the image currently on the screen, for the selected
+\ac{tof} range:
+
+\begin{itemize}
+  \item \textbf{Figure} (\key{Ctrl+E}): \ac{png}, PDF, or SVG drawn again with
+    matplotlib, with axes, a color bar in counts, and the run, title, and
+    \ac{tof} range in the title.
+  \item \textbf{Image data}: the $256\times192$ counts as \texttt{.npy} with a
+    \ac{json} description, or as text with a commented header. Row 0 is the
+    bottom of the tubes.
+  \item \textbf{\ac{tof} stack}: every slice at the current window width, as one
+    three-dimensional \texttt{.npy} array or as numbered \ac{png} figures. The
+    export runs in the background and \key{Esc} cancels it.
+\end{itemize}
+
+Masked pixels are left blank by default, as NaN in data and grey in figures,
+and each file records whether they were.
 
 \subsection{COMMAND-LINE MASK CREATION}
+\label{sec:maskcli}
 
-The same functionality is available non-interactively. Shapes are given in pixel
-coordinates and the options are repeatable:
+The same operations are available from the command line. Shapes are specified in
+pixel coordinates, and each option can be repeated:
 
 \begin{lstlisting}[language=shellsession]
 sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
@@ -1356,33 +1588,44 @@ sansdir mask /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_172749.nxs.h5 \
   --output beam_stop.nxs
 \end{lstlisting}
 
-Available shapes are \texttt{--rect X0,Y0,X1,Y1}, \texttt{--ellipse
+The available shapes are \texttt{--rect X0,Y0,X1,Y1}, \texttt{--ellipse
 XC,YC,RX,RY}, \texttt{--circle XC,YC,R}, and \texttt{--polygon
-X1,Y1,X2,Y2,...} with at least three vertices. A sidecar log in \ac{json} form
-is written alongside every output, and \texttt{--shapes-json} replays it, so a
-mask developed interactively can be reapplied to other runs in a script.
+X1,Y1,X2,Y2,...} with at least three vertices. Each output has a sidecar
+\ac{json} log. The \texttt{--shapes-json} option reads this log, allowing a mask
+created interactively to be applied to other runs in a script.
 
 \subsection{OUTPUT FORMATS AND REDUCTION COMPATIBILITY}
+\label{sec:maskformats}
 
-Three output formats are supported: a Mantid \texttt{SaveMask} \ac{xml} file, a
-NeXus file, and a \texttt{numpy} array with a metadata sidecar.
+The program supports three output formats: a Mantid \texttt{SaveMask} \ac{xml}
+file, a NeXus file, and a \texttt{numpy} array with a metadata sidecar. The
+viewer and the \texttt{mask} subcommand use the same writers.
 
-The NeXus path deserves explanation because it changed during development. To be
-usable by the \texttt{drtsans} reduction pipeline, the mask must carry per-detector
-mask flags in the instrument parameter map that the pipeline reads. Producing
-that structure reliably means letting Mantid write it. The save step therefore
-shells out to the cluster's \texttt{drtsans} wrapper to run a
-load--mask--save sequence against the source file. When Mantid is unavailable,
-the program falls back to a pure-\texttt{numpy} writer that produces a
-visualization-only file, and says so: the fallback output can be inspected but
-does not affect reduction.
+The NeXus output requires an additional step. A mask used by the
+\texttt{drtsans} reduction pipeline must contain per-detector mask flags in the
+instrument parameter map read by the pipeline. Mantid is used to write this
+structure. During saving, the program calls the cluster's \texttt{drtsans}
+wrapper and runs a load--mask--save sequence on the source file. This takes
+about 10~s. If Mantid is not
+available, a pure-\texttt{numpy} writer produces a file for visualization only.
+The \ac{tui} briefly identifies this as a legacy save, while the \ac{cli} does
+not give a prominent fallback warning. This file can be inspected but does not
+change a reduction.
 
-The on-disk encoding of the visualization file mirrors the convention of existing
-EQ-SANS beam-stop files, in which each \emph{unmasked} detector carries one
-synthetic event and masked detectors carry none. Consequently a mask opened with
-\key{p} renders with the masked region in grey, the same visual convention as a
-beam stop. The builder retains Mantid's ``1 means masked'' convention internally;
-only the on-disk encoding is inverted.
+The visualization file follows the convention of existing EQ-SANS beam-stop
+files. Each \emph{unmasked} detector contains one synthetic event, while masked
+detectors contain no events. Therefore, a mask opened with \key{p} shows the
+masked area in grey, like a beam stop. The mask builder continues to use
+Mantid's ``1 means masked'' convention internally; only the file encoding is
+inverted.
+
+The \ac{xml} and NeXus outputs were checked in \texttt{drtsans} with Mantid
+6.16. A test mask containing every kind of edit was saved in both formats and
+applied with \texttt{drtsans.mask\_utils.apply\_mask} to a loaded run. Both
+files masked exactly the intended 2,646 detectors, with none missing and none
+extra. A production beam-stop mask gave the same result for its 7,504
+detectors. The check must use a loaded run; applying a mask to an empty
+instrument gives wrong counts for every file, including production masks.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 10. CLI
@@ -1390,9 +1633,9 @@ only the on-disk encoding is inverted.
 \section{NON-INTERACTIVE COMMAND-LINE INTERFACE}
 \label{sec:cli}
 
-Three operations are available without the \ac{tui}, for use in scripts and
-batch jobs. Because they dispatch through the same registry, their behavior
-matches the interactive equivalents exactly.
+Several operations are available without the \ac{tui} for scripts and batch
+jobs. The Click \ac{cli} is a separate entry path, but it calls the same service
+functions used by the interactive commands.
 
 \subsection{LAUNCHING THE INTERFACE}
 
@@ -1401,8 +1644,28 @@ sansdir                                # TUI in the current directory
 sansdir /SNS/EQSANS/IPTS-12345/shared  # TUI rooted at a directory
 \end{lstlisting}
 
-A bare path argument is interpreted as \texttt{sansdir tui PATH}, so the
-subcommand name may be omitted in the common case.
+A path given without a subcommand is interpreted as \texttt{sansdir tui PATH}.
+Thus, the subcommand name can be omitted for normal interactive use.
+
+\subsection{DETECTOR VIEWER}
+
+\begin{lstlisting}[language=shellsession]
+sansdir view /SNS/EQSANS/IPTS-XXXXX/nexus/EQSANS_176669.nxs.h5
+sansdir view FILE --mask beam_mask.xml --output my_mask.nxs --tool rect
+\end{lstlisting}
+
+\texttt{sansdir view} opens the viewer of Section~\ref{sec:viewer} without the
+\ac{tui}. \texttt{--mask} loads a mask at start, \texttt{--output} sets the
+default save path, and \texttt{--tool} selects the initial mask tool.
+\texttt{--nbins} changes the number of \ac{tof} bins from the default of 500.
+\texttt{--no-cache} neither reads nor writes the histogram cache, and
+\texttt{--clear-cache} empties it and exits.
+
+\subsection{ONCAT SIGN-IN}
+
+\texttt{sansdir oncat login}, \texttt{status}, and \texttt{logout} perform the
+same per-user sign-in operations as the \key{:} commands described in
+Section~\ref{sec:oncat}.
 
 \subsection{BATCH METADATA EXTRACTION}
 
@@ -1425,20 +1688,20 @@ sansdir extract \
 sansdir extract --with-stats -k /entry/DASlogs/temperature/value *.nxs.h5
 \end{lstlisting}
 
-Options are \texttt{-k/--keys} (repeatable, required), \texttt{-o/--out},
-\texttt{--format} with values \texttt{tsv}, \texttt{csv}, or \texttt{columns},
-\texttt{--with-stats}, and \texttt{--workers} to size the thread pool. The
-written paths are echoed to standard output, one per line, so the command
-composes with shell pipelines.
+The options are \texttt{-k/--keys} (repeatable and required),
+\texttt{-o/--out}, \texttt{--format} with the values \texttt{tsv},
+\texttt{csv}, or \texttt{columns}, \texttt{--with-stats}, and
+\texttt{--workers} for the thread-pool size. Each written path is printed on a
+separate line, allowing the command to be used in a shell pipeline.
 
 \subsection{MASK CREATION}
 
-The \texttt{mask} subcommand is documented in Section~\ref{sec:mask}. Its options
+Section~\ref{sec:maskcli} describes the \texttt{mask} subcommand. Its options
 are \texttt{--rect}, \texttt{--ellipse}, \texttt{--circle}, \texttt{--polygon},
 \texttt{--shapes-json}, \texttt{--inverse}, \texttt{--output}, and
-\texttt{--format} with values \texttt{nxs}, \texttt{xml}, or \texttt{npy}. On
-completion it reports the output path, the masked pixel count as an absolute
-number and a percentage, and the sidecar log path.
+\texttt{--format} with values \texttt{nxs}, \texttt{xml}, or \texttt{npy}. When
+complete, it reports the output path, masked pixel count as a number and
+percentage, and sidecar log path.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 11. CONFIGURATION
@@ -1446,22 +1709,23 @@ number and a percentage, and the sidecar log path.
 \section{CONFIGURATION}
 \label{sec:config}
 
-Configuration is read from \texttt{\hme/.config/sansdir/config.toml}, or from the
-path named by \texttt{\$SANSDIR\_CONFIG}. Every section and key is optional; the
-program runs correctly with no configuration file at all.
+Configuration is read from \texttt{\hme/.config/sansdir/config.toml} or from the
+path given by \texttt{\$SANSDIR\_CONFIG}. All sections and keys are optional, and
+the program can run without a configuration file.
 
 \begin{lstlisting}
 [ui]
 theme = "monokai"       # any Textual theme name
-colorbar_mode = "shared"   # tiled 2-D scale: "shared" or "independent\"
+colorbar_mode = "shared"   # tiled 2-D scale: "shared" or "independent"
 
 [keys]
-"ctrl+y" = "view.toggle_hidden"   # rebind any key to any command
-f5 = "ui.move_tagged"             # unknown commands are dropped at startup
+"ctrl+y" = "view.toggle_hidden"   # bind a key to a compatible command
+f5 = "ui.move_tagged"             # replace the default F5 action
 
 [oncat]
 default_instrument = "EQSANS"
 cache_ttl_seconds  = 86400
+token_path         = ""  # blank: ~/.config/sansdir/oncat_token.json
 
 [instrument]
 default     = "EQSANS"   # "" falls back to [oncat].default_instrument
@@ -1474,20 +1738,32 @@ data_dir_template = "/SNS/USANS/{ipts}/shared/autoreduce"
 logbin            = true
 thickness_cm      = 0.1
 short_name_copy   = true   # also write UN_*_bsub.txt aliases
+sigma_y           = 0.13   # slit half-width for desmearing (1/A)
+skip_off_wavelength = true # leave 1.2 A runs out of new setup tables
+csv_to_json       = true   # give the engine its JSON configuration
 
 [mail]
 command = "mail"                  # or "mutt"
 default_subject = "[sansdir] data"
 \end{lstlisting}
 
-The loader is deliberately tolerant. An unknown theme name falls back to the
-default with a notification rather than aborting startup, and a key rebinding
-naming a nonexistent command is dropped with a notification. A malformed
-configuration file should never prevent the program from launching, because a
-user who cannot launch the program also cannot use it to fix the file.
+The loader handles several invalid settings without stopping the program. An
+unknown theme name is replaced by the default and reported to the user. A key
+binding that names an unknown command is removed and also reported. A malformed
+TOML file or an invalid value type can still stop startup and must be corrected
+in the configuration file.
 
-Themes may also be changed at runtime with \texttt{:theme <name>}; issuing
-\texttt{:theme} with no argument lists the available names.
+A custom key binding is most suitable for a command that requires no arguments.
+The configuration override stores a key and command name but does not add the
+argument resolver used by some built-in bindings.
+
+The theme can also be changed during a session with
+\texttt{:theme <name>}. Entering \texttt{:theme} without an argument lists the
+available themes.
+
+The detector viewer keeps its own preferences, such as the color map and scale
+settings, in \texttt{\hme/.config/sansdir/viewer.json}. The viewer writes this
+file itself; it is not part of \texttt{config.toml}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 11b. USANS REDUCTION
@@ -1495,145 +1771,162 @@ Themes may also be changed at runtime with \texttt{:theme <name>}; issuing
 \section{USANS REDUCTION}
 \label{sec:usans}
 
-\Ac{usans} overlaps almost entirely with what the program already does: the same
-proposal catalog, the same file manager, the same one-dimensional plotting, the
-same editor. What it adds is a short reduction workflow and, downstream of it, a
-desmearing step. The reduction itself is delegated to the instrument team's
-\texttt{usansred} package; the desmearing implements the truncated Abel inversion
-of Huang \autocite{huang2026abel}. Rather than ship a second application, the
-program carries an \emph{instrument mode} and a small, self-contained module.
+\Ac{usans} uses many operations that were already available in the program: the
+proposal catalog, file manager, one-dimensional plotting, and editor. It adds a
+short reduction workflow and a desmearing step. The instrument team's
+\texttt{usansred} package performs the reduction. The desmearing operation uses
+the truncated Abel inversion of Huang \autocite{huang2026abel}. These operations
+are included through an \emph{instrument mode} and a small, self-contained
+module instead of a separate application.
 
 \subsection{INSTRUMENT MODE}
 
-The mode is either \ac{sans} or \ac{usans}, and it is resolved once at launch:
-path detection first, then \texttt{[instrument].default}, then
-\texttt{[oncat].default\_instrument}. Any launch path containing
-\texttt{usans}---which covers \texttt{/SNS/USANS/IPTS-\textit{N}} as well as a
-user's own scratch directories---selects \ac{usans}. Path detection outranks the
-configuration file because a user who opens a \ac{usans} proposal directory means
-it, whatever their defaults say. The command \texttt{instrument.set}, reached as
-\texttt{:instrument usans}, switches at runtime.
+The mode is either \ac{sans} or \ac{usans}. It is resolved once at launch, using
+path detection first, then \texttt{[instrument].default}, and finally
+\texttt{[oncat].default\_instrument}. A launch path containing
+\texttt{usans} selects \ac{usans}. This includes
+\texttt{/SNS/USANS/IPTS-\textit{N}} and a user's own scratch directories. Path
+detection has priority over the configuration file because the path gives the
+current working context. The command \texttt{instrument.set}, entered as
+\texttt{:instrument usans}, can change the mode during a session.
 
-The mode governs four things: which instrument the proposal browser queries,
-which columns the run catalog shows (\ac{usans} has no moveable detector and a
-fixed incident wavelength, so the distance and wavelength columns would be
-constants and are dropped), what \key{Enter} does on a catalog row, and whether
-the \key{r} binding is live. It is signalled in the title bar and by the presence
-of \texttt{r:Reduce} in the key hint bar.
+The mode controls four items: the instrument queried by the proposal browser,
+the columns shown in the run catalog, the action of \key{Enter} on a catalog
+row, and whether the \key{r} and \key{d} bindings are active. \Ac{usans} has no moveable
+detector and uses a fixed incident wavelength, so the distance and wavelength
+columns would contain only constants and are omitted. The title bar shows the
+mode, and the reduction and desmearing actions appear in the key hint bar in
+\ac{usans} mode.
 
-Mode scoping is applied to \emph{bindings}, not to registrations. The
-\ac{usans} commands are registered in both modes, so \texttt{:usans-reduce}
-works whether or not the user remembered to switch; only the key disappears.
-Correspondingly, \texttt{default\_keymap()} called with no argument returns
-exactly the map it returned before \ac{usans} existed, which is what the help
-overlay, the hint bar, and the existing test suite all observe.
+The mode changes \emph{bindings}, not command registrations. The \ac{usans}
+commands are registered in both modes, so \texttt{:usans-reduce} works even if
+the user did not switch modes; only the key bindings are hidden. The live help
+overlay and hint bar request the key map for the current instrument mode.
+Calling \texttt{default\_keymap()} without a mode still returns the original
+\ac{sans} map for backward compatibility.
 
 \subsection{THE SETUP TABLE}
 
-The reduction engine is driven by a small \ac{csv} listing, one row per sample:
-a flag distinguishing the empty-cell background from the samples, a name that
-becomes the output filename stem, a first run number, a scan count, a thickness,
-and optionally runs to exclude. The program generates this table from the
-proposal's run list and then gets out of the way: the user reviews and corrects
-it with \key{F4}, the same editor used for any other file. There is deliberately
-no table-editing widget.
+The reduction engine reads a small \ac{csv} table with one row per sample. Each
+row contains a flag that distinguishes the empty-cell background from the
+samples, a name used as the output filename stem, a first run number, a scan
+count, a thickness, and optional runs to exclude. The program generates a draft
+from the proposal run list. The user then reviews and corrects it with \key{F4},
+using the same editor as for other files. A separate table editor is not needed.
 
-Generation groups consecutive runs sharing a title into blocks and picks the
-block whose title names an empty cell or banjo as the background. The
-load-bearing step is the scan count. A titled block of $N$ consecutive runs is
-$(N-1)$ analyzer rocking-curve scans plus one transmission run, and the engine
-reads only the rocking-curve files. $N$ is not a constant: it varies with the
-experiment's settings. Passing the run count that the catalog reports therefore
-makes the engine fail on the transmission run's absent input. The program instead
-derives the count from which runs actually have rocking-curve files on disk,
-which handles any block size without configuration, and expresses any gap inside
-a block through the \ac{csv}'s exclude column.
+During generation, consecutive runs with the same title are grouped into blocks.
+The block whose title identifies an empty cell or banjo is selected as the
+background. The scan count requires additional checking. A block of $N$
+consecutive runs contains $(N-1)$ analyzer rocking-curve scans and one
+transmission run, while the engine reads only the rocking-curve files. The value
+of $N$ depends on the experiment settings. Therefore, using the catalog run
+count would make the engine look for an input file that does not exist for the
+transmission run. Instead, the program counts the runs that have rocking-curve
+files on disk. This works for different block sizes without additional
+configuration. A gap inside a block is recorded in the exclude column of the
+\ac{csv}.
 
-Some judgements cannot be made from the data alone. A measurement that was
-stopped and restarted under one title leaves an oversized block in which only
-the last few runs are real; the generator narrows to the last window of the modal
-size and flags the block. Every such judgement---narrowed blocks, unusual sizes,
-blocks with no reducible runs, the transmission runs that were dropped, the
-background that was chosen---is written to a companion notes file. The generated
-table is a first draft, and the notes exist so that reviewing it is quick rather
-than archaeological.
+Some cases still require review. If a measurement was stopped and restarted
+under one title, it can produce an oversized block in which only the last few
+runs are usable. The generator keeps the last window of the modal size and flags
+the block. A companion notes file records every such choice: narrowed blocks,
+unusual sizes, blocks with no reducible runs, removed transmission runs, and the
+selected background. The generated table is a first draft. The notes provide
+the information needed to review it.
+
+Two kinds of runs are left out of the table, each with its reason in the notes.
+A \emph{pause} run with a near-zero monitor count has no rocking-curve files,
+and passing it to the engine stops the reduction. In some proposals the first
+run of every block was recorded at 1.2~\AA{} instead of 3.6~\AA{}; it has
+rocking-curve files but no usable counts.
+\texttt{[usans].skip\_off\_wavelength = false} keeps these runs.
+
+The empty cell is written twice: as a \texttt{t} row, the transmission
+reference by which each sample is divided, and as a \texttt{b} row over the same
+runs, which is subtracted. The result is $I = S/T - B$. A \texttt{b} row alone
+gives $S - B$. The \texttt{usansred} engine accepts an empty cell only from its
+\ac{json} configuration, because its \ac{csv} reader would reduce a \texttt{t}
+row as a sample. At reduction time, the program therefore translates the
+reviewed \ac{csv} into this \ac{json} form in its temporary directory and keeps
+a copy in the output directory.
 
 \subsection{INVOKING THE ENGINE}
 
-The reduction mathematics belongs to the instrument team's \texttt{usansred}
-package, deployed on the cluster as a pixi environment. The program locates its
-console script and runs it as a subprocess; it does not reimplement the
-physics, and no code from \texttt{usansred} is copied into this code base.
-Two deployment realities are absorbed on the caller's side.
+The instrument team's \texttt{usansred} package contains the reduction
+mathematics and is deployed on the cluster as a pixi environment. The program
+locates its console script and runs it as a subprocess. It does not reimplement
+the physics, and no \texttt{usansred} code is copied into this code base. The
+caller also handles two deployment conditions.
 
-First, the console script inherits the invoking user's \texttt{\textasciitilde
-/.local} site packages and aborts on a stale \texttt{pandas}, which is reachable
-on the analysis nodes. Every invocation therefore disables user site packages and
-empties \texttt{PYTHONPATH}.
+First, the console script can inherit the user's \texttt{\textasciitilde
+/.local} site packages. On the analysis nodes, an old \texttt{pandas} package in
+this location causes the script to stop. Therefore, each invocation disables
+user site packages and clears \texttt{PYTHONPATH}.
 
-Second, the engine resolves its per-run input relative to the directory holding
-the setup \ac{csv}, not the working directory. The reviewed table normally lives
-in the user's own folder, and the pre-processed data lives under the proposal's
-autoreduce directory---which is instrument data the program must not write to,
-and which is frequently read-only to the user in any case. Rather than copy the
-table into it, the program builds a temporary directory of symbolic links to the
-data, places a copy of the table there, and runs the engine in that directory.
-Nothing beneath the instrument data root is modified.
+Second, the engine locates each run relative to the directory containing the
+setup \ac{csv}, not relative to the working directory. The reviewed table is
+normally in the user's folder, while the preprocessed data are in the proposal's
+autoreduce directory. The program must not write to this instrument data
+directory, which is also often read-only. It instead creates a temporary
+directory containing symbolic links to the data, copies the table there, and
+runs the engine in that directory. It does not modify anything below the
+instrument data root.
 
 \subsection{ONE KEY}
 
-The two operations are exposed through a single binding. \key{r} reduces the
-setup table under the cursor; when the cursor is not on one, it offers to build
-a table for the proposal named by the current path, fetching the run list,
-showing the catalog beside the user, and leaving the cursor on the file it wrote.
+One binding provides both operations. If the cursor is on a setup table,
+\key{r} reduces it. If the cursor is not on a table, the program offers to build
+one for the proposal identified by the current path. It fetches the run list,
+shows the catalog in the other pane, writes the table, and leaves the cursor on
+the new file.
 
-It stops there rather than reducing immediately. The table is a first draft whose
-guesses the notes exist to expose, so the second \key{r} is the review step, and
-it costs one keystroke. The one case that does \emph{not} offer to regenerate is
-a table that parses but fails validation---two backgrounds, a zero scan count:
-there the user is mid-edit on a real table, and regenerating would discard the
-corrections. That case reports the problem and points at \key{F4}.
+The program stops after writing the draft and does not begin reduction. The user
+can review the table and the choices recorded in the notes before pressing
+\key{r} again. A table that can be parsed but fails validation is not regenerated.
+For example, it may contain two backgrounds or a zero scan count. In this case,
+the table may include real user corrections, so regeneration could discard
+them. The program reports the problem and directs the user to \key{F4}.
 
-Reduced output is ordinary two- or three-column text, so the existing plotting
-path handles it with only a filename rule added to the classifier. The rule
-matches on the name rather than the column count so that a sample whose name
-happens to contain \texttt{trans} is not routed to the transmission plotter.
+The reduced output is ordinary two- or three-column text and is handled by the
+existing plotting path. Only a filename rule was added to the classifier. The
+rule uses the filename rather than the column count, so a sample name containing
+\texttt{trans} is not incorrectly sent to the transmission plotter.
 
-The engine's final curve carries a verbose suffix,
-\texttt{\_background\_subtracted.txt}. Because that name is long, the program
-writes a shorter \texttt{\_bsub.txt} alias beside it after each reduce, keeping
-the original so the engine's own summary spreadsheet and any downstream tooling
-that expects the standard name continue to work. The alias is a copy, not a
-symbolic link, and is controlled by \texttt{[usans].short\_name\_copy}.
+The engine gives the final curve the suffix
+\texttt{\_background\_subtracted.txt}. After each reduction, the program also
+writes a shorter \texttt{\_bsub.txt} name. It keeps the original so that the
+engine's summary spreadsheet and other tools that expect the standard name
+continue to work. The shorter file is a copy, not a symbolic link, and is
+controlled by \texttt{[usans].short\_name\_copy}.
 
 \subsection{A WORKED EXAMPLE}
 \label{sec:usans-example}
 
-Figures~\ref{fig:usans-workflow} and~\ref{fig:usans-workflow-2} show the complete flow on a real proposal
-(IPTS-37679), from an empty working folder to reduced curves, using only the
-\key{r} key and the prompts it raises.
+Figures~\ref{fig:usans-workflow} and~\ref{fig:usans-workflow-2} show the complete
+workflow for a real proposal (IPTS-37679). It starts with an empty working folder
+and ends with reduced curves, using the \key{r} key and the related prompts.
 
 \begin{enumerate}
-  \item Open the program in a writable working folder anywhere under the
-    proposal's path. The \texttt{/SNS/USANS} prefix puts it in \ac{usans} mode
-    automatically.
+  \item Open the program in a writable working folder under the proposal path.
+    The \texttt{/SNS/USANS} prefix selects \ac{usans} mode automatically.
   \item Press \key{r}. The folder holds no setup table yet, so the program
     offers to build one for the \ac{ipts} named by the path
     (panel~a). Confirm with \key{y}.
   \item The run list is fetched from the catalog and displayed in the other
     pane, and a prompt asks for the first run of the experiment---here
-    49434 (panel~b). Blocks recorded before that run---beam-cycle alignment
-    and test scans---are noted but left out of the table.
+    49434 (panel~b). Blocks recorded before that run, including beam-cycle
+    alignment and test scans, are recorded in the notes but omitted from the
+    table.
   \item The program writes \texttt{IPTS-37679\_setup.csv} and its companion
     \texttt{NOTE.md}, leaves the cursor on the table, and previews its content
-    in the other pane (panel~c): here one background and 23 sample blocks.
-    This is the review gate---check the background pick and block sizes
-    against the NOTE, editing with \key{F4} if needed.
+    in the other pane (panel~c). In this case, it contains one empty-cell block and
+    23 sample blocks. The user checks the selected background and block sizes
+    against the NOTE and edits the table with \key{F4} if needed.
   \item Press \key{r} again, now on the table. The data directory defaults to
     the proposal's \texttt{autoreduce} folder and the output directory to
     \texttt{output/} beside the table; accepting both runs the engine over
-    every block---seconds, since it works from the pre-processed per-run
-    ASCII. On completion the program offers to show the output folder in
+    every block. This takes seconds because it reads the preprocessed per-run
+    ASCII files. On completion, the program offers to show the output folder in
     the other pane (panel~d), where each sample now has its
     \texttt{UN\_*\_det\_1\_*} curve family. \key{p} plots any of them, and
     \key{d} desmears (Section~\ref{sec:desmear}).
@@ -1667,11 +1960,11 @@ Figures~\ref{fig:usans-workflow} and~\ref{fig:usans-workflow-2} show the complet
 \subsection{DESMEARING}
 \label{sec:desmear}
 
-\Ac{usans} instruments use slit rather than pinhole collimation: the larger
-illuminated area buys the flux that the very high angular resolution of the
-Bonse--Hart crystal optics demands. The cost is that the recorded intensity at a
-nominal momentum transfer $Q$ is an average of the true intensity over a tall
-vertical acceptance,
+\Ac{usans} instruments use slit collimation instead of pinhole collimation. The
+larger illuminated area provides the flux needed for the high angular resolution
+of the Bonse--Hart crystal optics. However, the intensity recorded at a nominal
+momentum transfer $Q$ is an average of the true intensity over the vertical
+acceptance,
 %
 \begin{equation}
   I_\text{exp}(Q) = \frac{1}{\sigma_y}\int_0^{\sigma_y}
@@ -1680,14 +1973,14 @@ vertical acceptance,
 \end{equation}
 %
 where $\sigma_y$ is the vertical resolution half-width. For the \ac{sns}
-instrument $\sigma_y \simeq 0.13~\text{\AA}^{-1}$, two decades above the top of
-the measured window. Recovering $I(Q)$ from $I_\text{exp}(Q)$ is the desmearing
-problem, and it is ill-posed: the slit average couples each measured point to
-scattering at much higher $Q$.
+instrument, $\sigma_y \simeq 0.13~\text{\AA}^{-1}$, which is two decades above
+the top of the measured window. Desmearing recovers $I(Q)$ from
+$I_\text{exp}(Q)$. This is an ill-posed problem because the slit average couples
+each measured point to scattering at much higher $Q$.
 
-The \key{d} key desmears the selected reduced curves. The implementation is the
-non-iterative truncated Abel inversion of Huang \autocite{huang2026abel}, which
-expresses the intrinsic intensity in closed form as
+The \key{d} key desmears the selected reduced curves. The program uses the
+non-iterative truncated Abel inversion of Huang \autocite{huang2026abel}. The
+method expresses the intrinsic intensity in closed form as
 %
 \begin{equation}
   I(Q) = I(Q_m) - \frac{2\sigma_y}{\pi}
@@ -1696,39 +1989,39 @@ expresses the intrinsic intensity in closed form as
   \label{eq:abel}
 \end{equation}
 %
-Being closed-form, it propagates uncertainty through a single linear operator
-rather than accumulating it over iterations, which is the principal weakness of
-the widely used Lake algorithm \autocite{lake1967} it replaces. Every integral
-is evaluated with the substitution $Q_x = \sqrt{Q^2 + s^2}$, which removes the
-$1/\sqrt{Q_x^2 - Q^2}$ singularity at the lower limit. A Bayesian Gaussian-process
-alternative to the same inversion has been developed by Tung
-\autocite{tung2026gpr}; the program implements the Abel method for its
-determinism and its closed-form error propagation.
+Because the expression is closed-form, the program propagates uncertainty
+through one linear operator instead of across iterative updates. This differs
+from the widely used iterative Lake method \autocite{lake1967}. Each integral is
+evaluated with the substitution $Q_x = \sqrt{Q^2 + s^2}$, which removes the
+$1/\sqrt{Q_x^2 - Q^2}$ singularity at the lower limit. A Bayesian
+Gaussian-process alternative has also been reported for this inversion
+\autocite{tung2026gpr}.
+The program uses the Abel method because it is deterministic and provides
+closed-form error propagation.
 
 Equation~\eqref{eq:abel} evaluates $I$ at $Q_m \simeq \sigma_y$ and integrates
-out to there, so it requires the scattering far beyond the \ac{usans} window.
-This drives the one interactive decision in the workflow. When a single curve is
-selected, the program asks---in the pane the user is already in, while the other
-pane stays a live, filterable file list---whether a companion pinhole \ac{sans}
-measurement of the same sample is available. If one is chosen, the two are put on
-a common smearing basis, scale-matched, joined across the instrument gap, and
-inverted over the full range. If the user declines, or when several curves are
-desmeared at once, the high-$Q$ side is instead extrapolated as a power law out
-to $\sigma_y$---the approach taken by the \ac{nist} \textsc{Igor}/\textsc{Irena}
-package \autocite{kline2006}---and the result is truncated to the measured
-\ac{usans} range, with the extrapolation recorded in the output file's header.
-Huang \autocite{huang2026abel} show that without genuine high-$Q$ data the
-reconstruction is reliable only at low $Q$; the truncation and the header note
-make that limitation explicit rather than silent.
+to that point. Therefore, it requires scattering data well beyond the
+\ac{usans} window. This requirement produces one interactive choice. When one
+curve is selected, the program asks whether a companion pinhole \ac{sans}
+measurement of the same sample is available. The question appears in the current
+pane, while the other pane remains a filterable file list. If a companion curve
+is selected, the two curves are placed on a common smearing basis, scale-matched,
+joined across the instrument gap, and inverted over the full range. If the user
+declines, or if several curves are desmeared together, the high-$Q$ side is
+extrapolated as a power law to $\sigma_y$. This is the approach used by the
+\ac{nist} \textsc{Igor}/\textsc{Irena} package \autocite{kline2006}. The result
+is then limited to the measured \ac{usans} range, and the extrapolation is
+recorded in the output header. Huang \autocite{huang2026abel} show that a
+reconstruction without measured high-$Q$ data is reliable only at low $Q$. The
+limited output range and header note make this restriction visible.
 
-The desmeared curve is written as an ordinary three-column
-$Q$, $I$, $\mathrm{d}I$ text file that the \key{p} key plots like any other. The
-inversion is pure \texttt{numpy}, with no new dependency, and was validated by a
-smear--desmear round trip against analytic power laws: over the core of the
-\ac{usans} window the recovered log--log slope is within half a percent and the
-median intensity error is below one percent, while the reported uncertainty
-widens toward the top of the range where the high-$Q$ extrapolation loses
-authority.
+The desmeared curve is written as a three-column $Q$, $I$, $\mathrm{d}I$ text
+file, which the \key{p} key plots in the same way as other curves. The inversion
+uses only \texttt{numpy} and adds no dependency. It was validated by a
+smear--desmear round trip using analytic power laws. The tests require the
+recovered log--log slope to agree within 0.03 and the median core intensity error
+to remain below two percent. The reported uncertainty increases near the top of
+the range, where the high-$Q$ extrapolation is less reliable.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 12. DATA FORMATS
@@ -1738,9 +2031,10 @@ authority.
 
 \subsection{ASCII REDUCED DATA}
 
-Reduced data files are whitespace-delimited ASCII with optional comment lines
-introduced by \texttt{\#}. Table~\ref{tab:formats} gives the recognized column
-layouts. Detection counts the columns on the first non-comment line.
+Reduced data files are whitespace-delimited ASCII. Optional comment lines begin
+with \texttt{\#}. Columns may also be separated by commas. Table~\ref{tab:formats}
+lists the recognized column layouts. The program takes the most common column
+count over the first data rows (Section~\ref{sec:plot}).
 
 \begin{table}[ht]
   \centering
@@ -1770,7 +2064,9 @@ layouts. Detection counts the columns on the first non-comment line.
   \end{tabular}
   \begin{tablenotes}
     \item \emph{Note:} Classification does not rely on column count alone; the
-    filename and any header keywords are considered first.
+    filename and any header keywords are considered first. Older Mantid
+    \texttt{SaveAscii} $I(q)$ files and \ac{nist}-style two-dimensional files
+    are also recognized.
   \end{tablenotes}
   \end{threeparttable}
 \end{table}
@@ -1778,16 +2074,20 @@ layouts. Detection counts the columns on the first non-comment line.
 \subsection{NEXUS FILES}
 
 Raw event-mode files follow the \ac{sns} NeXus conventions
-\autocite{nexus}. The paths the program relies on are
-\texttt{/entry/instrument/bank<N>/} for detector data,
+\autocite{nexus}. The program uses the paths
+\texttt{/entry/bank<N>\_events/event\_id} for detector events,
+\texttt{/entry/instrument/bank1/pixel\_id} when an explicit pixel-identifier
+array is available,
 \texttt{/entry/DASlogs/<name>/value} for sample environment values, and
 \texttt{/entry/DASlogs/<name>/time} for the corresponding time axis. Scalars such
 as \texttt{/entry/duration} are read directly.
 
-Processed Mantid files are also accepted for the detector view and for metadata
-extraction. Since Mantid writes these with a \texttt{.nxs} extension and no
-\texttt{.h5} suffix, classification checks the \ac{hdf} magic signature rather
-than trusting the name.
+Older raw files named \texttt{EQSANS\_<run>\_event.nxs} in an \ac{ipts}
+\texttt{data/} directory use the same event layout and open in the detector
+viewer. Processed Mantid files are also accepted for detector viewing and metadata
+extraction. Mantid writes these files with a \texttt{.nxs} extension but without
+the \texttt{.h5} suffix. Therefore, classification checks the \ac{hdf} magic
+signature instead of using only the filename.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 13. TESTING
@@ -1797,19 +2097,21 @@ than trusting the name.
 
 \subsection{TEST SUITE}
 
-The suite comprises approximately 800 tests across 40 test modules, of which
-all pass and two are skipped as environment-dependent (they require a real
-NeXus file or the installed reduction engine). It runs in about 140~s. Five
-tests are interface snapshot comparisons.
+For version 0.12.3, pytest collects 1,079 test cases from 66
+\texttt{test\_*.py} modules. Six test functions are interface snapshot
+comparisons, and 206 tests cover the detector viewer. Integration tests that require a real NeXus file or the installed
+reduction engine are skipped when those resources are not available. The exact
+pass, skip, and run-time results depend on the test environment and are not used
+as fixed values in this report.
 
-The suite is layered to match the architecture:
+The tests follow the software layers:
 
 \begin{itemize}
   \item \textbf{Unit tests} cover every module under \texttt{core/},
     \texttt{hdf/}, \texttt{mask/}, and the plot classification logic.
   \item \textbf{Registry tests} verify duplicate-name rejection, parameter
-    validation, argument checking at dispatch, and---importantly---that every key
-    binding names a command that exists.
+    validation, argument checking during dispatch, and that every key binding
+    names an existing command.
   \item \textbf{Interface tests} drive the real application through Textual's
     pilot harness, pressing keys and asserting on resulting state. The feature of
     Section~\ref{sec:hdfsearch}, for example, is covered by tests that press
@@ -1818,22 +2120,29 @@ The suite is layered to match the architecture:
     behavior, and the empty-result path.
   \item \textbf{Snapshot tests} compare rendered output against stored
     references to catch unintended layout regressions.
+  \item \textbf{Viewer tests} exercise the Qt-free data model directly and
+    build the Qt window on Qt's off-screen platform, so they run without a
+    display and are skipped when PySide6 is absent. One test fails if a module
+    outside \texttt{viewer/qt/} imports Qt. Another moves the pointer over the
+    image thousands of times and checks that the reference count of
+    \texttt{True} does not drift, which guards against the PySide6 6.12 defect
+    of Table~\ref{tab:deps}.
 \end{itemize}
 
-Two testing constraints are enforced. OnCat tests inject a fake catalog client
-and never contact the real service or trigger a browser sign-in. No test touches
-a real cluster data path; fixtures are generated synthetically or drawn from a
-small set of committed files.
+Two restrictions apply to the tests. OnCat tests use a fake catalog client and
+do not contact the real service or start a browser sign-in. Tests also do not access real cluster data
+paths. Their fixtures are generated or taken from a small set of committed
+files.
 
 \subsection{STATIC ANALYSIS AND STYLE}
 
-Linting and formatting use \texttt{ruff} at a line length of 100, with the
+Linting and formatting use \texttt{ruff} with a line length of 100 and the
 \texttt{E}, \texttt{F}, \texttt{W}, \texttt{I}, \texttt{B}, \texttt{UP},
 \texttt{N}, \texttt{C4}, \texttt{SIM}, and \texttt{RUF} rule sets enabled.
 Type checking uses \texttt{mypy} in strict mode over \texttt{src/sansdir}.
-Public functions carry type hints and Google-style docstrings. Bare
-\texttt{except} clauses are prohibited: exceptions are caught specifically,
-logged, and surfaced to the user in the status bar.
+Public functions have type hints and Google-style docstrings. Bare
+\texttt{except} clauses are not allowed. Exceptions are caught specifically,
+logged, and shown to the user in the status bar.
 
 \Ac{ci} runs the suite on Python 3.10, 3.11, and 3.12 on Linux.
 
@@ -1843,43 +2152,52 @@ logged, and surfaced to the user in the status bar.
 \section{PERFORMANCE}
 \label{sec:perf}
 
-Table~\ref{tab:perf} states the design budgets. Startup is measured; the
-remaining figures are the targets against which regressions are judged, and
-profiling is performed with \texttt{pyinstrument} when one is missed.
+Table~\ref{tab:perf} lists the performance budgets. Startup, run lookup, and the
+detector viewer are measured. The other values are targets used to identify
+regressions. When a target is missed,
+the operation is profiled with \texttt{pyinstrument}.
 
 \begin{table}[ht]
   \centering
   \begin{threeparttable}
-  \caption{Performance budgets}
+  \caption{Performance measurement and regression budgets}
   \label{tab:perf}
   \small
   \begin{tabular}{p{0.55\textwidth} l l}
     \toprule
-    Operation & Budget & Status \\
+    Operation & Value & Basis \\
     \midrule
-    Cold start to first paint & 300~ms & $\sim$120~ms median\tnote{a} \\
-    Render a directory of 1,000 entries & 100~ms & Met \\
-    OnCat search, first call & 2~s & Met \\
-    OnCat search, cached & 100~ms & Met \\
-    Single metadata key read & 50~ms & Met \\
-    Batch extract, 100 files, 5 keys & 10~s & Met \\
+    \texttt{sansdir --help} startup & $\sim$40~ms median\tnote{a} & Measured \\
+    Find a run by number, about 1,100 proposals & 0.11--0.16~s & Measured \\
+    Viewer preview, $6\times10^{9}$ events & 1.7--2.0~s & Measured \\
+    Viewer full load, $6\times10^{9}$ events & 51~s & Measured \\
+    Viewer reopen from cache & 0.24~s & Measured \\
+    Viewer \ac{tof} slider step & 7.5~ms median & Measured \\
+    Render a directory of 1,000 entries & 100~ms & Regression budget \\
+    OnCat search, first call & 2~s & Regression budget \\
+    OnCat search, cached & 100~ms & Regression budget \\
+    Single metadata key read & 50~ms & Regression budget \\
+    Batch extract, 100 files, 3 keys & 10~s & Regression budget \\
     \bottomrule
   \end{tabular}
   \begin{tablenotes}
     \item[a] Median end-to-end wall-clock time for \texttt{sansdir --help} on
-    an analysis node, re-measured after the \ac{usans} reduction and desmearing
-    features were added; the best case is near 60~ms. The figure did not grow
-    with those features because the fast path imports none of the scientific
-    stack (Section~\ref{sec:startup}).
+    an analysis node for version 0.12.3, with the files in the filesystem
+    cache; earlier cold-cache measurements gave 70--120~ms. The value did not
+    grow with the \ac{usans} and viewer features because the fast path imports
+    none of the scientific stack (Section~\ref{sec:startup}).
   \end{tablenotes}
   \end{threeparttable}
 \end{table}
 
-Three specific measures address the cases where a naive implementation would
-miss a budget. Directory listings are cached and keyed by modification time.
-The OnCat browser debounces its filter input and caps rendered rows. \Ac{hdf}
-value previews slice before materializing, which bounds the cost of previewing an
-event array to a constant rather than the array length.
+Three measures help keep these operations within their budgets. Directory
+listings use \texttt{os.scandir} and reuse each entry's stat result during one
+scan. The OnCat browser debounces its filter input and limits the number of
+rendered rows. \Ac{hdf} value previews take a slice before materializing an
+array, so the preview cost does not depend on the full length of an event array.
+The detector viewer stores a cumulative \ac{tof} histogram, so a new \ac{tof}
+range costs one subtraction instead of a pass over the events
+(Section~\ref{sec:viewer-load}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % 15. LIMITATIONS AND FUTURE WORK
@@ -1887,37 +2205,41 @@ event array to a constant rather than the array length.
 \section{SUMMARY}
 \label{sec:future}
 
-\textbf{sansdir} consolidates the file-handling, inspection, and packaging work
-that surrounds \ac{sans} data reduction into a single keyboard-driven terminal
-application. It requires no display server, starts in about 54~ms, and runs from
-a shared installation on the \ac{ornl} analysis cluster with no per-user setup.
+\textbf{sansdir} puts the file handling, inspection, and packaging tasks around
+\ac{sans} reduction in one keyboard-driven terminal application. It also keeps
+\ac{usans} setup, reduction, and desmearing in the same workflow. It does not
+require a display server and runs from a shared installation on the \ac{ornl}
+analysis cluster without per-user setup. The measured
+\texttt{sansdir --help} startup has a median of about 40~ms; the \ac{tui}
+first-paint time is not reported here. A separate Qt viewer adds interactive
+\ac{tof} slicing and mask editing for runs of several billion events without
+slowing the terminal application.
 
-Its distinguishing technical choice is that every user-facing action is a typed
-command in one registry, and that key bindings, the interactive command line, and
-the non-interactive \ac{cli} are all thin callers of it. This yields a uniform
-interaction surface, self-documenting help, and testable business logic decoupled
-from the terminal framework.
+Every interactive action is a typed command in one registry. Key bindings and
+the interactive command line use this registry. The non-interactive Click
+\ac{cli} uses a separate path to the same service functions. The command data
+also generate the interactive help, while the service logic can be tested
+without the terminal framework.
 
-Two limitations bound the present version. The detector heat map and the mask
-editor assume the EQ-SANS detector layout and have been exercised only against
-EQ-SANS data; the navigation and file-format features are instrument-agnostic
-but remain unverified on the \ac{hfir} \ac{sans} instruments. And a mask that
-\texttt{drtsans} will honor still requires a Mantid environment at save time, as
-described in Section~\ref{sec:mask}.
+The present version has two main limitations. The detector heat map, the
+detector viewer, the mask editor, and the run lookup assume the EQ-SANS detector
+layout and directory structure and have been tested only with EQ-SANS data. The navigation and file-format operations are not specific to one
+instrument, but they have not been verified on the \ac{hfir} \ac{sans}
+instruments. Also, saving a mask that \texttt{drtsans} will use still requires a
+Mantid environment, as described in Section~\ref{sec:maskformats}.
 
-The \ac{usans} workflow of Section~\ref{sec:usans} has been exercised end to end
-against a single proposal's data. Its grouping and scan-count reconciliation are
-driven by conventions---consecutive same-title blocks, a trailing transmission
-run, empty-cell titles naming a banjo---that hold for the experiments examined
-but are not enforced by the data format. This is why the generated table is
-presented as a draft for review rather than as an input to be reduced
-unattended.
+The \ac{usans} workflow in Section~\ref{sec:usans} has been tested from start to
+end with data from one proposal. The grouping and scan-count checks use current
+conventions: consecutive blocks with the same title, a transmission run at the
+end, and an empty-cell title that names a banjo. These conventions apply to the
+experiments examined but are not required by the data format. Therefore, the
+program presents the generated table as a draft for review and does not reduce
+it automatically.
 
-Work in progress extends the program in two directions: minting \acp{doi} for
-tagged file sets through the Zenodo \ac{api}, and a natural-language layer that
-would translate a free-text instruction into registry commands for the user to
-confirm before execution. Both are additions to the existing command surface
-rather than changes to it.
+Current work has two directions: creating \acp{doi} for tagged file sets through
+the Zenodo \ac{api}, and adding a natural-language layer that translates a
+free-text instruction into registry commands for user confirmation. Both would
+use the existing command interface.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ACKNOWLEDGMENTS
@@ -1925,9 +2247,9 @@ rather than changes to it.
 \section*{ACKNOWLEDGMENTS}
 
 This research used resources at the \ac{sns}, a \ac{doe} Office of Science User
-Facility operated by \ac{ornl}. The mask editor's interaction design was revised
-substantially in response to feedback from the first instrument scientist to use
-it on production data.
+Facility operated by \ac{ornl}. Feedback from the first instrument scientist to
+use the mask editor with production data led to substantial changes in its
+interaction design.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % REFERENCES
@@ -1944,8 +2266,8 @@ it on production data.
 \section{COMMAND REGISTRY REFERENCE}
 \label{sec:appcommands}
 
-Table~\ref{tab:allcommands} lists every command registered in version 0.11.2.
-Any command may be invoked from the \key{:} line by name or alias.
+Table~\ref{tab:allcommands} lists all commands registered in version 0.12.3.
+Each command can be entered on the \key{:} line by its name or alias.
 
 \begin{small}
 \begin{longtable}{p{0.24\textwidth} p{0.20\textwidth} p{0.46\textwidth}}
@@ -1998,13 +2320,14 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{nav.up} & --- & Ascend one directory. \\
   \texttt{oncat.search} (\texttt{ipts}) & \texttt{keyword?},
     \texttt{instrument?} & Browse OnCat experiments. \\
-  \texttt{oncat} & \texttt{action?} & Sign-in router: login / status / logout. \\
+  \texttt{oncat} & \texttt{action?} & Sign-in router: \texttt{login},
+    \texttt{status}, or \texttt{logout}. \\
   \texttt{oncat.login} (\texttt{oncat-login}) & --- & Per-user OnCat sign-in
     (device flow). \\
-  \texttt{oncat.status} (\texttt{oncat-status}) & --- & Show OnCat sign-in
-    state. \\
-  \texttt{oncat.logout} (\texttt{oncat-logout}) & --- & Remove the cached OnCat
+  \texttt{oncat.logout} (\texttt{oncat-logout}) & --- & Remove the stored OnCat
     token. \\
+  \texttt{oncat.status} (\texttt{oncat-status}) & --- & Show the OnCat sign-in
+    state. \\
   \texttt{pane.activate} & \texttt{panel\_id} & Activate the named pane. \\
   \texttt{pane.swap} & --- & Swap the two panes. \\
   \texttt{pane.sync} & --- & Match the inactive pane to the active one. \\
@@ -2019,11 +2342,14 @@ Any command may be invoked from the \key{:} line by name or alias.
     Open image files in matplotlib. \\
   \texttt{plot.iq} & \texttt{paths} & Overlay 2-, 3-, or 4-column $I(q)$
     files. \\
-  \texttt{plot.iqxqy} & \texttt{paths}, \texttt{colorbar\_mode?} & Plot 4-
-    or 6-column $I(q_x,q_y)$ files; \texttt{colorbar\_mode} is \texttt{shared}
-    or \texttt{independent}. \\
+  \texttt{plot.iqxqy} & \texttt{paths?}, \texttt{colorbar\_mode?} & Plot 4-
+    or 6-column $I(q_x,q_y)$ files, or the selection when no paths are given;
+    \texttt{colorbar\_mode} is \texttt{shared} or \texttt{independent}. \\
   \texttt{plot.transmission} & \texttt{paths} & Plot $T(\lambda)$ on linear
     axes. \\
+  \texttt{run.find} (\texttt{find}) & \texttt{run}, \texttt{view?} & Find a
+    raw run file by run number in any \ac{ipts}, show it in the right pane, and
+    open it in the viewer. \\
   \texttt{shell.run} (\texttt{!}) & \texttt{cmd} & Run a shell command with the
     interface suspended. \\
   \texttt{tag.clear} & --- & Clear all tags in the active pane. \\
@@ -2039,7 +2365,8 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{ui.delete\_tagged} & --- & Delete the selection, with
     confirmation. \\
   \texttt{ui.mail\_tagged} & --- & Mail the selection as attachments. \\
-  \texttt{ui.mask} (\texttt{mask}) & \texttt{path?} & Open the mask editor. \\
+  \texttt{ui.mask} (\texttt{mask}) & \texttt{path?} & Open the detector viewer
+    with the rectangle mask tool. \\
   \texttt{ui.move\_tagged} & --- & Move the selection to the inactive pane. \\
   \texttt{ui.plot\_auto} & --- & Plot the selection, routing by file kind. \\
   \texttt{usans.init\_table} (\texttt{usans-init}) & \texttt{start\_run?},
@@ -2049,7 +2376,8 @@ Any command may be invoked from the \key{:} line by name or alias.
     \texttt{output\_dir?}, \texttt{data\_dir?}, \texttt{logbin?} & Reduce a
     setup \ac{csv}, or offer to build one. \\
   \texttt{usans.desmear} (\texttt{desmear}) & \texttt{paths?},
-    \texttt{sans?}, \texttt{out\_dir?}, \texttt{sigma\_y?} & Desmear
+    \texttt{sans?}, \texttt{out\_dir?}, \texttt{sigma\_y?},
+    \texttt{ask\_for\_sans?} & Desmear
     reduced \ac{usans} curves by truncated Abel inversion. \\
   \texttt{view.in\_other\_pane} & \texttt{path} & Show a file in the other pane
     (open, not toggle). \\
@@ -2059,6 +2387,8 @@ Any command may be invoked from the \key{:} line by name or alias.
     cursor. \\
   \texttt{ui.set\_theme} (\texttt{theme}) & \texttt{name?} & Switch theme; no
     argument lists available names. \\
+  \texttt{ui.view} (\texttt{viewer}, \texttt{detector}) & \texttt{path?} &
+    Open the detector viewer. \\
   \texttt{ui.zip\_tagged} & --- & Prompt for an archive path and zip the
     selection. \\
   \texttt{view.file} (\texttt{view}) & \texttt{path} & Open a read-only
@@ -2068,7 +2398,7 @@ Any command may be invoked from the \key{:} line by name or alias.
   \texttt{view.set\_sort} & \texttt{key}, \texttt{reverse?} & Set the sort
     key. \\
   \texttt{view.toggle\_hidden} & --- & Show or hide dotfiles. \\
-  \texttt{view.toggle\_other\_pane} & --- & Show the cursor's file in the other
+  \texttt{view.toggle\_\allowbreak{}other\_pane} & --- & Show the cursor's file in the other
     pane. \\
 \end{longtable}
 \end{small}
@@ -2076,9 +2406,10 @@ Any command may be invoked from the \key{:} line by name or alias.
 \section{DEFAULT KEY MAP}
 \label{sec:appkeys}
 
-Table~\ref{tab:allkeys} lists the bindings shown in the help overlay. Ten further
-bindings exist as alternate terminal encodings of the same keys and are hidden
-from help.
+Table~\ref{tab:allkeys} lists the combined default map shown by the help overlay
+in \ac{usans} mode. The \ac{sans} map omits \key{r} and \key{d}; the remaining
+bindings are the same. Ten additional bindings are alternate terminal encodings
+of the same keys and are not shown in the help overlay.
 
 \begin{small}
 \begin{longtable}{p{0.13\textwidth} p{0.40\textwidth} p{0.37\textwidth}}
@@ -2119,6 +2450,7 @@ from help.
   \key{F9} & Make directory & \texttt{app.cmdline\_prompt} \\
   \key{g} & Jump to a path & \texttt{app.cmdline\_prompt} \\
   \key{G} & Browse the filesystem tree & \texttt{app.browse\_tree} \\
+  \key{f} & Find a run by number & \texttt{app.cmdline\_prompt} \\
   \key{/} & Filter the active pane & \texttt{app.cmdline\_prompt} \\
   \key{c} & Toggle the run catalog & \texttt{pane.toggle\_catalog} \\
   \key{i} & OnCat proposal search & \texttt{oncat.search} \\
@@ -2126,7 +2458,8 @@ from help.
   \key{l} & Linear plot of the selection & \texttt{ui.plot\_generic} \\
   \key{m} & \Ac{hdf} metadata tree & \texttt{hdf.show\_keys} \\
   \key{M} & Batch metadata extract & \texttt{ui.batch\_extract} \\
-  \key{K} & Create a detector mask & \texttt{ui.mask} \\
+  \key{K} & Detector viewer with the mask tools & \texttt{ui.mask} \\
+  \key{V} & Detector viewer & \texttt{ui.view} \\
   \key{z} & Zip the selection & \texttt{ui.zip\_tagged} \\
   \key{e} & Email the selection & \texttt{ui.mail\_tagged} \\
   \key{:} & Open the command line & \texttt{app.cmdline\_open} \\
@@ -2142,9 +2475,9 @@ from help.
 \section{WORKED EXAMPLE SESSION}
 \label{sec:appsession}
 
-The following sequence is representative of a triage session and exercises most
-of the feature set. It assumes a proposal has been allocated and reduced data
-exists.
+The following sequence is an example of a data-triage session and uses most of
+the program's features. It assumes that the proposal exists and that reduced
+data are available.
 
 \begin{enumerate}
   \item Launch with \texttt{sansdir}.
@@ -2155,7 +2488,9 @@ exists.
     \texttt{shared/} directory and the run catalog loads on the right.
   \item Move into the catalog with \key{Tab}, scroll to a run of interest, and
     press \key{p} to view its raw detector image. Confirm the beam center and
-    beam-stop placement, then close the plot window.
+    beam-stop placement, then close the plot window. Press \key{V} instead to
+    open the detector viewer and drag the \ac{tof} window over the spectrum to
+    check the image at short and long wavelengths.
   \item Press \key{m} on the same run and then \key{/} to search for
     \texttt{temperature}. Confirm the sample environment value recorded for the
     run. Press \key{Esc} twice to return.
@@ -2172,6 +2507,9 @@ exists.
   \item Press \key{l} on the resulting table to plot it directly.
   \item Tag the files to share, press \key{z}, and enter an archive name. Then
     tag the archive, press \key{e}, and complete the mail dialog.
+  \item To check a run from another experiment, press \key{f}, type its run
+    number, and press \key{Enter}. The right pane moves to that run and the
+    detector viewer opens it.
   \item Press \key{q} to exit.
 \end{enumerate}
 

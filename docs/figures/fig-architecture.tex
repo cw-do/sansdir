@@ -1,5 +1,5 @@
 % Layered architecture of sansdir. Included by sansdir-report.tex.
-% Requires: \usepackage{tikz} with the positioning, arrows.meta, fit libraries.
+% Requires: \usepackage{tikz} with positioning, arrows.meta, fit libraries.
 \begin{tikzpicture}[
     font=\small\sffamily,
     box/.style={draw, rounded corners=2pt, minimum height=8mm, align=center,
@@ -10,47 +10,54 @@
     ext/.style={box, fill=gray!10, dashed, thick},
     lbl/.style={font=\scriptsize\sffamily\itshape, text=black},
     flow/.style={-{Latex[length=2mm]}, thick},
+    planned/.style={-{Latex[length=2mm]}, thick, dashed},
   ]
 
   % --- Entry points -------------------------------------------------------
-  \node[ui, minimum width=26mm] (keys)  at (-4.6, 5.2) {Keybindings\\\scriptsize\ttfamily ui/keys.py};
-  \node[ui, minimum width=26mm] (cmdl)  at (-1.4, 5.2) {\texttt{:} command line\\\scriptsize\ttfamily ui/command\_input.py};
-  \node[ui, minimum width=26mm] (cli)   at ( 1.8, 5.2) {CLI subcommands\\\scriptsize\ttfamily cli.py};
-  \node[ext, minimum width=26mm] (llm)  at ( 5.0, 5.2) {LLM layer\\\scriptsize (planned, Phase 10)};
+  \node[ui, minimum width=28mm] (keys) at (-5.0, 5.2)
+    {Key bindings\\\scriptsize\ttfamily ui/keys.py};
+  \node[ui, minimum width=31mm] (cmdl) at (-1.6, 5.2)
+    {\texttt{:} command line\\\scriptsize\ttfamily ui/command\_input.py};
+  \node[ui, minimum width=28mm] (cli) at (2.0, 5.2)
+    {Click CLI\\\scriptsize\ttfamily cli.py};
+  \node[ext, minimum width=28mm] (llm) at (5.3, 5.2)
+    {LLM layer\\\scriptsize planned};
 
-  \node[lbl, anchor=east] at (-8.0, 5.2) {\begin{tabular}{r}entry\\points\end{tabular}};
+  \node[lbl, anchor=east] at (-8.0, 5.2)
+    {\begin{tabular}{r}entry\\points\end{tabular}};
 
-  % --- Registry -----------------------------------------------------------
-  \node[reg, minimum width=15.4cm, minimum height=11mm] (registry) at (0.2, 3.3)
-    {\textbf{CommandRegistry} \;---\; 57 typed \texttt{Command} objects, one dispatch path\\
-     \scriptsize\ttfamily commands/registry.py \textbullet\ commands/builtins.py \textbullet\ commands/schema.py};
+  % --- Interactive registry ---------------------------------------------
+  \node[reg, minimum width=77mm, minimum height=11mm] (registry) at (-3.2, 3.3)
+    {\textbf{CommandRegistry} --- 63 typed commands\\
+     \scriptsize\ttfamily commands/registry.py \textbullet\ commands/builtins.py
+     \textbullet\ commands/schema.py};
+  \node[lbl, anchor=east] at (-8.0, 3.3)
+    {\begin{tabular}{r}interactive\\dispatch\end{tabular}};
 
-  \node[lbl, anchor=east] at (-8.0, 3.3) {\begin{tabular}{r}single\\source of\\truth\end{tabular}};
-
-  % --- Service layer ------------------------------------------------------
-  \node[svc, minimum width=27mm] (core) at (-5.4, 1.2) {\texttt{core/}\\\scriptsize filesystem, fileops,\\\scriptsize archive, mailer, oncat};
-  \node[svc, minimum width=27mm] (hdf)  at (-1.9, 1.2) {\texttt{hdf/}\\\scriptsize reader, metadata,\\\scriptsize batch extract};
-  \node[svc, minimum width=27mm] (plot) at ( 1.6, 1.2) {\texttt{plot/}\\\scriptsize detect, ascii1d/2d,\\\scriptsize tile, hdf5\_detector};
-  \node[svc, minimum width=27mm] (mask) at ( 5.1, 1.2) {\texttt{mask/}\\\scriptsize core, detector,\\\scriptsize writers, gui};
-
-  \node[lbl, anchor=east] at (-8.0, 1.2) {\begin{tabular}{r}service\\layer\end{tabular}};
+  % --- Shared service layer ----------------------------------------------
+  \node[svc, minimum width=15.4cm, minimum height=12mm] (services) at (0.2, 1.2)
+    {Shared service modules\\
+     \scriptsize\ttfamily core/ \textbullet\ hdf/ \textbullet\ plot/
+     \textbullet\ mask/ \textbullet\ viewer/ \textbullet\ usans/};
+  \node[lbl, anchor=east] at (-8.0, 1.2)
+    {\begin{tabular}{r}service\\layer\end{tabular}};
 
   % --- External resources -------------------------------------------------
-  % One wide band rather than four boxes: several services touch the same
-  % resource (mask and hdf both read NeXus), so per-box arrows would cross.
   \node[ext, minimum width=15.4cm, minimum height=10mm] (extern) at (0.2, -0.9)
-    {Cluster filesystem \texttt{/SNS/<INST>/IPTS-*} \textbullet\ NeXus\,/\,HDF5 via \texttt{h5py}\\
-     matplotlib subprocess windows \textbullet\ OnCat REST API (\texttt{httpx}, OAuth2)
-     \textbullet\ \texttt{\$EDITOR}, \texttt{mail}\,/\,\texttt{mutt}};
-
-  \node[lbl, anchor=east] at (-8.0, -0.9) {\begin{tabular}{r}external\\resources\end{tabular}};
+    {Cluster filesystem \texttt{/SNS/<INST>/IPTS-*} \textbullet\ NeXus\,/\,HDF5
+     via \texttt{h5py} \textbullet\ matplotlib subprocess windows
+     \textbullet\ Qt detector-viewer subprocess\\
+     OnCat REST API \textbullet\ \texttt{reduceUSANS} \textbullet\ Mantid save
+     subprocess \textbullet\ \texttt{\$EDITOR}, \texttt{mail}\,/\,\texttt{mutt}};
+  \node[lbl, anchor=east] at (-8.0, -0.9)
+    {\begin{tabular}{r}external\\resources\end{tabular}};
 
   % --- Arrows -------------------------------------------------------------
-  \foreach \n in {keys, cmdl, cli, llm}
-    \draw[flow] (\n) -- (\n |- registry.north);
-  \foreach \n in {core, hdf, plot, mask}
-    \draw[flow] (\n |- registry.south) -- (\n);
-  \foreach \n in {core, hdf, plot, mask}
-    \draw[flow] (\n) -- (\n |- extern.north);
+  \draw[flow] (keys) -- (keys |- registry.north);
+  \draw[flow] (cmdl) -- (cmdl |- registry.north);
+  \draw[planned] (llm.south) |- (registry.east);
+  \draw[flow] (registry) -- (registry |- services.north);
+  \draw[flow] (cli) -- (cli |- services.north);
+  \draw[flow] (services) -- (extern);
 
 \end{tikzpicture}

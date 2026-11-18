@@ -7,7 +7,7 @@ ORNL Technical Memorandum describing sansdir, built on the ORNL report template
 
 | File | Role |
 |---|---|
-| `sansdir-report.tex` | The report. |
+| `sansdir-report.tex` | The report (v0.12.3). The only copy; the former `-do` direct-voice draft became this file. |
 | `sansdir-abbreviations.tex` | Acronym declarations for this report. |
 | `sansdir.bib` | Bibliography. |
 | `figures/` | Generated figures (see below). |
@@ -19,7 +19,7 @@ ORNL Technical Memorandum describing sansdir, built on the ORNL report template
 
 ## Building
 
-`sansdir-report.pdf` (49 pp.) is checked in, so you only need to build after
+`sansdir-report.pdf` (63 pp.) is checked in, so you only need to build after
 editing.
 
 On Overleaf or any `texlive-full` host:
@@ -86,7 +86,7 @@ first.
 
 `docs/` is also the root of the ORNL Overleaf project
 (`https://latex.ornl.gov/git/6a6cff314d4a53890cc75518`, git remote `overleaf`),
-kept in sync with `git subtree`. Its main document is `sansdir-report-do.tex`.
+kept in sync with `git subtree`. Its main document is `sansdir-report.tex`.
 
 ```bash
 git remote add overleaf https://git@latex.ornl.gov/git/6a6cff314d4a53890cc75518  # once per clone
@@ -109,7 +109,14 @@ base so they cannot drift from the program:
 - `plot-iq.pdf`, `plot-detector.pdf` — real plots, produced by calling
   sansdir's own `make_iq_figure()` and `make_detector_figure()` on the
   fixtures in `tests/data/`.
-- `fig-architecture.tex`, `fig-plotflow.tex` — TikZ source, `\input` directly.
+- `metadata-workflow-*.pdf`, `usans-workflow-*.pdf` — worked examples on real
+  IPTS data (cluster-only; the USANS one also needs an OnCat sign-in, and is
+  skipped without one, leaving the previous PDFs in place).
+- `viewer.png` — the Qt detector viewer on IPTS-37425 run 176669, rendered on
+  Qt's offscreen platform (cluster-only; uses the viewer histogram cache when
+  the run is in it).
+- `plot-iqxqy-tile.png` — a real temperature series (cluster-only).
+- `fig-architecture.tex` — TikZ source, `\input` directly.
 
 ## Before submitting
 
